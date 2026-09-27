@@ -95,6 +95,14 @@ Every creature is built from hand-placed boxes with procedurally painted fur, wo
 - **Villagers**: farmers, shepherds, fishers, butchers, clerics, smiths and librarians, each with their own clothes, hats, beards and tools (a straw hat, a crook, a pipe, a bandana, a hood, goggles, a book and quill) and their own trades. They wave when you come close, scratch their heads and look around. **Stonewarden**: a mossy stone guardian with a glowing amber heart and a sapling on its head that fights monsters near its village
 - **Emberwisp**: a floating soot-black lantern skull with a flame crown that lobs fireballs. **Cinderbrute**: a hulking basalt ape with glowing seams and spines that knuckle-walks, slams and shrugs off fire
 
+**Quality of life**
+- A minimap in the corner and a full-screen world map (M), both showing waypoints and the last place you died
+- Third-person camera (F5), screenshots (F2), a coordinates line, and an interface size setting
+- Rebindable keys, hold-or-toggle sprint and sneak, gamepad support, and a reduce-motion option
+- World backups: export any world to a file and import it on another browser or device; rename and duplicate worlds
+- Installable as an app (Add to Home Screen) and playable offline; when a new version is published the game offers to save and reload
+- A frame-rate cap, and automatic quality that lowers the resolution when frames get slow
+
 **Game modes**
 - Survival, and Creative (fly, instant breaking, and every block and item in a searchable palette)
 - Title screen, world list, create world with a seed, pause menu, settings (render distance, field of view, mouse sensitivity, brightness, volume, view bobbing, invert mouse), death screen and a debug overlay
@@ -128,21 +136,34 @@ Phones start with lighter graphics (render distance 6, no sun shadows or bloom);
 | Left click | Mine or attack |
 | Right click | Place, use, eat, open, draw a bow, cast a rod |
 | Middle click | Pick the block you're looking at |
-| 1–9 or scroll wheel | Choose a hotbar slot |
+| 1–9 or scroll wheel | Choose a hotbar slot (in Creative flight, Ctrl+scroll changes flying speed) |
 | E | Inventory (E, Esc, the × button or a click outside the panel closes it) |
 | Q | Drop one item (Ctrl+Q drops the stack) |
-| T or / | Commands (Enter runs, Esc or × closes) |
+| T or / | Chat and commands: Tab completes, Up and Down recall earlier commands, Esc or × closes |
+| M | World map (drag to pan, scroll to zoom; in Creative, double-click to teleport) |
+| F5 | Camera: first person, behind you, in front of you |
+| F2 | Save a screenshot |
 | F3 | Debug info |
 | F1 | Hide the HUD |
 | Esc | Pause |
 
-In inventories: click to pick up or place a stack, right-click to split or place one, shift-click to move a stack across, and press 1–9 while hovering a slot to swap it with the hotbar.
+Every key can be changed in **Settings → Keys**, and sprint and sneak can be set to toggle instead of hold.
+
+In inventories: click to pick up or place a stack, right-click to split or place one, shift-click to move a stack across, and press 1–9 while hovering a slot to swap it with the hotbar. Holding a stack, drag across slots to share it out evenly (right-drag places one in each); double-click a slot to gather every stack of that item. The Creative inventory has category tabs and a search box.
+
+### Controllers
+
+Plug in a gamepad and it just works: left stick to move, right stick to look, right trigger to mine, left trigger to place, A to jump, B to sneak (and to close screens), Y for the inventory, bumpers for the hotbar, left stick click to sprint, Start to pause, Back for the map.
 
 ## Commands
 
-`/gamemode survival|creative`, `/speed <multiplier>` (walk and fly faster; `/speed 1` resets), `/time set day|noon|sunset|night|midnight|<ticks>`, `/weather clear|rain|thunder`, `/give <item> [count]`, `/xp <amount>`, `/tp <x> <y> <z>`, `/spawn <mob>` (for example `zombie`, `skeleton`, `witch`, `blastcap`), `/locate village`, `/dimension overworld|ember`, `/seed`, `/kill`, `/help`
+`/gamemode survival|creative`, `/speed <multiplier>` (walk and fly faster; `/speed 1` resets), `/time set day|noon|sunset|night|midnight|<ticks>`, `/weather clear|rain|thunder`, `/give <item> [count]`, `/xp <amount>`, `/tp <x> <y> <z>` or `/tp <waypoint>`, `/spawn <mob>` (for example `zombie`, `skeleton`, `witch`, `blastcap`), `/locate village`, `/dimension overworld|ember`, `/seed`, `/kill`, `/help [command]`
 
-Item names for `/give` are the lowercase names with underscores, for example `/give diamond_pickaxe` or `/give oak_stairs 64`.
+Building: `/setblock <x> <y> <z> <block>`, `/fill <x1> <y1> <z1> <x2> <y2> <z2> <block> [replace <block>|hollow|outline]` (up to 32,768 blocks) and `/undo`, which also takes back blocks you placed or broke in Creative. Coordinates accept `~` for your own position, like `~ ~-1 ~`.
+
+Waypoints: `/waypoint add <name>`, `/waypoint remove <name>`, `/waypoint list`. Waypoints show on screen with their distance and on both maps, and your last death position is marked automatically.
+
+Item names for `/give` are the lowercase names with underscores, for example `/give diamond_pickaxe` or `/give oak_stairs 64`. Press Tab to complete command names, item and block names, creature names and waypoints.
 
 ## How it's built
 
@@ -156,6 +177,12 @@ TypeScript, [Vite](https://vite.dev) and [Three.js](https://threejs.org), with n
 | The Emberdeep | `src/world/embergen.ts` |
 | Trading | `src/trading.ts` |
 | Chunk meshing (face culling, smooth light, ambient occlusion) | `src/world/mesher.ts` |
+| Terrain draw batching (chunk sections merged into 64-high bands, rebuilt on a frame budget) | `src/render/renderer.ts` |
+| The game loop, world lifecycle and saving | `src/game.ts` |
+| Mining, placing and using things | `src/game/actions.ts` |
+| Keyboard, mouse, pointer lock, gamepad and key bindings | `src/game/input.ts` |
+| Chat, command table and completion, undo history, waypoints | `src/game/chat.ts`, `src/game/commands.ts`, `src/game/history.ts`, `src/game/waypoints.ts` |
+| Minimap and world map | `src/ui/map.ts` |
 | Sky light and block light flood-fill | `src/world/light.ts` |
 | Chunk streaming, fluids, falling blocks, random ticks | `src/world/world.ts` |
 | Background workers for generation and meshing | `src/world/worker.ts`, `src/world/pool.ts` |
@@ -170,14 +197,20 @@ Physics runs at 20 ticks per second using the classic constants (gravity 0.08, 0
 ## Tests
 
 ```bash
+npm run lint                      # oxlint
 npm test                          # unit tests: noise, world gen, lighting, physics, crafting, armor, enchanting...
 npm run dev -- --port 5199        # then, in another terminal:
-node scripts/playtest.mjs         # plays the real game in headless Chromium and checks mining, placing,
+npm run playtest                  # plays the real game in headless Chromium and checks mining, placing,
                                   # water, torches, combat, bows, shearing, breeding, bone meal, armor,
                                   # weather, dungeon loot, fishing, enchanting, power, fire, villages,
-                                  # trading, Ember Gates, the Emberdeep, crafting and save/load
+                                  # trading, Ember Gates, the Emberdeep, crafting, closing every screen,
+                                  # commands and undo, chat completion, maps, camera, key bindings,
+                                  # a gamepad, inventory dragging, world backups and save/load
+npm run test:mobile               # the same on an emulated phone: touch walking, looking, mining, buttons
 npm run screenshots               # regenerates docs/screenshots
 ```
+
+Every push runs lint, the unit tests, the playtest and the phone test in CI before deploying. CI machines have no GPU, so there the game runs with `NORENDER=1` (the page is opened with `?norender`): everything updates normally but nothing is drawn.
 
 ## What's not in yet
 

@@ -1,6 +1,7 @@
 /// <reference lib="webworker" />
 // Background worker: terrain generation, chunk-local lighting and meshing.
 
+import { B } from '../blocks';
 import { computeChunkLight } from './light';
 import { meshSubchunk, type LayerMesh } from './mesher';
 import { EmberGen } from './embergen';
@@ -37,7 +38,10 @@ ctx.onmessage = (e: MessageEvent<WorkerRequest>) => {
     }
     const biomes = g.biomes;
     const light = computeChunkLight(blocks);
-    ctx.postMessage({ type: 'gen', id: msg.id, cx: msg.cx, cz: msg.cz, blocks, meta, biomes, light, spawns: msg.saved ? [] : g.spawns }, [blocks.buffer, meta.buffer, biomes.buffer, light.buffer] as ArrayBuffer[]);
+    // Monster cages, found here so the main thread doesn't scan the whole chunk.
+    const spawners: number[] = [];
+    for (let i = 0; i < blocks.length; i++) if (blocks[i] === B.spawner) spawners.push(i);
+    ctx.postMessage({ type: 'gen', id: msg.id, cx: msg.cx, cz: msg.cz, blocks, meta, biomes, light, spawners, spawns: msg.saved ? [] : g.spawns }, [blocks.buffer, meta.buffer, biomes.buffer, light.buffer] as ArrayBuffer[]);
     return;
   }
   if (msg.type === 'mesh') {

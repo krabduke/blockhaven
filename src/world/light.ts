@@ -109,31 +109,53 @@ export class LightEngine {
   private setLight(c: Chunk, x: number, y: number, z: number, shift: number, v: number): void {
     const i = idx(x & 15, y, z & 15);
     c.light[i] = (c.light[i] & ~(15 << shift)) | (v << shift);
-    this.src.onLightChanged(x, y, z);
+    if (this.batch) {
+      // Cells on a section's faces also affect the neighbouring section's mesh, so they are kept
+      // apart from interior cells: the key is the section plus which faces the cell touches.
+      const lx = x & 15, lz = z & 15, ly = y & 15;
+      const edge = (lx === 0 ? 1 : lx === 15 ? 2 : 0) | (lz === 0 ? 4 : lz === 15 ? 8 : 0) | (ly === 0 ? 16 : ly === 15 ? 32 : 0);
+      const key = ((((x >> 4) & 0xffff) * 65536 + ((z >> 4) & 0xffff)) * 16 + (y >> 4)) * 64 + edge;
+      if (!this.batch.has(key)) this.batch.set(key, [x, y, z]);
+    } else this.src.onLightChanged(x, y, z);
   }
 
-  /** Seed propagation across the borders between this chunk and its loaded neighbours. */
+  /**
+   * Seed propagation across the borders between this chunk and its loaded neighbours.
+   * Reads the two chunks' light arrays directly (no per-cell lookups or allocations), and
+   * batches the "light changed here" notifications so each mesh section is flagged once.
+   */
   stitch(chunk: Chunk): void {
     const x0 = chunk.cx * CS, z0 = chunk.cz * CS;
+    // [neighbour, edge x/z in this chunk, edge x/z in the neighbour, along x?]
+    const sides: [Chunk | undefined, number, number, boolean][] = [
+      [this.src.getChunk(chunk.cx - 1, chunk.cz), 0, CS - 1, false],
+      [this.src.getChunk(chunk.cx + 1, chunk.cz), CS - 1, 0, false],
+      [this.src.getChunk(chunk.cx, chunk.cz - 1), 0, CS - 1, true],
+      [this.src.getChunk(chunk.cx, chunk.cz + 1), CS - 1, 0, true],
+    ];
+    this.batch = new Map();
     for (const shift of [4, 0]) {
       this.addQ.length = 0;
-      for (let y = 0; y < CH; y++) {
-        for (let k = 0; k < CS; k++) {
-          // Cells on this chunk's edge and the matching cells just outside it.
-          const pairs = [
-            [x0, z0 + k, x0 - 1, z0 + k], [x0 + CS - 1, z0 + k, x0 + CS, z0 + k],
-            [x0 + k, z0, x0 + k, z0 - 1], [x0 + k, z0 + CS - 1, x0 + k, z0 + CS],
-          ];
-          for (const [ax, az, bx, bz] of pairs) {
-            const la = this.getLight(ax, y, az, shift), lb = this.getLight(bx, y, bz, shift);
-            if (la > lb + 1) this.addQ.push(ax, y, az);
-            else if (lb > la + 1 && this.chunkAt(bx, bz)) this.addQ.push(bx, y, bz);
-          }
+      for (const [n, a, b, alongX] of sides) {
+        if (!n) continue;
+        const nx0 = n.cx * CS, nz0 = n.cz * CS;
+        for (let y = 0; y < CH; y++) for (let k = 0; k < CS; k++) {
+          const ia = alongX ? idx(k, y, a) : idx(a, y, k);
+          const ib = alongX ? idx(k, y, b) : idx(b, y, k);
+          const la = (chunk.light[ia] >> shift) & 15, lb = (n.light[ib] >> shift) & 15;
+          if (la > lb + 1) this.addQ.push(x0 + (ia & 15), y, z0 + ((ia >> 4) & 15));
+          else if (lb > la + 1) this.addQ.push(nx0 + (ib & 15), y, nz0 + ((ib >> 4) & 15));
         }
       }
       this.propagate(shift);
     }
+    const batch = this.batch;
+    this.batch = null;
+    for (const [x, y, z] of batch.values()) this.src.onLightChanged(x, y, z);
   }
+
+  /** While stitching: one representative changed cell per (section, edge class). */
+  private batch: Map<number, [number, number, number]> | null = null;
 
   private propagate(shift: number): void {
     const q = this.addQ;

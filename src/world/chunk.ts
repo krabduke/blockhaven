@@ -25,6 +25,8 @@ export class Chunk {
   readonly biomes: Uint8Array;
   /** Subchunks whose mesh is out of date. */
   dirty = new Set<number>();
+  /** Bumped on every block change (lets the map redraw only what changed). */
+  version = 0;
   /** Edited by the player since generation (needs saving). */
   modified = false;
   /** Initial light has been computed. */

@@ -111,9 +111,9 @@ await hud(false);
 // Village at golden hour, then down in the street.
 const vloc = await game(() => {
   const g = window.blockhaven, log = [];
-  const say = g.say.bind(g); g.say = (t) => { log.push(t); say(t); };
+  const say = g.chat.say.bind(g.chat); g.chat.say = (t) => { log.push(t); say(t); };
   g.runCommand('/locate village');
-  g.say = say;
+  g.chat.say = say;
   const m = /at (-?\d+), (-?\d+)/.exec(log.join(' '));
   return m ? [+m[1], +m[2]] : null;
 });

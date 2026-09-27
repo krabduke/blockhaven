@@ -6,7 +6,7 @@ import type { WorkerRequest } from './worker';
 
 import type { Spawn } from './worldgen';
 
-export interface GenResult { cx: number; cz: number; blocks: Uint8Array; meta: Uint8Array; biomes: Uint8Array; light: Uint8Array; spawns: Spawn[] }
+export interface GenResult { cx: number; cz: number; blocks: Uint8Array; meta: Uint8Array; biomes: Uint8Array; light: Uint8Array; spawners: number[]; spawns: Spawn[] }
 
 type Pending = { resolve: (v: any) => void; worker: number };
 

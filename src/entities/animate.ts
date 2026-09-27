@@ -116,7 +116,7 @@ function ears(c: Ctx, l: string, r: string, amt = 0.4): void {
   rot(c.parts[l], 0, 0, f);
   rot(c.parts[r], 0, 0, -f * 0.6);
 }
-function armsSwing(c: Ctx, mag: number, l = 'armL', r = 'armR'): [number, number] {
+function armsSwing(c: Ctx, mag: number): [number, number] {
   const s = Math.sin(c.phase) * mag * c.amp;
   return [-s, s].map((v, i) => v + Math.sin(c.t * 1.6 + c.a.seed + i) * 0.04) as [number, number];
 }

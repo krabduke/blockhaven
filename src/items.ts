@@ -172,6 +172,24 @@ export function creativeItems(): number[] {
   return allItemIds().filter((id) => !hidden.has(id));
 }
 
+export type CreativeTab = 'all' | 'building' | 'nature' | 'decor' | 'power' | 'tools' | 'food' | 'misc';
+
+const NATURE = /ore|^stone$|dirt|grass|sand(?!stone)|gravel|log|leaves|sapling|snow|^ice|packed_ice|clay|cactus|flower|dandelion|poppy|cornflower|tulip|mushroom|kelp|moss|vine|fern|bush|cane|bamboo|pumpkin|melon|lily|cattail|deepstone|granite|limestone|chalk|basalt|obsidian|dripstone|glowmoss|mud|ashsand|cinderstone|magma|emberquartz_ore|geode|crystal|berry|bedrock|mycel|coral|sponge/;
+const POWER = /lever|button|pressure|lamp|tnt|wire|spark|rail|piston|repeater|hopper|sensor|observer|minecart|comparator/;
+const DECOR = /torch|lantern|carpet|wool|bed|door|trapdoor|fence|gate|ladder|sign|bookshelf|chest|furnace|crafting|table|bell|pane|bars|pot|cake|painting|banner|glowstone|beehive|hive|brewing|anvil|barrel/;
+
+/** Which creative-inventory tab an item belongs to. */
+export function creativeCategory(id: number): CreativeTab {
+  const d = items[id];
+  if (!d) return 'misc';
+  const k = d.key;
+  if (POWER.test(k)) return 'power';
+  if (id < 256) return NATURE.test(k) ? 'nature' : DECOR.test(k) ? 'decor' : 'building';
+  if (d.tool || d.armor || d.use === 'bow' || d.use === 'rod' || d.use === 'shears' || d.use === 'ignite' || /arrow|shield|crossbow|bolt/.test(k)) return 'tools';
+  if (d.food || /seed|wheat|carrot|egg|sugar|milk|honey|bone_meal|potato|beet/.test(k)) return 'food';
+  return 'misc';
+}
+
 export interface ItemStack {
   id: number;
   count: number;

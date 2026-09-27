@@ -3,6 +3,7 @@ name: Deploy to GitHub Pages
 on:
   push:
     branches: [main]
+  pull_request:
   workflow_dispatch:
 
 permissions:
@@ -11,7 +12,7 @@ permissions:
   id-token: write
 
 concurrency:
-  group: pages
+  group: pages-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -24,13 +25,47 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
+      - run: npm run lint
       - run: npm test
       - run: npm run build
       - uses: actions/upload-pages-artifact@v3
         with:
           path: dist
-  deploy:
+
+  # Plays the built game in headless Chromium: the full playtest and the
+  # phone-controls test. CI machines have no GPU, so the game runs without
+  # drawing (NORENDER); the checks exercise game logic. A deploy waits for both.
+  playtest:
+    runs-on: ubuntu-latest
     needs: build
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - run: npm run build
+      - name: Serve the build
+        run: |
+          npx vite preview --port 5199 --strictPort &
+          npx --yes wait-on http://localhost:5199/ --timeout 60000
+      - name: Playtest
+        run: SOFTWARE_GL=1 NORENDER=1 npm run playtest
+      - name: Phone controls
+        run: SOFTWARE_GL=1 NORENDER=1 npm run test:mobile
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: test-screens
+          path: test-results/
+          if-no-files-found: ignore
+
+  deploy:
+    if: github.event_name != 'pull_request'
+    needs: [build, playtest]
     runs-on: ubuntu-latest
     environment:
       name: github-pages

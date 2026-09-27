@@ -147,6 +147,7 @@ export class World implements ChunkSource {
     c.blocks[i] = id;
     c.meta[i] = meta;
     c.modified = true;
+    c.version++;
     if (old === B.spawner) this.spawners.delete(`${x},${y},${z}`);
     if (id === B.spawner) this.spawners.add(`${x},${y},${z}`);
     if (old !== id) {
@@ -915,7 +916,7 @@ export class World implements ChunkSource {
     chunk.markAllDirty();
     this.chunks.set(key, chunk);
     this.light.stitch(chunk);
-    for (let i = 0; i < VOLUME; i++) if (res.blocks[i] === B.spawner) this.spawners.add(`${cx * 16 + (i & 15)},${i >> 8},${cz * 16 + ((i >> 4) & 15)}`);
+    for (const i of res.spawners ?? []) this.spawners.add(`${cx * 16 + (i & 15)},${i >> 8},${cz * 16 + ((i >> 4) & 15)}`);
     // Resume fluids and falling blocks that were mid-flow when saved.
     if (saved) this.rescanPending(chunk);
     if (res.spawns?.length && !this.spawnedChunks.has(key)) this.onSpawns(res.spawns);

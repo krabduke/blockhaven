@@ -323,7 +323,7 @@ function villager(profession = 'farmer'): MobModel {
   const L = looks[profession] ?? looks.farmer;
   const skin = tone(skinC, { noise: 0.03 });
   const face = withFace(skin, (g, w) => {
-    if (L.hair) px(g, shade(L.hair, 0.9), 1, 2, 2, 1), px(g, shade(L.hair, 0.9), w - 3, 2, 2, 1);   // brows
+    if (L.hair) { px(g, shade(L.hair, 0.9), 1, 2, 2, 1); px(g, shade(L.hair, 0.9), w - 3, 2, 2, 1); }   // brows
     eye(g, 1, 3, '#3a5a2a', 'r'); eye(g, w - 3, 3, '#3a5a2a', 'l');
     if (profession === 'librarian') { px(g, '#3a3a40', 0, 3, 4, 1); px(g, '#3a3a40', w - 4, 3, 4, 1); px(g, '#3a3a40', 4, 3, w - 8, 1); }
     px(g, 'rgba(200,80,70,0.35)', 0, 5, 2, 1); px(g, 'rgba(200,80,70,0.35)', w - 2, 5, 2, 1); // cheeks

@@ -780,7 +780,8 @@ export class XpOrb extends Entity {
   render(alpha: number, m: EntityManager): void {
     super.render(alpha, m);
     const t = this.age * 0.25;
-    (this.object as THREE.Mesh).material instanceof THREE.MeshBasicMaterial && ((this.object as THREE.Mesh).material as THREE.MeshBasicMaterial).color.setRGB(0.6 + Math.sin(t) * 0.3, 1, 0.3);
+    const mat = (this.object as THREE.Mesh).material;
+    if (mat instanceof THREE.MeshBasicMaterial) mat.color.setRGB(0.6 + Math.sin(t) * 0.3, 1, 0.3);
     this.object.rotation.y = t * 0.3;
   }
 }

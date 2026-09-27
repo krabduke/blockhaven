@@ -6,6 +6,7 @@
 // it, and a part can carry extra boxes for small details.
 
 import * as THREE from 'three';
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { hashString, mulberry32 } from '../noise';
 import { HOSTILE_MODELS } from './hostile-models';
 import { PASSIVE_MODELS } from './passive-models';
@@ -187,28 +188,79 @@ export function glow(g: CanvasRenderingContext2D, x: number, y: number, w: numbe
 }
 
 // ---------------------------------------------------------------- building
-const matCache = new Map<string, THREE.MeshBasicMaterial[]>();
+// Every face of every box in a creature is painted into one texture atlas per
+// creature kind, face shading is baked into vertex colours, and the boxes that
+// hang from the same pivot are merged into one mesh. A creature is then one
+// material and one draw call per moving part, instead of one per box face.
 
-function boxMaterials(key: string, paint: Paint, s: V3): THREE.MeshBasicMaterial[] {
-  const cached = matCache.get(key);
-  if (cached) return cached.map((m) => m.clone());
-  const w = Math.max(1, Math.round(s[0])), h = Math.max(1, Math.round(s[1])), d = Math.max(1, Math.round(s[2]));
-  const dims: [number, number][] = [[d, h], [d, h], [w, d], [w, d], [w, h], [w, h]];
-  const mats = dims.map(([cw, ch], f) => {
-    const cv = document.createElement('canvas');
-    cv.width = cw; cv.height = ch;
-    const g = cv.getContext('2d')!;
-    paint(g, cw, ch, f, mulberry32(hashString(key + f)));
-    const t = new THREE.CanvasTexture(cv);
-    t.magFilter = THREE.NearestFilter; t.minFilter = THREE.NearestFilter; t.colorSpace = THREE.NoColorSpace;
-    const sh = [0.78, 0.78, 1, 0.55, 0.9, 0.92][f];
-    const m = new THREE.MeshBasicMaterial({ map: t });
-    m.userData.shade = sh;
-    m.color.setScalar(sh);
-    return m;
-  });
-  matCache.set(key, mats);
-  return mats.map((m) => m.clone());
+/** Relative brightness of each box face (+x, -x, top, bottom, back, front): light from above. */
+const FACE_SHADE = [0.78, 0.78, 1, 0.55, 0.9, 0.92];
+
+interface KindAtlas { texture: THREE.CanvasTexture; rects: Map<string, [number, number, number, number]> }
+const atlases = new Map<string, KindAtlas>();
+
+/** Paint every face of every box of a kind into one atlas (cached per kind). */
+function kindAtlas(kind: string, boxes: { key: string; paint: Paint; size: V3 }[]): KindAtlas {
+  const cached = atlases.get(kind);
+  if (cached) return cached;
+  const faces: { key: string; w: number; h: number; paint: Paint; f: number }[] = [];
+  for (const bx of boxes) {
+    const w = Math.max(1, Math.round(bx.size[0])), h = Math.max(1, Math.round(bx.size[1])), d = Math.max(1, Math.round(bx.size[2]));
+    const dims: [number, number][] = [[d, h], [d, h], [w, d], [w, d], [w, h], [w, h]];
+    dims.forEach(([fw, fh], f) => faces.push({ key: bx.key + f, w: fw, h: fh, paint: bx.paint, f }));
+  }
+  // Shelf packing, tallest first, with a pixel of padding so nearest sampling never bleeds.
+  const W = 256;
+  const order = [...faces].sort((p, q) => q.h - p.h);
+  const rects = new Map<string, [number, number, number, number]>();
+  let x = 0, y = 0, shelf = 0;
+  for (const fc of order) {
+    if (x + fc.w + 1 > W) { x = 0; y += shelf + 1; shelf = 0; }
+    rects.set(fc.key, [x, y, fc.w, fc.h]);
+    x += fc.w + 1;
+    shelf = Math.max(shelf, fc.h);
+  }
+  const H = Math.max(8, 1 << Math.ceil(Math.log2(y + shelf + 1)));
+  const cv = document.createElement('canvas');
+  cv.width = W; cv.height = H;
+  const g = cv.getContext('2d')!;
+  const tmp = document.createElement('canvas');
+  const tg = tmp.getContext('2d')!;
+  for (const fc of faces) {
+    const [rx, ry] = rects.get(fc.key)!;
+    tmp.width = fc.w; tmp.height = fc.h;
+    fc.paint(tg, fc.w, fc.h, fc.f, mulberry32(hashString(fc.key)));
+    g.drawImage(tmp, rx, ry);
+  }
+  const texture = new THREE.CanvasTexture(cv);
+  texture.magFilter = THREE.NearestFilter; texture.minFilter = THREE.NearestFilter; texture.colorSpace = THREE.NoColorSpace;
+  texture.generateMipmaps = false;
+  const atlas = { texture, rects };
+  atlases.set(kind, atlas);
+  return atlas;
+}
+
+/** A box whose faces sample their atlas rects, with face shading in vertex colours. */
+function atlasBox(atlas: KindAtlas, key: string, size: V3, offset: V3, rot?: V3): THREE.BufferGeometry {
+  const geo = new THREE.BoxGeometry(size[0] / 16, size[1] / 16, size[2] / 16).toNonIndexed();
+  const uv = geo.getAttribute('uv') as THREE.BufferAttribute;
+  const tex = atlas.texture.image as HTMLCanvasElement;
+  const colors = new Float32Array(uv.count * 3);
+  // Non-indexed box: 6 vertices per face, faces in the order +x -x +y -y +z -z.
+  for (let f = 0; f < 6; f++) {
+    const [rx, ry, rw, rh] = atlas.rects.get(key + f)!;
+    for (let v = 0; v < 6; v++) {
+      const i = f * 6 + v;
+      const u = uv.getX(i), w = uv.getY(i);
+      uv.setXY(i, (rx + u * rw) / tex.width, 1 - (ry + (1 - w) * rh) / tex.height);
+      colors[i * 3] = colors[i * 3 + 1] = colors[i * 3 + 2] = FACE_SHADE[f];
+    }
+  }
+  geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+  geo.deleteAttribute('normal');
+  if (rot) geo.applyMatrix4(new THREE.Matrix4().makeRotationFromEuler(new THREE.Euler(rot[0], rot[1], rot[2])));
+  geo.translate(offset[0] / 16, offset[1] / 16, offset[2] / 16);
+  return geo;
 }
 
 export interface Detail {
@@ -267,22 +319,20 @@ export function build(kind: string, specs: PartSpec[], shadowSize = 1): MobModel
   const inner = new THREE.Group();
   root.add(inner);
   const parts: Record<string, THREE.Object3D> = { body: inner };
-  const materials: THREE.MeshBasicMaterial[] = [];
-  const box = (key: string, paint: Paint, size: V3, offset: V3, rot?: V3) => {
-    const mats = boxMaterials(key, paint, size);
-    materials.push(...mats);
-    const mesh = new THREE.Mesh(new THREE.BoxGeometry(size[0] / 16, size[1] / 16, size[2] / 16), mats);
-    mesh.position.set(offset[0] / 16, offset[1] / 16, offset[2] / 16);
-    if (rot) mesh.rotation.set(rot[0], rot[1], rot[2]);
-    return mesh;
-  };
+  const atlas = kindAtlas(kind, specs.flatMap((s) => [
+    { key: `${kind}:${s.name}`, paint: s.paint, size: s.size },
+    ...(s.extra ?? []).map((d, i) => ({ key: `${kind}:${s.name}:${i}`, paint: d.paint, size: d.size })),
+  ]));
+  // One material per creature (so damage flashes and light can tint it alone).
+  const material = new THREE.MeshBasicMaterial({ map: atlas.texture, vertexColors: true });
   for (const s of specs) {
     const pivot = new THREE.Group();
     pivot.position.set(s.pivot[0] / 16, s.pivot[1] / 16, s.pivot[2] / 16);
-    const main = box(`${kind}:${s.name}`, s.paint, s.size, s.offset);
-    pivot.add(main);
-    const meshes = [main];
-    s.extra?.forEach((d, i) => { const m = box(`${kind}:${s.name}:${i}`, d.paint, d.size, d.offset, d.rot); pivot.add(m); meshes.push(m); });
+    const geos = [atlasBox(atlas, `${kind}:${s.name}`, s.size, s.offset)];
+    s.extra?.forEach((d, i) => geos.push(atlasBox(atlas, `${kind}:${s.name}:${i}`, d.size, d.offset, d.rot)));
+    const merged = geos.length === 1 ? geos[0] : mergeGeometries(geos)!;
+    if (geos.length > 1) for (const g of geos) g.dispose();
+    pivot.add(new THREE.Mesh(merged, material));
     const parent = s.parent ? parts[s.parent] : inner;
     if (!parent) throw new Error(`${kind}: part '${s.name}' needs its parent '${s.parent}' defined before it`);
     if (s.parent) pivot.position.sub(parts[s.parent].userData.worldPivot ?? new THREE.Vector3());
@@ -291,14 +341,13 @@ export function build(kind: string, specs: PartSpec[], shadowSize = 1): MobModel
     pivot.rotation.set(r[0], r[1], r[2]);
     pivot.userData.baseRot = r;
     pivot.userData.basePos = pivot.position.clone();
-    pivot.userData.meshes = meshes;
     parent.add(pivot);
     parts[s.name] = pivot;
   }
   const shadow = makeShadow();
   shadow.scale.setScalar(shadowSize);
   root.add(shadow);
-  return { root, parts, materials, shadow };
+  return { root, parts, materials: [material], shadow };
 }
 
 export function createModel(kind: string): MobModel {

@@ -4,7 +4,9 @@
 import { sfx } from '../audio';
 import { SMELTING, craft } from '../crafting';
 import type { Inventory, Slot } from '../inventory';
-import { ENCHANT_NAMES, creativeItems, itemDef, maxDurability, maxStack, type ItemStack } from '../items';
+import { ENCHANT_NAMES, creativeCategory, creativeItems, itemDef, maxDurability, maxStack, type CreativeTab, type ItemStack } from '../items';
+
+const TABS: [CreativeTab, string][] = [['all', 'All'], ['building', 'Building'], ['nature', 'Nature'], ['decor', 'Decoration'], ['power', 'Power'], ['tools', 'Tools & combat'], ['food', 'Food & farming'], ['misc', 'Other']];
 import { offers, roman } from '../enchanting';
 import { PROFESSION_NAMES, type TradeOffer } from '../trading';
 import type { Player } from '../player';
@@ -39,6 +41,9 @@ export class ContainerScreen {
   private hovered: SlotRef | null = null;
   private progressEls: { cook?: HTMLElement; burn?: HTMLElement } = {};
   private search = '';
+  private tab: CreativeTab = 'all';
+  /** Dragging a held stack across slots to share it out (left) or drop one in each (right). */
+  private drag: { button: number; refs: SlotRef[] } | null = null;
   onClose: () => void = () => {};
   private openedAt = 0;
   onDrop: (stack: ItemStack) => void = () => {};
@@ -86,6 +91,7 @@ export class ContainerScreen {
       }
     });
     this.root.addEventListener('contextmenu', (e) => e.preventDefault());
+    window.addEventListener('mouseup', () => this.endDrag());
   }
 
   private villager: { offers: TradeOffer[]; profession: string } | null = null;
@@ -138,8 +144,21 @@ export class ContainerScreen {
     const el = document.createElement('div');
     el.className = 'slot' + (big ? ' big' : '');
     ref.el = el;
-    el.addEventListener('mousedown', (e) => { e.preventDefault(); this.click(ref, e.button, e.shiftKey); });
-    el.addEventListener('mouseenter', () => { this.hovered = ref; this.showTip(ref); });
+    el.addEventListener('mousedown', (e) => {
+      e.preventDefault();
+      if (this.cursor && !e.shiftKey && (e.button === 0 || e.button === 2) && this.canSpread(ref)) {
+        this.drag = { button: e.button, refs: [ref] };
+        el.classList.add('drag');
+        return;
+      }
+      this.click(ref, e.button, e.shiftKey);
+    });
+    el.addEventListener('dblclick', (e) => { e.preventDefault(); this.gather(ref); });
+    el.addEventListener('mouseenter', () => {
+      this.hovered = ref;
+      this.showTip(ref);
+      if (this.drag && this.canSpread(ref) && !this.drag.refs.includes(ref)) { this.drag.refs.push(ref); el.classList.add('drag'); this.previewSpread(); }
+    });
     el.addEventListener('mouseleave', () => { if (this.hovered === ref) this.hovered = null; this.tooltip.style.display = 'none'; });
     this.refs.push(ref);
     return el;
@@ -194,7 +213,7 @@ export class ContainerScreen {
       search.className = 'field search';
       search.placeholder = 'Search items';
       search.value = this.search;
-      search.addEventListener('input', () => { this.search = search.value; this.build(); const s = this.root.querySelector('input.search') as HTMLInputElement; s.focus(); s.setSelectionRange(s.value.length, s.value.length); });
+      search.addEventListener('input', () => { this.search = search.value; if (search.value) this.tab = 'all'; this.build(); const s = this.root.querySelector('input.search') as HTMLInputElement; s.focus(); s.setSelectionRange(s.value.length, s.value.length); });
       // Typing goes to the search box, but Escape still closes the screen and Enter leaves the box.
       search.addEventListener('keydown', (e) => {
         e.stopPropagation();
@@ -202,8 +221,22 @@ export class ContainerScreen {
         else if (e.key === 'Enter') search.blur();
       });
       panel.appendChild(search);
+      const tabs = document.createElement('div');
+      tabs.className = 'tabs';
+      tabs.setAttribute('role', 'tablist');
+      for (const [id, label] of TABS) {
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'tab' + (this.tab === id ? ' on' : '');
+        b.setAttribute('role', 'tab');
+        b.setAttribute('aria-selected', String(this.tab === id));
+        b.textContent = label;
+        b.addEventListener('click', () => { this.tab = id; this.search = ''; this.build(); });
+        tabs.appendChild(b);
+      }
+      panel.appendChild(tabs);
       const q = this.search.trim().toLowerCase();
-      const ids = creativeItems().filter((id) => !q || (itemDef(id)?.name.toLowerCase().includes(q) ?? false));
+      const ids = creativeItems().filter((id) => (q ? itemDef(id)?.name.toLowerCase().includes(q) ?? false : this.tab === 'all' || creativeCategory(id) === this.tab));
       const refs: SlotRef[] = ids.map((id) => ({ get: () => ({ id, count: 1 }), set: () => {}, role: 'palette', group: 'container' }));
       const wrap = this.grid(9, refs);
       wrap.classList.add('creative-grid');
@@ -487,6 +520,72 @@ export class ContainerScreen {
     }
     this.render();
     this.showTip(ref);
+  }
+
+  /** A slot the held stack could be shared into (empty, or the same item with room). */
+  private canSpread(ref: SlotRef): boolean {
+    if (ref.role !== 'normal' || !this.cursor) return false;
+    if (ref.accepts && !ref.accepts(this.cursor)) return false;
+    const cur = ref.get();
+    return !cur || (cur.id === this.cursor.id && !cur.damage && !cur.ench && cur.count < maxStack(cur.id));
+  }
+
+  private previewSpread(): void {
+    if (!this.drag || !this.cursor) return;
+    const n = this.drag.refs.length;
+    const each = this.drag.button === 2 ? 1 : Math.floor(this.cursor.count / n);
+    this.cursorEl.dataset.spread = each > 0 ? `${each} each` : '';
+  }
+
+  /** Mouse released after a drag: share the stack out over the slots it crossed. */
+  endDrag(): void {
+    const d = this.drag;
+    if (!d) return;
+    this.drag = null;
+    delete this.cursorEl.dataset.spread;
+    for (const r of d.refs) r.el?.classList.remove('drag');
+    if (d.refs.length === 1) { this.click(d.refs[0], d.button, false); return; }
+    const c = this.cursor;
+    if (!c) return;
+    const each = d.button === 2 ? 1 : Math.floor(c.count / d.refs.length);
+    if (each <= 0) return;
+    for (const r of d.refs) {
+      if (!this.cursor || this.cursor.count <= 0) break;
+      const cur = r.get();
+      const room = cur ? maxStack(cur.id) - cur.count : maxStack(c.id);
+      const n = Math.min(each, room, this.cursor.count);
+      if (n <= 0) continue;
+      if (cur) cur.count += n; else r.set({ ...c, count: n });
+      this.cursor.count -= n;
+    }
+    if (this.cursor && this.cursor.count <= 0) this.cursor = null;
+    sfx.click();
+    this.render();
+  }
+
+  /** Double-click: collect every stack of this item into the held one. */
+  private gather(ref: SlotRef): void {
+    if (ref.role !== 'normal') return;
+    if (!this.cursor) {
+      const cur = ref.get();
+      if (!cur) return;
+      this.cursor = cur;
+      ref.set(null);
+    }
+    const c = this.cursor;
+    if (c.damage || c.ench) { this.render(); return; }
+    const max = maxStack(c.id);
+    for (const r of this.refs) {
+      if (c.count >= max) break;
+      if (r.role !== 'normal') continue;
+      const s = r.get();
+      if (!s || s.id !== c.id || s.damage || s.ench) continue;
+      const n = Math.min(s.count, max - c.count);
+      c.count += n; s.count -= n;
+      if (s.count <= 0) r.set(null);
+    }
+    sfx.click();
+    this.render();
   }
 
   private quickMove(ref: SlotRef, stack: ItemStack): void {

@@ -319,6 +319,23 @@ export interface SkyState {
   fogColor: THREE.Color;
 }
 
+const BANDS = 4;
+function releaseArray(this: { array: unknown }): void { this.array = null; }
+
+interface Column {
+  cx: number;
+  cz: number;
+  sections: (SubMesh | null)[];
+  /** Merged meshes per band: [band0 opaque, band0 cutout, band0 translucent, band1 opaque, ...]. */
+  meshes: (THREE.Mesh | null)[];
+  /** Bit per band that needs rebuilding. */
+  dirtyBands: number;
+  /** Frame when a section last arrived. */
+  touched: number;
+  /** Has translucent geometry (water), which is what reflections are for. */
+  water: boolean;
+}
+
 export class Renderer {
   readonly gl: THREE.WebGLRenderer;
   readonly scene = new THREE.Scene();
@@ -327,8 +344,9 @@ export class Renderer {
   readonly uniforms: Record<string, THREE.IUniform>;
   readonly materials: { opaque: THREE.ShaderMaterial; cutout: THREE.ShaderMaterial; translucent: THREE.ShaderMaterial };
   readonly atlasTexture: THREE.DataArrayTexture;
-  private subMeshes = new Map<string, THREE.Mesh[]>();
-  private chunkGroups = new Map<string, THREE.Group>();
+  private columns = new Map<string, Column>();
+  private dirtyColumns = new Set<Column>();
+  private frameNo = 0;
   private sky: THREE.Group;
   private sun: THREE.Mesh;
   private moon: THREE.Mesh;
@@ -550,7 +568,19 @@ export class Renderer {
     return m;
   }
 
+  /** Device pixel ratio times the automatic-quality scale. */
+  private basePixelRatio = Math.min(window.devicePixelRatio, 2);
+  renderScale = 1;
+  private lastSize: [number, number] = [1, 1];
+  setRenderScale(scale: number): void {
+    if (Math.abs(scale - this.renderScale) < 0.01) return;
+    this.renderScale = scale;
+    this.gl.setPixelRatio(this.basePixelRatio * scale);
+    this.resize(...this.lastSize);
+  }
+
   resize(w: number, h: number): void {
+    this.lastSize = [w, h];
     this.gl.setSize(w, h, false);
     const pr = this.gl.getPixelRatio();
     this.size.set(Math.floor(w * pr), Math.floor(h * pr));
@@ -563,67 +593,134 @@ export class Renderer {
   }
 
   // ---------- Terrain meshes ----------
-  private chunkGroup(cx: number, cz: number): THREE.Group {
-    const key = cx + ',' + cz;
-    let g = this.chunkGroups.get(key);
-    if (!g) {
-      g = new THREE.Group();
-      g.position.set(cx * 16, 0, cz * 16);
-      g.userData = { cx, cz };
-      this.chunkGroups.set(key, g);
-      this.terrain.add(g);
-    }
-    return g;
-  }
+  // Each 16x16 chunk column keeps the geometry of its sixteen 16-high sections,
+  // but draws them merged into four 64-high bands per material (opaque,
+  // cutout, water): up to 12 draw calls per column instead of up to 48, while
+  // bands above or below the view are still culled. Bands are rebuilt within
+  // a per-frame time budget, nearest first, and only once their sections have
+  // stopped arriving, so streaming in new terrain doesn't cause frame hitches.
 
   setSubMesh(cx: number, sy: number, cz: number, mesh: SubMesh | null): void {
-    const key = `${cx},${sy},${cz}`;
-    const old = this.subMeshes.get(key);
-    if (old) {
-      for (const m of old) { m.removeFromParent(); m.geometry.dispose(); }
-      this.subMeshes.delete(key);
+    const key = cx + ',' + cz;
+    let col = this.columns.get(key);
+    if (!col) {
+      if (!mesh) return;
+      col = { cx, cz, sections: new Array(16).fill(null), meshes: new Array(BANDS * 3).fill(null), dirtyBands: 0, touched: 0, water: false };
+      this.columns.set(key, col);
     }
-    if (!mesh) return;
-    const g = this.chunkGroup(cx, cz);
-    const list: THREE.Mesh[] = [];
-    const add = (lm: LayerMesh | null, mat: THREE.Material, order: number) => {
-      if (!lm) return;
-      const geo = new THREE.BufferGeometry();
-      geo.setAttribute('aPos', new THREE.BufferAttribute(lm.pos, 4));
-      geo.setAttribute('aUV', new THREE.BufferAttribute(lm.uv, 4));
-      geo.setAttribute('aLight', new THREE.BufferAttribute(lm.light, 4));
-      geo.setAttribute('aTint', new THREE.BufferAttribute(lm.tint, 4));
-      geo.setIndex(new THREE.BufferAttribute(lm.index, 1));
-      geo.boundingSphere = new THREE.Sphere(new THREE.Vector3(8, 8, 8), 14);
-      const m = new THREE.Mesh(geo, mat);
-      m.position.set(0, sy * 16, 0);
-      m.renderOrder = order;
-      m.matrixAutoUpdate = false;
-      m.updateMatrix();
-      g.add(m);
-      list.push(m);
-    };
-    add(mesh.opaque, this.materials.opaque, 0);
-    add(mesh.cutout, this.materials.cutout, 1);
-    add(mesh.translucent, this.materials.translucent, 2);
-    this.subMeshes.set(key, list);
+    col.sections[sy] = mesh;
+    col.dirtyBands |= 1 << (sy >> 2);
+    col.touched = this.frameNo;
+    this.dirtyColumns.add(col);
   }
 
   removeChunk(cx: number, cz: number): void {
-    for (let sy = 0; sy < 16; sy++) this.setSubMesh(cx, sy, cz, null);
     const key = cx + ',' + cz;
-    const g = this.chunkGroups.get(key);
-    if (g) { g.removeFromParent(); this.chunkGroups.delete(key); }
+    const col = this.columns.get(key);
+    if (!col) return;
+    for (const m of col.meshes) if (m) { m.removeFromParent(); m.geometry.dispose(); }
+    this.columns.delete(key);
+    this.dirtyColumns.delete(col);
   }
 
   clearTerrain(): void {
-    for (const key of [...this.chunkGroups.keys()]) {
-      const [cx, cz] = key.split(',').map(Number);
-      this.removeChunk(cx, cz);
+    for (const col of [...this.columns.values()]) this.removeChunk(col.cx, col.cz);
+  }
+
+  get meshCount(): number { let n = 0; for (const c of this.columns.values()) for (const m of c.meshes) if (m) n++; return n; }
+
+  /** Rebuild changed bands, nearest first, until the time budget runs out. */
+  flushTerrain(budgetMs = 3): void {
+    this.frameNo++;
+    if (!this.dirtyColumns.size) return;
+    const t0 = performance.now();
+    const cam = this.camera.position;
+    const pcx = Math.floor(cam.x / 16), pcz = Math.floor(cam.z / 16);
+    const near = (c: Column) => Math.max(Math.abs(c.cx - pcx), Math.abs(c.cz - pcz)) <= 1;
+    // Wait for a column's sections to stop arriving (new chunks send all 16 in quick succession),
+    // except right around the player, where block edits must show at once.
+    const ready = [...this.dirtyColumns].filter((c) => near(c) || this.frameNo - c.touched >= 2);
+    ready.sort((a, b) => Math.hypot(a.cx - pcx, a.cz - pcz) - Math.hypot(b.cx - pcx, b.cz - pcz));
+    for (const col of ready) {
+      this.rebuildColumn(col);
+      if (performance.now() - t0 > budgetMs && !near(col)) break;
     }
   }
 
-  get meshCount(): number { return this.subMeshes.size; }
+  private rebuildColumn(col: Column): void {
+    const bands = col.dirtyBands;
+    col.dirtyBands = 0;
+    this.dirtyColumns.delete(col);
+    for (let band = 0; band < BANDS; band++) if (bands & (1 << band)) this.rebuildBand(col, band);
+    col.water = col.meshes.some((m, i) => m && i % 3 === 2);
+  }
+
+  private rebuildBand(col: Column, band: number): void {
+    const layers = ['opaque', 'cutout', 'translucent'] as const;
+    const mats = [this.materials.opaque, this.materials.cutout, this.materials.translucent];
+    layers.forEach((layer, li) => {
+      const slot = band * 3 + li;
+      const parts: { m: LayerMesh; sy: number }[] = [];
+      let verts = 0, idx = 0;
+      for (let sy = band * 4; sy < band * 4 + 4; sy++) {
+        const m = col.sections[sy]?.[layer];
+        if (m) { parts.push({ m, sy }); verts += m.pos.length / 4; idx += m.index.length; }
+      }
+      const old = col.meshes[slot];
+      if (old) { old.removeFromParent(); old.geometry.dispose(); col.meshes[slot] = null; }
+      if (!parts.length) return;
+      const pos = new Int16Array(verts * 4), uv = new Uint16Array(verts * 4), light = new Uint8Array(verts * 4), tint = new Uint8Array(verts * 4);
+      const index = verts > 65535 ? new Uint32Array(idx) : new Uint16Array(idx);
+      let vo = 0, io = 0, minY = 256, maxY = 0;
+      for (const { m, sy } of parts) {
+        const n = m.pos.length / 4, dy = sy * 256;
+        for (let i = 0; i < n; i++) {
+          const o = (vo + i) * 4, s4 = i * 4;
+          pos[o] = m.pos[s4]; pos[o + 1] = m.pos[s4 + 1] + dy; pos[o + 2] = m.pos[s4 + 2]; pos[o + 3] = m.pos[s4 + 3];
+        }
+        uv.set(m.uv, vo * 4); light.set(m.light, vo * 4); tint.set(m.tint, vo * 4);
+        for (let i = 0; i < m.index.length; i++) index[io + i] = m.index[i] + vo;
+        vo += n; io += m.index.length;
+        minY = Math.min(minY, sy * 16); maxY = Math.max(maxY, sy * 16 + 16);
+      }
+      const geo = new THREE.BufferGeometry();
+      // Once uploaded, the GPU copy is all that's needed (the sections keep their own data for rebuilds).
+      const attr = (a: THREE.TypedArray, n: number) => new THREE.BufferAttribute(a, n).onUpload(releaseArray);
+      geo.setAttribute('aPos', attr(pos, 4));
+      geo.setAttribute('aUV', attr(uv, 4));
+      geo.setAttribute('aLight', attr(light, 4));
+      geo.setAttribute('aTint', attr(tint, 4));
+      geo.setIndex(attr(index, 1));
+      // Bound only the height range that has geometry, so frustum culling still works vertically.
+      const half = (maxY - minY) / 2;
+      geo.boundingSphere = new THREE.Sphere(new THREE.Vector3(8, minY + half, 8), Math.hypot(8, 8, half) + 1);
+      const mesh = new THREE.Mesh(geo, mats[li]);
+      mesh.position.set(col.cx * 16, 0, col.cz * 16);
+      mesh.renderOrder = li;
+      mesh.matrixAutoUpdate = false;
+      mesh.updateMatrix();
+      this.terrain.add(mesh);
+      col.meshes[slot] = mesh;
+    });
+  }
+
+  /** Hide terrain farther than `chunks` from the camera for a side pass (reflections); returns what it hid. */
+  private hideFarTerrain(chunks: number): THREE.Mesh[] {
+    const cam = this.camera.position, pcx = cam.x / 16, pcz = cam.z / 16;
+    const hidden: THREE.Mesh[] = [];
+    for (const col of this.columns.values()) {
+      if (Math.max(Math.abs(col.cx + 0.5 - pcx), Math.abs(col.cz + 0.5 - pcz)) <= chunks) continue;
+      for (const m of col.meshes) if (m && m.visible) { m.visible = false; hidden.push(m); }
+    }
+    return hidden;
+  }
+
+  /** Is there water (or other translucent terrain) within `chunks` of the camera? */
+  private waterNear(chunks: number): boolean {
+    const cam = this.camera.position, pcx = Math.floor(cam.x / 16), pcz = Math.floor(cam.z / 16);
+    for (let dz = -chunks; dz <= chunks; dz++) for (let dx = -chunks; dx <= chunks; dx++) if (this.columns.get((pcx + dx) + ',' + (pcz + dz))?.water) return true;
+    return false;
+  }
 
   // ---------- Per-frame ----------
   updateSky(time: number, camPos: THREE.Vector3): void {
@@ -715,7 +812,7 @@ export class Renderer {
     const cl = Math.max(0.12, Math.min(1, sy * 2 + 0.35));
     ct.color.setRGB(cl, cl, cl * 1.05);
     ct.opacity = 0.55 + 0.25 * cl;
-    ct.map!.offset.set((this.uniforms.uTime.value * 0.0004 + camPos.x / 768 * 0) % 1, 0);
+    ct.map!.offset.set((this.uniforms.uTime.value * 0.0004) % 1, 0);
   }
 
   /**
@@ -902,6 +999,9 @@ export class Renderer {
     return new THREE.Mesh(new THREE.BoxGeometry(size, size, size), mats);
   }
 
+  /** 0..1 arc of the current hand swing (for the third-person avatar). */
+  swingAmount(): number { return Math.sin(this.swing * Math.PI); }
+
   swingHand(): void {
     this.swing = 1;
   }
@@ -927,13 +1027,22 @@ export class Renderer {
     const hidden: THREE.Object3D[] = [];
     for (const c of this.scene.children) if (c !== this.terrain && c.visible) { c.visible = false; hidden.push(c); }
     this.scene.overrideMaterial = this.shadowMaterial;
+    // Water doesn't cast shadows (and skipping it saves a draw per column).
+    this.materials.translucent.visible = false;
     this.gl.setRenderTarget(this.shadowTarget);
     this.gl.clear();
     this.gl.render(this.scene, this.shadowCam);
     this.gl.setRenderTarget(null);
     this.scene.overrideMaterial = null;
+    this.materials.translucent.visible = true;
     for (const c of hidden) c.visible = true;
   }
+
+  /**
+   * Automated tests on machines without a GPU run the game with ?norender: everything updates as
+   * usual (terrain meshes are still built) but nothing is drawn, so the game runs at full speed.
+   */
+  readonly noDraw = typeof location !== 'undefined' && new URLSearchParams(location.search).has('norender');
 
   renderFrame(dt: number, moving: boolean, handBrightness: number, showHand: boolean): void {
     this.uniforms.uTime.value += dt;
@@ -950,6 +1059,8 @@ export class Renderer {
         m.color.copy(m.userData.base).multiplyScalar(handBrightness);
       }
     });
+    this.flushTerrain();
+    if (this.noDraw) return;
     this.renderShadows();
     const usePost = this.post && this.fancy;
     this.renderReflection(usePost);
@@ -987,7 +1098,7 @@ export class Renderer {
   private renderReflection(on: boolean): void {
     const plane = 62 + 14 / 16 - 0.03;
     const cam = this.camera;
-    const enabled = on && !this.debugNoRefl && this.dimension === 'overworld' && !this.underwater && cam.position.y > plane - 0.2 && cam.position.y < plane + 90;
+    const enabled = on && !this.debugNoRefl && this.dimension === 'overworld' && !this.underwater && cam.position.y > plane - 0.2 && cam.position.y < plane + 90 && this.waterNear(4);
     this.uniforms.uReflOn.value = enabled ? 1 : 0;
     if (!enabled) return;
     const rc = this.reflCam;
@@ -1002,8 +1113,10 @@ export class Renderer {
     const bias = new THREE.Matrix4().set(0.5, 0, 0, 0.5, 0, 0.5, 0, 0.5, 0, 0, 0.5, 0.5, 0, 0, 0, 1);
     (this.uniforms.uReflMatrix.value as THREE.Matrix4).copy(bias).multiply(rc.projectionMatrix).multiply(rc.matrixWorldInverse);
     // Draw everything above the water except the water itself and screen-space bits.
-    const hide = [this.rainLines, this.highlight, this.crack, this.clouds].filter((o) => o.visible);
+    const hide: THREE.Object3D[] = [this.rainLines, this.highlight, this.crack, this.clouds].filter((o) => o.visible);
     for (const o of hide) o.visible = false;
+    // Reflections only need nearby terrain: distant hills are hazy in the water anyway.
+    hide.push(...this.hideFarTerrain(6));
     this.materials.translucent.visible = false;
     (this.uniforms.uClip.value as THREE.Vector2).set(1, plane);
     this.uniforms.uReflection.value = this.blankTex;

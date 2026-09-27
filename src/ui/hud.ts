@@ -1,7 +1,10 @@
 // Heads-up display: crosshair, hotbar, health / hunger / air meters.
 
+import * as THREE from 'three';
 import { itemDef, maxDurability } from '../items';
 import type { Player } from '../player';
+import type { Game } from '../game';
+import { BIOME_NAMES } from '../world/worldgen';
 import { iconURL } from './icons';
 
 type Pix = string[];
@@ -55,8 +58,18 @@ export class Hud {
   private nameTimer = 0;
   private lastSel = -1;
   private lastKey = '';
+  private coords: HTMLElement;
+  private markerLayer: HTMLElement;
+  private markers = new Map<string, HTMLElement>();
+  private tmp = new THREE.Vector3();
 
   constructor(parent: HTMLElement) {
+    this.coords = document.createElement('div');
+    this.coords.id = 'coords';
+    parent.appendChild(this.coords);
+    this.markerLayer = document.createElement('div');
+    this.markerLayer.id = 'markers';
+    parent.appendChild(this.markerLayer);
     const ic = hudIcons();
     this.root = document.createElement('div');
     this.root.id = 'hud';
@@ -157,6 +170,42 @@ export class Hud {
       this.bubbles.innerHTML = '';
       for (let i = 0; i < bubbles; i++) { const b = new Image(); b.src = ic.bubble; b.alt = ''; this.bubbles.appendChild(b); }
     }
+  }
+
+  /** Coordinates line and on-screen waypoint markers. */
+  updateInfo(g: Game): void {
+    const show = g.mode === 'playing' && !g.hudHidden && !!g.world;
+    const p = g.player;
+    this.coords.style.display = show && g.settings.showCoords ? 'block' : 'none';
+    if (show && g.settings.showCoords) {
+      const [x, y, z] = p.body.pos;
+      const facing = ['north', 'west', 'south', 'east'][p.quadrant()];
+      const c = g.world!.getChunk(Math.floor(x) >> 4, Math.floor(z) >> 4);
+      const biome = c ? BIOME_NAMES[c.biomes[(Math.floor(x) & 15) + (Math.floor(z) & 15) * 16]] : '';
+      const text = `${Math.floor(x)}, ${Math.floor(y)}, ${Math.floor(z)} · facing ${facing}${biome && g.world!.dimension === 'overworld' ? ' · ' + biome : ''}`;
+      if (this.coords.textContent !== text) this.coords.textContent = text;
+    }
+    const seen = new Set<string>();
+    if (show) {
+      const cam = g.renderer.camera, w = window.innerWidth, h = window.innerHeight;
+      for (const wp of g.waypoints.list(g.dimension)) {
+        const v = this.tmp.set(wp.pos[0], wp.pos[1] + 1.2, wp.pos[2]).project(cam);
+        const dist = Math.hypot(wp.pos[0] - p.body.pos[0], wp.pos[1] - p.body.pos[1], wp.pos[2] - p.body.pos[2]);
+        if (v.z > 1 || Math.abs(v.x) > 1.1 || Math.abs(v.y) > 1.1 || dist < 2) continue;
+        seen.add(wp.name);
+        let el = this.markers.get(wp.name);
+        if (!el) {
+          el = document.createElement('div');
+          el.className = 'marker' + (wp.death ? ' death' : '');
+          this.markerLayer.appendChild(el);
+          this.markers.set(wp.name, el);
+        }
+        el.style.transform = `translate(${((v.x + 1) / 2) * w}px, ${((1 - v.y) / 2) * h}px)`;
+        const label = `${wp.name} · ${Math.round(dist)} m`;
+        if (el.textContent !== label) el.textContent = label;
+      }
+    }
+    for (const [k, el] of this.markers) if (!seen.has(k)) { el.remove(); this.markers.delete(k); }
   }
 }
 

@@ -5,7 +5,9 @@ import './ui/style.css';
 import { Game } from './game';
 import { buildAtlas } from './textures';
 import { initIcons } from './ui/icons';
+import { setupOffline } from './update';
 
 const atlas = buildAtlas();
 initIcons(atlas);
-new Game(document.getElementById('app')!, atlas);
+const game = new Game(document.getElementById('app')!, atlas);
+setupOffline(game);

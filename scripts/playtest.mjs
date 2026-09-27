@@ -6,7 +6,9 @@
 
 import { chromium } from 'playwright';
 
-const url = process.argv[2] ?? 'http://localhost:5199/';
+// NORENDER=1 runs the game without drawing (for machines without a GPU, like CI): the checks
+// exercise game logic, which then runs at full speed even under software rendering.
+const url = (process.argv[2] ?? 'http://localhost:5199/') + (process.env.NORENDER ? '?norender' : '');
 // Use the real GPU (Metal on macOS); set SOFTWARE_GL=1 to force software rendering.
 const browser = await chromium.launch({
   args: process.env.SOFTWARE_GL ? ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'] : ['--use-angle=metal', '--enable-gpu', '--ignore-gpu-blocklist'],
@@ -231,10 +233,13 @@ const fished = await g(async ({ x, y, z }) => {
   if (b) { b.waitTicks = 1; }
   await sleep(300);
   const biting = b ? b.biteTicks > 0 : false;
+  const itemsNear = () => G.entities.list.filter((e) => e.stack && Math.hypot(e.body.pos[0] - p.body.pos[0], e.body.pos[2] - p.body.pos[2]) < 8).length;
+  const nearBefore = itemsNear();
   G.use();
   await sleep(2500);
+  // The catch flies toward you; count it whether it has been picked up or is still on its way.
   const after = p.inv.count(291) + p.inv.slots.filter((s) => s && s.id !== 291 && s.id !== 290 && s.id !== 283 && s.id !== 284 && s.id !== 285).length;
-  return { state, biting, caught: after - before };
+  return { state, biting, caught: after - before + Math.max(0, itemsNear() - nearBefore) };
 }, setup);
 check('fishing: bobber floats, bites, and reeling in catches something', fished.state === 'floating' && fished.biting && fished.caught >= 1, JSON.stringify(fished));
 
@@ -327,7 +332,7 @@ const zoo = await g(async ({ x, y, z }) => {
 check('new creatures spawn and move without errors', zoo.every((m) => m.alive), JSON.stringify(zoo));
 
 // --- Classic monsters: a Blastcap bursts next to you, a skeleton shoots you, a witch's potion splashes you.
-const monsters = await g(async ({ x, y, z }) => {
+const monsters = await g(async ({ x, z }) => {
   const G = window.blockhaven, p = G.player, w = G.world, E = G.entities;
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   const out = {};
@@ -368,7 +373,7 @@ const village = await g(async () => {
   const G = window.blockhaven, p = G.player;
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   const log = [];
-  const orig = G.say.bind(G); G.say = (t) => { log.push(t); orig(t); };
+  const orig = G.chat.say.bind(G.chat); G.chat.say = (t) => { log.push(t); orig(t); };
   G.runCommand('/locate village');
   const m = /at (-?\d+), (-?\d+)/.exec(log.join(' '));
   if (!m) return { found: false, log };
@@ -544,7 +549,177 @@ await g(() => {
   delete document.pointerLockElement; delete document.exitPointerLock; delete G.canvas.requestPointerLock;
   G.player.creative = false;
 });
+await wait(100);
+// Releasing the stand-in lock opened the pause menu (as losing the mouse should); dismiss it.
+await g(() => window.blockhaven.menus.show(null));
 await wait(300);
+
+// --- Quality-of-life features: commands, chat, waypoints, map, camera, keys, gamepad, inventory, backups.
+{
+  // Keep the inventory from the crafting test for the save/reload checks below.
+  await g(() => { window.__invSnap = window.blockhaven.player.inv.slots.map((s) => (s ? { ...s } : null)); });
+  // /fill, /setblock and /undo.
+  const edit = await g(() => {
+    const G = window.blockhaven, p = G.player, w = G.world;
+    const [x, , z] = p.body.pos.map(Math.floor);
+    const y = w.groundY(x + 4, z + 4) + 4;
+    G.runCommand(`/fill ${x + 3} ${y} ${z + 3} ${x + 5} ${y + 2} ${z + 5} glass`);
+    const filled = w.getBlock(x + 4, y + 1, z + 4);
+    G.runCommand(`/setblock ${x + 4} ${y + 3} ${z + 4} gold_block`);
+    const set = w.getBlock(x + 4, y + 3, z + 4);
+    G.runCommand('/undo');
+    const undoneSet = w.getBlock(x + 4, y + 3, z + 4);
+    G.runCommand('/undo');
+    const undoneFill = w.getBlock(x + 4, y + 1, z + 4);
+    const B = G.ids;
+    return { filled: filled === B.glass, set: set === B.gold_block, undoneSet, undoneFill };
+  });
+  check('/fill and /setblock place blocks, /undo reverts them in order', edit.filled && edit.set && edit.undoneSet === 0 && edit.undoneFill === 0, JSON.stringify(edit));
+
+  // Chat: history with Up, Tab completion of commands and arguments.
+  await g(() => window.blockhaven.chat.open('/'));
+  await wait(150);
+  await page.keyboard.type('tim');
+  await page.keyboard.press('Tab');
+  const completed = await g(() => window.blockhaven.chat.input.value);
+  await page.keyboard.type('set no');
+  await page.keyboard.press('Tab');
+  const completedArg = await g(() => window.blockhaven.chat.input.value);
+  await page.keyboard.press('Enter');
+  await wait(150);
+  await g(() => window.blockhaven.chat.open(''));
+  await wait(150);
+  await page.keyboard.press('ArrowUp');
+  const recalled = await g(() => window.blockhaven.chat.input.value);
+  await page.keyboard.press('Escape');
+  await wait(100);
+  check('Tab completes commands and arguments; Up recalls the last command', completed === '/time ' && completedArg.startsWith('/time set noon') && recalled.startsWith('/time set noon'), JSON.stringify({ completed, completedArg, recalled }));
+
+  // Waypoints, and a death marker where you died.
+  const wp = await g(() => {
+    const G = window.blockhaven;
+    G.runCommand('/waypoint add Home base');
+    const added = G.waypoints.get('Home base');
+    G.runCommand('/waypoint remove Home base');
+    return { added: !!added, removed: !G.waypoints.get('Home base') };
+  });
+  check('waypoints can be added and removed', wp.added && wp.removed, JSON.stringify(wp));
+
+  // World map opens and closes; minimap is drawn.
+  await g(() => { window.blockhaven.settings.minimap = true; window.blockhaven.map.show(); });
+  await wait(300);
+  const mapOpen = await g(() => window.blockhaven.map.open && getComputedStyle(document.querySelector('#worldmap')).display !== 'none');
+  await page.keyboard.press('Escape');
+  await wait(200);
+  const mapClosed = await g(() => !window.blockhaven.map.open);
+  const mini = await g(() => { const c = document.querySelector('#minimap'); const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data; let lit = 0; for (let i = 0; i < d.length; i += 4) if (d[i + 3] && (d[i] + d[i + 1] + d[i + 2]) > 60) lit++; return lit; });
+  check('the world map opens and closes, and the minimap shows terrain', mapOpen && mapClosed && mini > 1000, JSON.stringify({ mapOpen, mapClosed, mini }));
+
+  // Third-person camera shows the avatar and moves the camera off the player's eye.
+  const cam = await g(async () => {
+    const G = window.blockhaven, p = G.player;
+    G.cyclePerspective();
+    await new Promise((r) => setTimeout(r, 200));
+    const c = G.renderer.camera.position, e = p.eye();
+    const dist = Math.hypot(c.x - e[0], c.y - e[1], c.z - e[2]);
+    const shown = !!G.avatar?.root.visible;
+    G.cyclePerspective(); G.cyclePerspective();
+    await new Promise((r) => setTimeout(r, 100));
+    return { dist, shown, back: G.perspective, hidden: !G.avatar?.root.visible };
+  });
+  check('third-person view shows your avatar and pulls the camera back', cam.shown && cam.dist > 0.5 && cam.back === 0 && cam.hidden, JSON.stringify(cam));
+
+  // Screenshot key downloads a PNG.
+  const [dl] = await Promise.all([page.waitForEvent('download', { timeout: 5000 }).catch(() => null), g(() => window.blockhaven.screenshot())]);
+  check('the screenshot key saves a PNG', !!dl && dl.suggestedFilename().endsWith('.png'), dl ? dl.suggestedFilename() : 'no download');
+
+  // Rebinding a key, and toggle-sprint.
+  const keys = await g(() => {
+    const G = window.blockhaven, inp = G.input;
+    G.settings.keys = { forward: 'KeyI' };
+    const rebound = inp.codes('forward')[0] === 'KeyI';
+    G.settings.keys = {};
+    G.settings.toggleSprint = true;
+    inp.sprintLatch = true;
+    const latched = inp.movement().sprint || !inp.controlling;
+    G.settings.toggleSprint = false; inp.sprintLatch = false;
+    return { rebound, latched };
+  });
+  check('keys can be rebound, and sprint can be a toggle', keys.rebound && keys.latched, JSON.stringify(keys));
+
+  // A gamepad: left stick walks, A jumps, RB changes the hotbar slot.
+  const pad = await g(async () => {
+    const G = window.blockhaven, p = G.player;
+    p.creative = false; p.flying = false;
+    const state = { axes: [0, -1, 0, 0], buttons: Array.from({ length: 17 }, () => ({ pressed: false, value: 0 })) };
+    Object.defineProperty(navigator, 'getGamepads', { configurable: true, value: () => [{ connected: true, mapping: 'standard', axes: state.axes, buttons: state.buttons }] });
+    const x0 = [...p.body.pos], sel = p.selected;
+    await new Promise((r) => setTimeout(r, 900));
+    const forward = G.input.movement().forward;
+    state.buttons[5] = { pressed: true, value: 1 };
+    await new Promise((r) => setTimeout(r, 100));
+    state.buttons[5] = { pressed: false, value: 0 };
+    state.axes[1] = 0;
+    await new Promise((r) => setTimeout(r, 100));
+    const moved = Math.hypot(p.body.pos[0] - x0[0], p.body.pos[2] - x0[2]);
+    const selChanged = p.selected === (sel + 1) % 9;
+    const diag = { padActive: G.input.padActive, controlling: G.input.controlling, menu: G.menus.current, chat: G.chat.isOpen, inv: G.containers.open, alive: p.alive };
+    delete navigator.getGamepads;
+    G.input.padActive = false;
+    return { forward, moved, selChanged, ...diag };
+  });
+  check('a gamepad walks with the left stick and switches slots with the bumpers', pad.forward > 0.9 && pad.moved > 0.1 && pad.selChanged, JSON.stringify(pad));
+
+  // Creative tabs, drag-to-spread and double-click-to-gather in the inventory.
+  const inv = await g(async () => {
+    const G = window.blockhaven, p = G.player;
+    p.creative = true;
+    G.containers.close();
+    G.openInventory();
+    await new Promise((r) => setTimeout(r, 200));
+    const tabs = [...document.querySelectorAll('#container .tab')];
+    tabs.find((t) => t.textContent === 'All')?.click();
+    await new Promise((r) => setTimeout(r, 100));
+    const all = document.querySelectorAll('#container .creative-grid .slot').length;
+    [...document.querySelectorAll('#container .tab')].find((t) => t.textContent === 'Nature')?.click();
+    await new Promise((r) => setTimeout(r, 100));
+    const nature = document.querySelectorAll('#container .creative-grid .slot').length;
+    G.containers.close();
+    return { tabs: tabs.length, all, nature };
+  });
+  check('the creative inventory has category tabs that filter items', inv.tabs >= 7 && inv.nature > 5 && inv.nature < inv.all, JSON.stringify(inv));
+  await g(() => { const G = window.blockhaven, p = G.player; p.creative = false; p.inv.slots.fill(null); p.inv.slots[9] = { id: G.ids.dirt, count: 30 }; G.openInventory(); });
+  await wait(300);
+  const slots = await page.$$('#container .slot');
+  // Player screen layout: 4 armour, 4 craft, 1 result, then 27 main (slot 9 = main index 0), then hotbar.
+  const main = (i) => slots[9 + i];
+  await main(0).click();                      // pick up 30 dirt
+  const b1 = await main(1).boundingBox(), b2 = await main(2).boundingBox(), b3 = await main(3).boundingBox();
+  await page.mouse.move(b1.x + 10, b1.y + 10); await page.mouse.down();
+  await page.mouse.move(b2.x + 10, b2.y + 10, { steps: 3 }); await page.mouse.move(b3.x + 10, b3.y + 10, { steps: 3 });
+  await page.mouse.up();
+  await wait(200);
+  const spread = await g(() => window.blockhaven.player.inv.slots.slice(10, 13).map((s) => s?.count ?? 0));
+  await main(1).dblclick();
+  await wait(200);
+  const gathered = await g(() => ({ cursor: window.blockhaven.containers.cursor?.count ?? 0, left: window.blockhaven.player.inv.slots.slice(9, 36).filter(Boolean).length }));
+  await g(() => { const G = window.blockhaven; if (G.containers.cursor) { G.player.inv.slots[9] = G.containers.cursor; G.containers.cursor = null; } G.containers.close(); });
+  check('dragging a stack shares it out evenly; double-click gathers it back', spread.join() === '10,10,10' && gathered.cursor === 30 && gathered.left === 0, JSON.stringify({ spread, gathered }));
+
+  // Backup: export this world to a file and import it back as a new world.
+  const round = await g(async () => {
+    const G = window.blockhaven;
+    await G.save();
+    const { blob, name } = await G.storage.exportWorld(G.meta.id);
+    const meta = await G.storage.importWorld(blob);
+    const worlds = await G.listWorlds();
+    const ok = worlds.some((w) => w.id === meta.id && w.seed === G.meta.seed);
+    await G.storage.deleteWorld(meta.id);
+    return { name, size: blob.size, ok };
+  });
+  check('a world exports to a file and imports back as a new world', round.ok && round.size > 100 && round.name.endsWith('.blockhaven'), JSON.stringify(round));
+  await g(() => { const p = window.blockhaven.player; p.creative = false; window.__invSnap.forEach((s, i) => { p.inv.slots[i] = s; }); });
+}
 
 // --- Save, quit, reload, and check a block change persisted.
 const marker = await g(async () => {

@@ -1,6 +1,7 @@
 // Title screen, world list, world creation, pause, settings and death screens.
 
-import { deleteWorld, listWorlds, type WorldMeta } from '../storage';
+import { deleteWorld, download, duplicateWorld, exportWorld, importWorld, listWorlds, renameWorld, type WorldMeta } from '../storage';
+import { BINDABLE, DEFAULT_KEYS, keyName } from '../game/input';
 
 export interface Settings {
   renderDistance: number;
@@ -13,14 +14,32 @@ export interface Settings {
   fancy: boolean;
   shadows: boolean;
   post: boolean;
+  /** Key overrides: action -> KeyboardEvent.code. */
+  keys: Record<string, string>;
+  toggleSprint: boolean;
+  toggleSneak: boolean;
+  /** Turns off view bobbing, the sprint zoom and hurt tilt. */
+  reduceMotion: boolean;
+  /** Interface size multiplier. */
+  uiScale: number;
+  showCoords: boolean;
+  minimap: boolean;
+  /** Frame-rate cap (0 = unlimited). */
+  fpsCap: number;
+  /** Lower the render resolution when frames get slow. */
+  autoQuality: boolean;
+  music: number;
 }
 
-const DEFAULTS: Settings = { renderDistance: 8, fov: 70, sensitivity: 1, brightness: 0.5, volume: 0.6, viewBobbing: true, invertY: false, fancy: true, shadows: true, post: true };
+const DEFAULTS: Settings = {
+  renderDistance: 8, fov: 70, sensitivity: 1, brightness: 0.5, volume: 0.6, viewBobbing: true, invertY: false, fancy: true, shadows: true, post: true,
+  keys: {}, toggleSprint: false, toggleSneak: false, reduceMotion: false, uiScale: 1, showCoords: false, minimap: true, fpsCap: 0, autoQuality: true, music: 0.4,
+};
 
 export function loadSettings(): Settings {
   try {
     const raw = localStorage.getItem('blockhaven.settings');
-    if (raw) return { ...DEFAULTS, ...JSON.parse(raw) };
+    if (raw) { const v = JSON.parse(raw); return { ...DEFAULTS, ...v, keys: { ...v.keys } }; }
   } catch { /* storage unavailable: use defaults */ }
   return { ...DEFAULTS };
 }
@@ -59,6 +78,7 @@ export interface MenuCallbacks {
   saveAndQuit(): void;
   respawn(): void;
   settingsChanged(s: Settings): void;
+  exportCurrent(): void;
 }
 
 export class Menus {
@@ -73,6 +93,7 @@ export class Menus {
     this.buildCreate();
     this.buildPause();
     this.buildSettings();
+    this.buildControls();
     this.buildDeath();
     this.buildLoading();
   }
@@ -89,6 +110,7 @@ export class Menus {
     this.current = id;
     if (id === 'worlds') this.refreshWorlds();
     if (id === 'settings') this.renderSettings();
+    if (id === 'controls') this.renderControls();
     const first = id ? this.screens.get(id)?.querySelector<HTMLElement>('button, input') : null;
     first?.focus({ preventScroll: true });
   }
@@ -127,10 +149,48 @@ export class Menus {
       this.refreshWorlds();
     });
     del.id = 'delete-world';
+    const row3 = el('div', { class: 'row' });
+    const rename = button('Rename', '', async () => {
+      const w = this.selectedWorld;
+      if (!w) return;
+      const name = prompt('New name for this world:', w.name)?.trim().slice(0, 32);
+      if (!name) return;
+      await renameWorld(w.id, name);
+      this.selectedWorld = { ...w, name };
+      this.refreshWorlds();
+    });
+    const dup = button('Duplicate', '', async () => {
+      if (!this.selectedWorld) return;
+      try { this.selectedWorld = await duplicateWorld(this.selectedWorld.id); } catch (e) { this.status((e as Error).message); }
+      this.refreshWorlds();
+    });
+    const exp = button('Export', '', async () => {
+      if (!this.selectedWorld) return;
+      try { const { blob, name } = await exportWorld(this.selectedWorld.id); download(blob, name); this.status(`Saved ${name}`); }
+      catch (e) { this.status((e as Error).message); }
+    });
+    const fileIn = el('input', { type: 'file', accept: '.blockhaven,.json,application/json,application/gzip', 'aria-label': 'World file to import' });
+    fileIn.style.display = 'none';
+    fileIn.addEventListener('change', async () => {
+      const f = fileIn.files?.[0];
+      fileIn.value = '';
+      if (!f) return;
+      try { this.selectedWorld = await importWorld(f); this.status(`Imported "${this.selectedWorld.name}"`); }
+      catch (e) { this.status((e as Error).message); }
+      this.refreshWorlds();
+    });
+    const imp = button('Import', '', () => fileIn.click());
+    for (const [b, id] of [[rename, 'rename-world'], [dup, 'duplicate-world'], [exp, 'export-world']] as const) b.id = id;
+    row3.append(rename, dup, exp, imp, fileIn);
     row2.append(del, button('Back', '', () => this.show('title')));
-    actions.append(row1, row2);
+    const status = el('p', { class: 'hint', id: 'worlds-status', 'aria-live': 'polite' });
+    actions.append(row1, row3, row2, status);
     p.appendChild(actions);
     s.appendChild(p);
+  }
+
+  private status(text: string): void {
+    this.screens.get('worlds')!.querySelector('#worlds-status')!.textContent = text;
   }
 
   private async refreshWorlds(): Promise<void> {
@@ -151,7 +211,7 @@ export class Menus {
       list.appendChild(row);
     }
     (this.screens.get('worlds')!.querySelector('#play-selected') as HTMLButtonElement).disabled = !this.selectedWorld;
-    (this.screens.get('worlds')!.querySelector('#delete-world') as HTMLButtonElement).disabled = !this.selectedWorld;
+    for (const id of ['#delete-world', '#rename-world', '#duplicate-world', '#export-world']) (this.screens.get('worlds')!.querySelector(id) as HTMLButtonElement).disabled = !this.selectedWorld;
   }
 
   private buildCreate(): void {
@@ -195,6 +255,7 @@ export class Menus {
       el('h2', {}, 'Paused'),
       button('Back to game', 'primary', () => this.cb.resume()),
       button('Settings', '', () => { this.settingsBack = 'pause'; this.show('settings'); }),
+      button('Export a backup', '', () => this.cb.exportCurrent()),
       button('Save and quit to title', '', () => this.cb.saveAndQuit()),
     );
     s.appendChild(p);
@@ -210,6 +271,8 @@ export class Menus {
     p.innerHTML = '';
     p.appendChild(el('h2', {}, 'Settings'));
     const st = this.settings;
+    const changed = () => { saveSettings(st); this.cb.settingsChanged(st); };
+    const section = (title: string) => p.appendChild(el('h3', { class: 'set-head' }, title));
     const slider = (label: string, key: keyof Settings, min: number, max: number, step: number, fmt: (v: number) => string) => {
       const row = el('div', { class: 'setting' });
       const id = 'set-' + key;
@@ -220,35 +283,100 @@ export class Menus {
       input.addEventListener('input', () => {
         (st as unknown as Record<string, number>)[key] = Number(input.value);
         val.textContent = fmt(Number(input.value));
-        saveSettings(st);
-        this.cb.settingsChanged(st);
+        changed();
       });
       row.append(lab, input);
       p.appendChild(row);
     };
-    const toggle = (label: string, key: 'viewBobbing' | 'invertY' | 'fancy' | 'shadows' | 'post', on = 'On', off = 'Off') => {
+    type BoolKey = { [K in keyof Settings]: Settings[K] extends boolean ? K : never }[keyof Settings];
+    const toggle = (label: string, key: BoolKey, on = 'On', off = 'Off', note?: string) => {
       const row = el('div', { class: 'setting' });
-      row.appendChild(el('span', {}, label));
+      const lab = el('span', {}, label);
+      if (note) lab.appendChild(el('small', { class: 'note' }, note));
+      row.appendChild(lab);
       const b = button(st[key] ? on : off, '', () => {
         st[key] = !st[key];
         b.textContent = st[key] ? on : off;
-        saveSettings(st);
-        this.cb.settingsChanged(st);
+        b.setAttribute('aria-pressed', String(st[key]));
+        changed();
       });
+      b.setAttribute('aria-pressed', String(st[key]));
       row.appendChild(b);
       p.appendChild(row);
     };
+    section('Video');
     slider('Render distance', 'renderDistance', 2, 16, 1, (v) => `${v} chunks`);
     slider('Field of view', 'fov', 50, 110, 1, (v) => `${v}°`);
-    slider('Mouse sensitivity', 'sensitivity', 0.2, 2.5, 0.05, (v) => `${Math.round(v * 100)}%`);
     slider('Brightness', 'brightness', 0, 1, 0.05, (v) => (v < 0.15 ? 'Moody' : v > 0.85 ? 'Bright' : `${Math.round(v * 100)}%`));
-    slider('Volume', 'volume', 0, 1, 0.05, (v) => `${Math.round(v * 100)}%`);
     toggle('Graphics', 'fancy', 'Fancy', 'Fast');
     toggle('Sun shadows', 'shadows');
     toggle('Bloom, sun rays and reflections', 'post');
-    toggle('View bobbing', 'viewBobbing');
+    slider('Frame rate cap', 'fpsCap', 0, 144, 6, (v) => (v === 0 ? 'Unlimited' : `${v} fps`));
+    toggle('Automatic quality', 'autoQuality', 'On', 'Off', 'Lowers the resolution when frames get slow');
+    section('Controls');
+    slider('Mouse sensitivity', 'sensitivity', 0.2, 2.5, 0.05, (v) => `${Math.round(v * 100)}%`);
     toggle('Invert mouse', 'invertY');
+    toggle('Sprint key', 'toggleSprint', 'Toggle', 'Hold');
+    toggle('Sneak key', 'toggleSneak', 'Toggle', 'Hold');
+    p.appendChild(button('Keys…', '', () => this.show('controls')));
+    section('Interface');
+    slider('Interface size', 'uiScale', 0.75, 1.5, 0.05, (v) => `${Math.round(v * 100)}%`);
+    toggle('Coordinates', 'showCoords', 'Shown', 'Hidden');
+    toggle('Minimap', 'minimap', 'Shown', 'Hidden');
+    section('Comfort');
+    toggle('Reduce motion', 'reduceMotion', 'On', 'Off', 'No view bobbing, sprint zoom or hurt shake');
+    toggle('View bobbing', 'viewBobbing');
+    section('Sound');
+    slider('Volume', 'volume', 0, 1, 0.05, (v) => `${Math.round(v * 100)}%`);
+    slider('Music', 'music', 0, 1, 0.05, (v) => (v === 0 ? 'Off' : `${Math.round(v * 100)}%`));
     p.appendChild(button('Done', 'primary', () => this.show(this.settingsBack)));
+  }
+
+  private buildControls(): void {
+    const s = this.screen('controls');
+    s.appendChild(el('div', { class: 'panel settings controls stack' }));
+  }
+
+  /** Key bindings: click an action, then press the key you want for it. */
+  private renderControls(): void {
+    const p = this.screens.get('controls')!.querySelector('.controls')!;
+    p.innerHTML = '';
+    p.appendChild(el('h2', {}, 'Keys'));
+    p.appendChild(el('p', { class: 'hint' }, 'Click a key, then press the one you want. Escape cancels. Mouse buttons and number keys stay fixed.'));
+    const st = this.settings;
+    for (const [action, label] of BINDABLE) {
+      const row = el('div', { class: 'setting' });
+      row.appendChild(el('span', {}, label));
+      const current = () => (st.keys[action] ? [st.keys[action]] : DEFAULT_KEYS[action]).map(keyName).join(' or ');
+      const b = button(current(), 'keybind');
+      b.addEventListener('click', () => {
+        b.textContent = 'Press a key…';
+        b.classList.add('waiting');
+        const onKey = (e: KeyboardEvent) => {
+          e.preventDefault();
+          e.stopPropagation();
+          window.removeEventListener('keydown', onKey, true);
+          b.classList.remove('waiting');
+          if (e.code !== 'Escape') {
+            st.keys[action] = e.code;
+            // One key, one action: take it away from anything else that had it.
+            for (const [other] of BINDABLE) if (other !== action && st.keys[other] === e.code) delete st.keys[other];
+            saveSettings(st);
+            this.cb.settingsChanged(st);
+          }
+          this.renderControls();
+        };
+        window.addEventListener('keydown', onKey, true);
+      });
+      row.appendChild(b);
+      p.appendChild(row);
+    }
+    p.appendChild(el('div', { class: 'row' }));
+    const r = p.lastElementChild!;
+    r.append(
+      button('Reset all', '', () => { st.keys = {}; saveSettings(st); this.cb.settingsChanged(st); this.renderControls(); }),
+      button('Done', 'primary', () => this.show('settings')),
+    );
   }
 
   private buildDeath(): void {

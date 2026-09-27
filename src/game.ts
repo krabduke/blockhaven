@@ -1,16 +1,17 @@
-import * as THREE from 'three';
 // Ties everything together: the main loop, player control, mining and
 // placing, interactions, commands, saving, and the title screen flyover.
 
 import { initAudio, setVolume, sfx, spatial } from './audio';
-import { B, BLOCKS, SOLID, isLeaves, isLog } from './blocks';
-import { Bobber, EntityManager, MOBS, TntEntity } from './entities/entities';
-import { I, ITEMS, enchLevel, itemDef, maxStack, type ItemStack } from './items';
+import { B, BLOCKS, SOLID } from './blocks';
+import { EntityManager, MOBS, TntEntity } from './entities/entities';
+import { createAvatar } from './entities/avatar';
+import type { MobModel } from './entities/models';
+import { I, itemDef } from './items';
 import { hashString } from './noise';
-import { raycast, selectionBox, stepBody, updateContacts, type RayHit } from './physics';
+import { raycast, stepBody, updateContacts } from './physics';
 import { EYE_HEIGHT, Player, SNEAK_EYE_HEIGHT } from './player';
 import { Renderer } from './render/renderer';
-import { listWorlds, saveWorldMeta, savedChunkKeys, type WorldMeta } from './storage';
+import { deleteWorld, download, exportWorld, importWorld, listWorlds, saveWorldMeta, savedChunkKeys, type WorldMeta } from './storage';
 import type { Atlas } from './textures';
 import { ContainerScreen } from './ui/containers';
 import { Hud } from './ui/hud';
@@ -19,8 +20,15 @@ import { Menus, loadSettings, type Settings } from './ui/menus';
 import { SEA_LEVEL } from './world/chunk';
 import { WorkerPool } from './world/pool';
 import { BIOME, BIOME_NAMES, WorldGen } from './world/worldgen';
-import { nearestVillage } from './world/villages';
 import { World } from './world/world';
+import { Actions } from './game/actions';
+import { Chat } from './game/chat';
+import { runCommand } from './game/commands';
+import { EditHistory } from './game/history';
+import { Input } from './game/input';
+import { Signs } from './game/signs';
+import { Waypoints } from './game/waypoints';
+import { WorldMap } from './ui/map';
 
 const TICK = 1 / 20;
 const DEATH_MESSAGES: Record<string, string> = {
@@ -72,6 +80,7 @@ type SaveMeta = WorldMeta & {
   weatherTimer?: number;
   dimension?: Dimension;
   dims?: Partial<Record<Dimension, DimState>>;
+  waypoints?: unknown;
 };
 
 function dimState(meta: WorldMeta, dim: Dimension): DimState {
@@ -97,55 +106,55 @@ export class Game {
   meta: WorldMeta | null = null;
   dimension: Dimension = 'overworld';
 
-  private keys = new Set<string>();
-  private mouse = [false, false, false];
+  readonly input: Input;
+  readonly actions: Actions;
+  readonly signs: Signs;
+  readonly chat: Chat;
+  readonly history: EditHistory;
+  readonly waypoints = new Waypoints();
+  readonly map: WorldMap;
+  /** 0 first person, 1 behind, 2 in front. */
+  perspective = 0;
   private acc = 0;
   private last = performance.now();
   private fps = 0;
   private frames = 0;
   private fpsTime = 0;
-  private target: RayHit | null = null;
-  private breakProgress = 0;
-  private breakPos: string | null = null;
-  private breakCooldown = 0;
-  private useCooldown = 0;
-  private eating = 0;
-  private lastSpace = 0;
-  private lastW = 0;
   private stepDist = 0;
   private prevPos: [number, number, number] = [0, 0, 0];
   private titleAngle = 0;
   private debug = false;
-  private hudHidden = false;
+  hudHidden = false;
   readonly touchMode = isTouchDevice();
-  private touch: TouchControls | null = null;
+  touch: TouchControls | null = null;
   private autosave = 0;
   private fovCurrent = 70;
-  private canvas: HTMLCanvasElement;
-  private cmdEl: HTMLElement;
-  private cmdInput: HTMLInputElement;
-  private chatlog: HTMLElement;
+  readonly canvas: HTMLCanvasElement;
   private debugEl: HTMLElement;
   private resumeEl: HTMLElement;
-  /** Set once the mouse has been captured this session (the resume hint only makes sense after that). */
-  private everLocked = false;
-  private cmdOpenedAt = 0;
   private vignette: HTMLElement;
   private waterOverlay: HTMLElement;
-  private fadeEl: HTMLElement;
+  readonly fadeEl: HTMLElement;
   private toastEl: HTMLElement;
+  private saveEl: HTMLElement;
+  private saveFailed = false;
   private toastTimer = 0;
   private loadStart = 0;
-  private bowCharge = 0;
-  private bobber: Bobber | null = null;
   private achEl!: HTMLElement;
   private achQueue: string[] = [];
   private achTimer = 0;
   private lightningEl!: HTMLElement;
   private thunderTimer = 200;
 
-  constructor(private root: HTMLElement, atlas: Atlas) {
+  constructor(readonly root: HTMLElement, atlas: Atlas) {
     this.canvas = root.querySelector('canvas#game')!;
+    this.input = new Input(this);
+    this.actions = new Actions(this);
+    this.signs = new Signs(this);
+    this.history = new EditHistory(this);
+    this.chat = new Chat(this, root);
+    this.map = new WorldMap(this, root);
+    this.map.setAtlas(atlas);
     this.renderer = new Renderer(this.canvas, atlas);
     this.settings = loadSettings();
     if (this.touchMode) {
@@ -158,44 +167,47 @@ export class Game {
     this.hud = new Hud(root);
     if (this.touchMode) {
       this.touch = new TouchControls(root, {
-        mineStart: () => { if (!this.controlling) return; this.mouse[0] = true; this.attack(); },
-        mineEnd: () => { this.mouse[0] = false; this.breakProgress = 0; this.breakPos = null; },
-        useStart: () => { if (!this.controlling) return; this.mouse[2] = true; this.useCooldown = 0; this.use(); },
-        useEnd: () => { this.mouse[2] = false; this.eating = 0; this.releaseBow(); },
-        jumpStart: () => {
-          const now = performance.now();
-          if (this.player.creative && now - this.lastSpace < 300) { this.player.flying = !this.player.flying; this.lastSpace = 0; }
-          else this.lastSpace = now;
-        },
-        inventory: () => { if (this.controlling && this.player.alive) this.containers.show(this.player.creative ? 'creative' : 'player'); },
-        chat: () => this.openCommand('/'),
+        mineStart: () => { if (!this.input.controlling) return; this.input.mouse[0] = true; this.actions.attack(); },
+        mineEnd: () => { this.input.mouse[0] = false; this.actions.breakProgress = 0; this.actions.breakPos = null; },
+        useStart: () => { if (!this.input.controlling) return; this.input.mouse[2] = true; this.actions.useCooldown = 0; this.actions.use(); },
+        useEnd: () => { this.input.mouse[2] = false; this.actions.eating = 0; this.actions.releaseBow(); },
+        jumpStart: () => this.input.jumpPressed(),
+        inventory: () => { if (this.input.controlling && this.player.alive) this.openInventory(); },
+        chat: () => this.chat.open('/'),
         pause: () => { if (this.mode === 'playing') this.menus.show('pause'); },
-        drop: () => this.dropHeld(false),
+        drop: () => this.actions.dropHeld(false),
       });
       this.hud.enableTouch((i) => { this.player.selected = i; });
     }
     this.hud.setVisible(false);
     this.containers = new ContainerScreen(root, this.player);
-    this.containers.onClose = () => this.lockPointer();
-    this.containers.onDrop = (s) => this.throwStack(s);
+    this.containers.onClose = () => this.input.lockPointer();
+    this.containers.onDrop = (s) => this.actions.throwStack(s);
     this.menus = new Menus(root, {
       play: (w) => this.play(w),
       create: (name, seed, gm) => this.createWorld(name, seed, gm),
-      resume: () => { this.menus.show(null); this.lockPointer(); },
+      resume: () => { this.menus.show(null); this.input.lockPointer(); },
       saveAndQuit: () => this.quitToTitle(),
       respawn: () => this.respawn(),
       settingsChanged: (s) => this.applySettings(s),
+      exportCurrent: async () => {
+        if (!this.meta) return;
+        await this.save();
+        try { const { blob, name } = await exportWorld(this.meta.id); download(blob, name); this.toast(`Backup saved as ${name}`, 4); }
+        catch (e) { this.toast(`Couldn’t export: ${(e as Error).message}`); }
+      },
     }, this.settings);
 
-    this.cmdEl = root.querySelector('#cmd')!;
-    this.cmdInput = this.cmdEl.querySelector('input')!;
-    this.chatlog = root.querySelector('#chatlog')!;
     this.debugEl = root.querySelector('#debug')!;
     this.resumeEl = root.querySelector('#resume')!;
     this.vignette = root.querySelector('#vignette')!;
     this.waterOverlay = root.querySelector('#water-overlay')!;
     this.fadeEl = root.querySelector('#fade')!;
     this.toastEl = root.querySelector('#toast')!;
+    this.saveEl = document.createElement('div');
+    this.saveEl.id = 'saving';
+    this.saveEl.textContent = 'Saving…';
+    root.appendChild(this.saveEl);
 
     this.achEl = document.createElement('div');
     this.achEl.id = 'achievement';
@@ -204,7 +216,7 @@ export class Game {
     this.lightningEl.id = 'lightning';
     root.appendChild(this.lightningEl);
     this.applySettings(this.settings);
-    this.bindInput();
+    this.input.bind();
     window.addEventListener('resize', () => this.resize());
     this.resize();
     window.addEventListener('beforeunload', () => { this.save(); });
@@ -215,12 +227,13 @@ export class Game {
   }
 
   // ---------- Setup ----------
-  private applySettings(s: Settings): void {
+  applySettings(s: Settings): void {
     this.renderer.renderDistance = s.renderDistance;
     this.renderer.fancy = s.fancy;
     this.renderer.shadows = s.shadows;
     this.renderer.post = s.post;
     this.renderer.uniforms.uGamma.value = s.brightness;
+    document.documentElement.style.setProperty('--ui', String(s.uiScale));
     setVolume(s.volume);
   }
 
@@ -272,8 +285,9 @@ export class Game {
   }
 
   private disposeWorld(): void {
-    for (const v of this.signMeshes?.values() ?? []) v.mesh.removeFromParent();
-    this.signMeshes?.clear();
+    this.signs.clear();
+    this.history.clear();
+    this.map.clear();
     this.entities?.clear();
     this.entities = null;
     this.world?.dispose();
@@ -311,6 +325,7 @@ export class Game {
     await this.startWorld(meta, (meta as SaveMeta).dimension ?? 'overworld');
     const p = new Player(0.5, 100, 0.5);
     p.creative = meta.gamemode === 'creative';
+    this.waypoints.load((meta as SaveMeta).waypoints);
     if (meta.player) p.load(meta.player);
     else {
       const gen = new WorldGen(meta.seed);
@@ -396,8 +411,8 @@ export class Game {
     this.containers.root.remove();
     const c = new ContainerScreen(this.root, this.player);
     const p = this.player;
-    c.onClose = () => this.lockPointer();
-    c.onDrop = (s) => this.throwStack(s);
+    c.onClose = () => this.input.lockPointer();
+    c.onDrop = (s) => this.actions.throwStack(s);
     c.onSmeltTaken = (s) => {
       const per = s.id === I.iron_ingot || s.id === I.gold_ingot ? 0.7 : s.id === B.glass || s.id === B.stone ? 0.1 : 0.35;
       const xp = Math.floor(per * s.count + Math.random());
@@ -432,7 +447,7 @@ export class Game {
     this.mode = 'playing';
     this.menus.show(null);
     this.hud.setVisible(!this.hudHidden);
-    this.lockPointer();
+    this.input.lockPointer();
   }
 
   async save(): Promise<void> {
@@ -446,8 +461,9 @@ export class Game {
       weather: this.world.weather,
       weatherTimer: this.world.weatherTimer,
       dimension: this.dimension,
+      waypoints: this.waypoints.serialize(),
       dims: {
-        ...(prev.dims ?? {}),
+        ...prev.dims,
         [this.dimension]: {
           blockEntities: this.world.serializeBlockEntities(),
           entities: this.entities?.serialize(),
@@ -460,10 +476,17 @@ export class Game {
     delete (meta as { entities?: unknown }).entities;
     meta.gamemode = this.player.creative ? 'creative' : 'survival';
     this.meta = meta;
+    this.saveEl.classList.add('show');
     try {
       await Promise.all([saveWorldMeta(meta), this.world.saveAll()]);
+      this.saveFailed = false;
     } catch (e) {
       console.warn('Save failed', e);
+      // Say so once (not every autosave), so progress is never lost silently.
+      if (!this.saveFailed) this.toast('Couldn’t save the world: the browser refused storage (private browsing or a full disk?). Export a backup from the pause menu.', 10);
+      this.saveFailed = true;
+    } finally {
+      setTimeout(() => this.saveEl.classList.remove('show'), 600);
     }
   }
 
@@ -513,782 +536,9 @@ export class Game {
     return listWorlds();
   }
 
-  // ---------- Input ----------
-  private lockPointer(): void {
-    if (this.touchMode) return;
-    if (this.mode !== 'playing' || this.containers.open || this.menus.current || this.cmdEl.classList.contains('show')) return;
-    const p = this.canvas.requestPointerLock?.() as unknown as Promise<void> | undefined;
-    if (p && typeof p.catch === 'function') p.catch(() => {});
-  }
-
-  private get locked(): boolean {
-    return document.pointerLockElement === this.canvas;
-  }
-
-  /** The player is steering the game: pointer locked on desktop, or no menu open on a touch screen. */
-  private get controlling(): boolean {
-    if (this.locked) return true;
-    return this.touchMode && this.mode === 'playing' && !this.containers.open && !this.menus.current && !this.cmdEl.classList.contains('show');
-  }
-
-  private bindInput(): void {
-    this.canvas.addEventListener('click', () => {
-      initAudio();
-      // Clicking back into the world closes an open chat bar (but not the delayed click that
-      // follows the tap which opened it on a touch screen).
-      if (this.cmdEl.classList.contains('show')) { if (performance.now() - this.cmdOpenedAt > 400) this.closeCommand(); }
-      else this.lockPointer();
-    });
-    this.cmdEl.querySelector('.close-x')!.addEventListener('click', () => this.closeCommand());
-    document.addEventListener('pointerlockchange', () => {
-      if (this.locked) this.everLocked = true;
-      if (!this.locked && this.mode === 'playing' && !this.containers.open && !this.menus.current && !this.cmdEl.classList.contains('show') && this.player.alive) {
-        this.menus.show('pause');
-      }
-      if (!this.locked) { this.mouse = [false, false, false]; this.keys.clear(); }
-    });
-    document.addEventListener('mousemove', (e) => {
-      if (!this.locked) return;
-      const s = 0.0022 * this.settings.sensitivity;
-      this.player.yaw -= e.movementX * s;
-      this.player.pitch -= e.movementY * s * (this.settings.invertY ? -1 : 1);
-      this.player.pitch = Math.max(-Math.PI / 2 + 0.001, Math.min(Math.PI / 2 - 0.001, this.player.pitch));
-    });
-    document.addEventListener('mousedown', (e) => {
-      if (!this.locked) return;
-      this.mouse[e.button] = true;
-      if (e.button === 0) this.attack();
-      if (e.button === 2) { this.useCooldown = 0; this.use(); }
-      if (e.button === 1) this.pickBlock();
-    });
-    document.addEventListener('mouseup', (e) => {
-      this.mouse[e.button] = false;
-      if (e.button === 0) { this.breakProgress = 0; this.breakPos = null; }
-      if (e.button === 2) { this.eating = 0; this.releaseBow(); }
-    });
-    document.addEventListener('contextmenu', (e) => e.preventDefault());
-    document.addEventListener('wheel', (e) => {
-      if (!this.locked) return;
-      const d = Math.sign(e.deltaY);
-      this.player.selected = (this.player.selected + d + 9) % 9;
-    }, { passive: true });
-    document.addEventListener('keydown', (e) => this.keyDown(e));
-    document.addEventListener('keyup', (e) => this.keys.delete(e.code));
-    this.cmdInput.addEventListener('keydown', (e) => {
-      e.stopPropagation();
-      if (e.key === 'Enter') {
-        const v = this.cmdInput.value.trim();
-        this.closeCommand();
-        if (v) this.runCommand(v);
-      } else if (e.key === 'Escape') {
-        this.closeCommand();
-      }
-    });
-  }
-
-  private keyDown(e: KeyboardEvent): void {
-    if (this.mode !== 'playing') return;
-    const code = e.code;
-    // The chat bar is open but its text box lost focus (you clicked elsewhere): Escape still
-    // closes it, and typing goes back into it.
-    if (this.cmdEl.classList.contains('show')) {
-      if (code === 'Escape') { e.preventDefault(); this.closeCommand(); }
-      else if (!e.ctrlKey && !e.metaKey && !e.altKey) this.cmdInput.focus();
-      return;
-    }
-    if (['F1', 'F3', 'Tab'].includes(code)) e.preventDefault();
-    if (this.containers.open) {
-      if (code === 'KeyE' || code === 'Escape') { e.preventDefault(); this.containers.close(); }
-      else if (code.startsWith('Digit')) { const n = Number(code.slice(5)) - 1; if (n >= 0 && n < 9) this.containers.hotkey(n); }
-      return;
-    }
-    if (this.menus.current) {
-      if (code === 'Escape' && this.menus.current === 'pause') { this.menus.show(null); this.lockPointer(); }
-      return;
-    }
-    if (code === 'Slash' || code === 'KeyT') {
-      e.preventDefault();
-      this.openCommand(code === 'Slash' ? '/' : '');
-      return;
-    }
-    // Any key other than Escape counts as a gesture, so it can take the mouse back after a screen
-    // was closed with Escape.
-    if (!this.controlling && code !== 'Escape') this.lockPointer();
-    if (!this.controlling) return;
-    this.keys.add(code);
-    if (code === 'Space') {
-      const now = performance.now();
-      if (this.player.creative && now - this.lastSpace < 300) {
-        this.player.flying = !this.player.flying;
-        this.lastSpace = 0;
-      } else this.lastSpace = now;
-    }
-    if (code === 'KeyW' && !e.repeat) {
-      const now = performance.now();
-      if (now - this.lastW < 280) this.player.sprinting = true;
-      this.lastW = now;
-    }
-    if (code.startsWith('Digit')) {
-      const n = Number(code.slice(5)) - 1;
-      if (n >= 0 && n < 9) this.player.selected = n;
-    }
-    if (code === 'KeyE' && this.player.alive) {
-      document.exitPointerLock();
-      this.containers.show(this.player.creative ? 'creative' : 'player');
-    }
-    if (code === 'KeyQ') this.dropHeld(e.ctrlKey || e.metaKey);
-    if (code === 'F3') { this.debug = !this.debug; this.debugEl.classList.toggle('show', this.debug); }
-    if (code === 'F1') { this.hudHidden = !this.hudHidden; this.hud.setVisible(!this.hudHidden); }
-  }
-
-  private openCommand(prefix: string): void {
-    this.cmdOpenedAt = performance.now();
-    document.exitPointerLock();
-    this.cmdEl.classList.add('show');
-    this.cmdInput.value = prefix;
-    setTimeout(() => this.cmdInput.focus(), 0);
-  }
-
-  private closeCommand(): void {
-    this.cmdEl.classList.remove('show');
-    this.cmdInput.blur();
-    this.lockPointer();
-  }
-
-  private say(text: string): void {
-    const d = document.createElement('div');
-    d.textContent = text;
-    this.chatlog.appendChild(d);
-    setTimeout(() => d.remove(), 8000);
-    while (this.chatlog.childElementCount > 8) this.chatlog.firstElementChild!.remove();
-  }
-
   toast(text: string, seconds = 5): void {
     this.toastEl.textContent = text;
     this.toastTimer = seconds;
-  }
-
-  runCommand(line: string): void {
-    const parts = line.replace(/^\//, '').split(/\s+/);
-    const cmd = parts[0]?.toLowerCase();
-    const p = this.player, w = this.world!;
-    const findItem = (name: string) => ITEMS.find((it) => it && (it.key === name || it.name.toLowerCase() === name.replace(/_/g, ' ')));
-    switch (cmd) {
-      case 'help':
-        this.say('Commands: /gamemode survival|creative, /time set day|night|<ticks>, /weather clear|rain|thunder, /give <item> [count], /xp <n>, /tp <x> <y> <z>, /spawn <mob>, /speed <n>, /locate village, /dimension overworld|ember, /seed, /kill');
-        break;
-      case 'gamemode': case 'gm': {
-        const m = parts[1]?.toLowerCase();
-        if (m === 'creative' || m === 'c' || m === '1') { p.creative = true; this.say('Game mode set to Creative'); }
-        else if (m === 'survival' || m === 's' || m === '0') { p.creative = false; p.flying = false; this.say('Game mode set to Survival'); }
-        else this.say('Usage: /gamemode survival|creative');
-        break;
-      }
-      case 'time': {
-        const v = parts[2]?.toLowerCase();
-        const t = v === 'day' ? 1000 : v === 'noon' ? 6000 : v === 'sunset' ? 12000 : v === 'night' ? 13000 : v === 'midnight' ? 18000 : Number(v);
-        if (parts[1] === 'set' && Number.isFinite(t)) { w.time = ((t % 24000) + 24000) % 24000; this.say(`Time set to ${w.time}`); }
-        else this.say('Usage: /time set day|noon|sunset|night|midnight|<ticks>');
-        break;
-      }
-      case 'give': {
-        const it = findItem((parts[1] ?? '').toLowerCase());
-        if (!it) { this.say(`No item called "${parts[1] ?? ''}"`); break; }
-        const n = Math.max(1, Math.min(2304, Number(parts[2]) || 1));
-        let left = n;
-        while (left > 0) {
-          const c = Math.min(left, maxStack(it.id));
-          const rest = p.inv.add({ id: it.id, count: c });
-          if (rest) this.throwStack(rest);
-          left -= c;
-        }
-        this.say(`Gave ${n} × ${it.name}`);
-        break;
-      }
-      case 'tp': {
-        const [x, y, z] = parts.slice(1, 4).map(Number);
-        if ([x, y, z].every(Number.isFinite)) { p.body.pos = [x, y, z]; p.body.vel = [0, 0, 0]; this.say(`Teleported to ${x}, ${y}, ${z}`); }
-        else this.say('Usage: /tp <x> <y> <z>');
-        break;
-      }
-      case 'spawn': case 'summon': {
-        const kind = parts[1]?.toLowerCase();
-        if (!kind || !MOBS[kind]) { this.say(`Mobs: ${Object.keys(MOBS).join(', ')}`); break; }
-        const d = p.lookDir();
-        this.entities!.spawnMob(kind, p.body.pos[0] + d[0] * 3, p.body.pos[1] + 0.5, p.body.pos[2] + d[2] * 3);
-        break;
-      }
-      case 'seed': this.say(`Seed: ${this.meta?.seedText ?? w.seed}`); break;
-      case 'speed': {
-        const v = parts[1] === undefined ? NaN : Number(parts[1]);
-        if (!Number.isFinite(v) || v < 0.1 || v > 20) { this.say(`Usage: /speed <0.1-20> (now ${p.speed}x). /speed 1 resets it.`); break; }
-        p.speed = v;
-        this.say(`Speed set to ${v}x`);
-        break;
-      }
-      case 'weather': {
-        const v = parts[1]?.toLowerCase();
-        if (v === 'clear' || v === 'rain' || v === 'thunder') { w.weather = v; w.weatherTimer = 12000 + Math.floor(Math.random() * 12000); this.say(`Weather set to ${v}`); }
-        else this.say('Usage: /weather clear|rain|thunder');
-        break;
-      }
-      case 'locate': {
-        if (parts[1] !== 'village') { this.say('Usage: /locate village'); break; }
-        if (w.dimension !== 'overworld') { this.say('There are no villages down here.'); break; }
-        const v = nearestVillage(new WorldGen(w.seed), p.body.pos[0], p.body.pos[2]);
-        this.say(v ? `Nearest village is at ${v.cx}, ${v.cz} (${Math.round(Math.hypot(v.cx - p.body.pos[0], v.cz - p.body.pos[2]))} blocks away)` : 'No village found nearby.');
-        break;
-      }
-      case 'dimension': {
-        const d = parts[1];
-        if (d === 'ember' || d === 'overworld') { if (d !== w.dimension) this.travel(d); }
-        else this.say('Usage: /dimension overworld|ember');
-        break;
-      }
-      case 'xp': {
-        const n = Number(parts[1]);
-        if (Number.isFinite(n)) { p.addXp(n); this.say(`Gave ${n} experience`); } else this.say('Usage: /xp <amount>');
-        break;
-      }
-      case 'kill': p.creative = false; p.invulnerable = 0; p.damage(1000, 'command'); break;
-      default: this.say(`Unknown command "${cmd}". Type /help for a list.`);
-    }
-  }
-
-  // ---------- Actions ----------
-  private reach(): number {
-    return this.player.creative ? 5 : 4.5;
-  }
-
-  private attack(): void {
-    if (!this.world || !this.entities || !this.player.alive) return;
-    this.renderer.swingHand();
-    const p = this.player;
-    const eye = p.eye(), dir = p.lookDir();
-    const mobHit = this.entities.raycastMob(eye, dir, 3);
-    const blockDist = this.target ? this.target.dist : Infinity;
-    if (mobHit && mobHit.dist < blockDist) {
-      const held = p.held;
-      const tool = held ? itemDef(held.id)?.tool : undefined;
-      let dmg = tool && held?.id !== I.bow && held?.id !== I.shears && held?.id !== I.fishing_rod ? tool.damage : 1;
-      const sharp = enchLevel(held, 'sharpness');
-      if (sharp) dmg += 0.5 * sharp + 0.5;
-      const crit = p.body.vel[1] < -0.1 && !p.body.onGround && !p.body.inWater;
-      if (crit) dmg *= 1.5;
-      mobHit.mob.hurt(this.entities, dmg, p.body.pos, p.sprinting ? 0.7 : 0.4, true);
-      if (p.sprinting) p.sprinting = false;
-      p.addExhaustion(0.1);
-      if (tool) this.damageTool(tool.kind === 'sword' ? 1 : 2);
-    }
-  }
-
-  private damageTool(n: number): void {
-    const p = this.player;
-    const held = p.held;
-    if (!held || p.creative) return;
-    const tool = itemDef(held.id)?.tool;
-    if (!tool) return;
-    const unb = enchLevel(held, 'unbreaking');
-    if (unb && Math.random() > 1 / (unb + 1)) return;
-    held.damage = (held.damage ?? 0) + n;
-    if (held.damage >= tool.durability) {
-      p.inv.slots[p.selected] = null;
-      sfx.breakBlock('wood');
-    }
-  }
-
-  private canHarvest(blockId: number): boolean {
-    const d = BLOCKS[blockId];
-    if (d.harvestTier < 0) return true;
-    const tool = this.player.held ? itemDef(this.player.held.id)?.tool : undefined;
-    return !!tool && tool.kind === d.tool && tool.tier >= d.harvestTier;
-  }
-
-  private breakSpeed(blockId: number): number {
-    const d = BLOCKS[blockId];
-    if (d.hardness < 0) return 0;
-    if (d.hardness === 0) return Infinity;
-    const tool = this.player.held ? itemDef(this.player.held.id)?.tool : undefined;
-    let speed = tool && tool.kind === d.tool ? tool.speed : 1;
-    if (tool?.kind === 'sword' && isLeaves(blockId)) speed = 1.5;
-    if (this.player.held?.id === I.shears && (isLeaves(blockId) || blockId === B.wool)) speed = isLeaves(blockId) ? 15 : 5;
-    const eff = enchLevel(this.player.held, 'efficiency');
-    if (eff && speed > 1) speed += eff * eff + 1;
-    if (this.player.body.eyeInWater) speed /= 5;
-    if (!this.player.body.onGround && !this.player.flying) speed /= 5;
-    return speed / d.hardness / (this.canHarvest(blockId) ? 30 : 100);
-  }
-
-  private tickBreaking(): void {
-    const w = this.world!, p = this.player;
-    if (this.breakCooldown > 0) this.breakCooldown--;
-    if (!this.mouse[0] || !this.target || !p.alive) { this.breakProgress = 0; this.breakPos = null; this.renderer.setCrack(null, 0); return; }
-    const t = this.target;
-    const key = t.pos.join(',');
-    if (this.breakPos !== key) { this.breakPos = key; this.breakProgress = 0; }
-    if (this.breakCooldown > 0) return;
-    const id = w.getBlock(t.pos[0], t.pos[1], t.pos[2]);
-    if (id === 0) return;
-    if (p.creative) {
-      const held = p.held ? itemDef(p.held.id)?.tool : undefined;
-      if (held?.kind === 'sword') return;
-      this.finishBreak(t.pos, id, false);
-      this.breakCooldown = 6;
-      return;
-    }
-    const rate = this.breakSpeed(id);
-    if (rate === 0) return;
-    this.breakProgress += rate;
-    if (w.tickCount % 4 === 0) { sfx.dig(BLOCKS[id].sound); this.renderer.swingHand(); this.entities!.digParticles(t.pos[0], t.pos[1], t.pos[2], id, t.normal); }
-    if (this.breakProgress >= 1) {
-      this.finishBreak(t.pos, id, this.canHarvest(id));
-      this.breakProgress = 0;
-      this.breakCooldown = 5;
-      p.addExhaustion(0.005);
-      if (BLOCKS[id].hardness > 0) this.damageTool(itemDef(p.held?.id ?? 0)?.tool?.kind === 'sword' ? 2 : 1);
-    }
-    this.renderer.setCrack(t.pos, this.breakProgress);
-  }
-
-  private finishBreak(pos: [number, number, number], id: number, drop: boolean): void {
-    const w = this.world!, p = this.player;
-    const shears = p.held?.id === I.shears;
-    if (drop && shears && (isLeaves(id) || id === B.tall_grass)) {
-      // Shears collect the block itself.
-      w.setBlock(pos[0], pos[1], pos[2], 0);
-      this.entities!.dropItem(pos[0] + 0.5, pos[1] + 0.5, pos[2] + 0.5, { id, count: 1 });
-      this.entities!.blockBreakParticles(pos[0], pos[1], pos[2], id, 12);
-      sfx.breakBlock(BLOCKS[id].sound);
-      this.damageTool(1);
-    } else {
-      w.breakBlock(pos[0], pos[1], pos[2], drop);
-    }
-    this.renderer.setCrack(null, 0);
-    if (drop && !p.creative) {
-      const xp = id === B.coal_ore ? Math.floor(Math.random() * 3) : id === B.diamond_ore ? 3 + Math.floor(Math.random() * 5) : 0;
-      if (xp) this.entities!.dropXp(pos[0] + 0.5, pos[1] + 0.5, pos[2] + 0.5, xp);
-      if (isLog(id)) p.achieve('wood');
-      if (id === B.diamond_ore) p.achieve('diamond');
-    }
-  }
-
-  private use(): void {
-    const w = this.world, p = this.player;
-    if (!w || !this.entities || !p.alive) return;
-    const held = p.held;
-    const def = held ? itemDef(held.id) : undefined;
-    const eye = p.eye(), dir = p.lookDir();
-    const hit = raycast(w, eye, dir, this.reach(), held?.id === I.bucket);
-    const sneaking = p.sneaking;
-    const consume = () => { if (!p.creative && held) { held.count--; if (held.count <= 0) p.inv.slots[p.selected] = null; } };
-
-    // Animals: feeding, breeding and shearing.
-    const mobHit = this.entities.raycastMob(eye, dir, 3.5);
-    if (mobHit && (!hit || mobHit.dist < hit.dist)) {
-      const res = mobHit.mob.interact(this.entities, held);
-      if (res === 'fed') { consume(); this.renderer.swingHand(); return; }
-      if (res === 'sheared') { this.damageTool(1); this.renderer.swingHand(); return; }
-      if (res === 'trade') {
-        const v = mobHit.mob;
-        v.yaw = Math.atan2(-(p.body.pos[0] - v.body.pos[0]), -(p.body.pos[2] - v.body.pos[2]));
-        document.exitPointerLock();
-        this.containers.show('trade', { villager: v });
-        sfx.mobSay(v.spec.pitch, { gain: 1, pan: 0 });
-        return;
-      }
-    }
-    if ((def?.use === 'ignite' || def?.use === 'firecharge') && hit && held) {
-      const [x, y, z] = hit.pos;
-      const tx = x + hit.normal[0], ty = y + hit.normal[1], tz = z + hit.normal[2];
-      let did = false;
-      if (hit.id === B.tnt) { w.setBlock(x, y, z, 0); this.entities.add(new TntEntity(x, y, z, this.renderer)); sfx.fuse(spatial(eye[0], eye[1], eye[2], p.yaw, x, y, z)); did = true; }
-      else if (hit.id === B.obsidian && w.tryLightPortal(tx, ty, tz)) { sfx.fizz(); did = true; p.achieve('gate'); }
-      else if (w.getBlock(tx, ty, tz) === 0 && SOLID[hit.id]) { w.setBlock(tx, ty, tz, B.fire); sfx.fizz({ gain: 0.4, pan: 0 }); did = true; }
-      if (did) { if (def.use === 'ignite') this.damageTool(1); else consume(); this.renderer.swingHand(); }
-      return;
-    }
-    if (def?.use === 'bow') { this.bowCharge = 1; return; }
-    if (def?.use === 'rod') { this.castOrReel(); return; }
-    if (def?.use === 'throw' && held) {
-      this.entities.shoot(held.id === I.snowball ? 'snowball' : 'egg', 'player', eye, dir, 1.5, 0.02);
-      consume();
-      this.renderer.swingHand();
-      return;
-    }
-
-    if (hit && !sneaking) {
-      const [x, y, z] = hit.pos;
-      const id = hit.id;
-      if (id === B.fence_gate) {
-        const m = w.getMeta(x, y, z);
-        // Open away from the player.
-        w.setMeta(x, y, z, m ^ 4);
-        sfx.door((m & 4) === 0);
-        this.renderer.swingHand();
-        return;
-      }
-      if (id === B.enchanting_table) {
-        let shelves = 0;
-        for (let dx = -2; dx <= 2; dx++) for (let dz = -2; dz <= 2; dz++) for (let dy = 0; dy <= 1; dy++) {
-          if ((Math.abs(dx) === 2 || Math.abs(dz) === 2) && w.getBlock(x + dx, y + dy, z + dz) === B.bookshelf) shelves++;
-        }
-        document.exitPointerLock();
-        this.containers.show('enchant', { bookshelves: shelves });
-        return;
-      }
-      if (id === B.crafting_table) { this.openScreen('crafting'); return; }
-      if (id === B.furnace || id === B.furnace_lit) { const be = w.getBlockEntity(x, y, z); if (be?.kind === 'furnace') { document.exitPointerLock(); this.containers.show('furnace', { furnace: be }); } return; }
-      if (id === B.chest) { const be = w.getBlockEntity(x, y, z); if (be?.kind === 'chest') { document.exitPointerLock(); this.containers.show('chest', { chest: be.inv }); } return; }
-      if (id === B.door) {
-        const m = w.getMeta(x, y, z);
-        const by = m & 8 ? y - 1 : y;
-        for (const yy of [by, by + 1]) if (w.getBlock(x, yy, z) === B.door) w.setMeta(x, yy, z, w.getMeta(x, yy, z) ^ 4);
-        sfx.door(((m >> 2) & 1) === 0);
-        this.renderer.swingHand();
-        return;
-      }
-      if (id === B.bed) { this.sleep(x, y, z); return; }
-      if (id === B.lever) { w.toggleLever(x, y, z); sfx.click(); return; }
-      if (id === B.button) { w.pressButton(x, y, z); sfx.click(); return; }
-      if (id === B.bell) { sfx.levelUp(); this.renderer.swingHand(); return; }
-      if (id === B.trapdoor) {
-        const m = w.getMeta(x, y, z);
-        w.setMeta(x, y, z, m ^ 4);
-        sfx.door((m & 4) === 0);
-        this.renderer.swingHand();
-        return;
-      }
-      if (id === B.cake) {
-        if (p.food >= 20 && !p.creative) return;
-        const m = w.getMeta(x, y, z);
-        p.food = Math.min(20, p.food + 2);
-        p.saturation = Math.min(p.food, p.saturation + 0.4);
-        sfx.eat();
-        if (m >= 6) w.setBlock(x, y, z, 0); else w.setMeta(x, y, z, m + 1);
-        return;
-      }
-      if (id === B.sign) { this.editSign(x, y, z); return; }
-    }
-
-    if (!held || !def) return;
-    // Food.
-    if (def.food && (p.food < 20 || p.creative)) {
-      this.eating = 1;
-      return;
-    }
-    // Buckets.
-    if (held.id === I.bucket) {
-      if (hit && BLOCKS[hit.id].fluid && (w.getMeta(...hit.pos) & 15) === 0) {
-        const filled = hit.id === B.water ? I.water_bucket : I.lava_bucket;
-        w.setBlock(hit.pos[0], hit.pos[1], hit.pos[2], 0);
-        sfx.splash();
-        if (!p.creative) {
-          if (held.count === 1) p.inv.slots[p.selected] = { id: filled, count: 1 };
-          else { held.count--; const left = p.inv.add({ id: filled, count: 1 }); if (left) this.throwStack(left); }
-        }
-      }
-      return;
-    }
-    if (def.armor && !hit) {
-      const slot = def.armor.slot;
-      const prev = p.armor.slots[slot];
-      p.armor.slots[slot] = held;
-      p.inv.slots[p.selected] = prev;
-      sfx.place('wool');
-      if (held.id >= 358 && held.id <= 361) p.achieve('armor');
-      return;
-    }
-    if (held.id === B.lily_pad) {
-      const wh = raycast(w, eye, dir, this.reach(), true);
-      if (wh && wh.id === B.water && w.getBlock(wh.pos[0], wh.pos[1] + 1, wh.pos[2]) === 0) {
-        w.setBlock(wh.pos[0], wh.pos[1] + 1, wh.pos[2], B.lily_pad);
-        sfx.place('grass'); consume(); this.renderer.swingHand();
-      }
-      return;
-    }
-    if (!hit) return;
-    if (held.id === I.water_bucket || held.id === I.lava_bucket) {
-      const t = this.placeTarget(hit);
-      if (!t) return;
-      if (held.id === I.water_bucket && w.dimension === 'ember') {
-        sfx.fizz();
-        for (let i = 0; i < 8; i++) this.entities.puff(t[0] + 0.5, t[1] + 0.5, t[2] + 0.5);
-        if (!p.creative) p.inv.slots[p.selected] = { id: I.bucket, count: 1 };
-        return;
-      }
-      w.setBlock(t[0], t[1], t[2], held.id === I.water_bucket ? B.water : B.lava, 0);
-      sfx.splash();
-      if (!p.creative) p.inv.slots[p.selected] = { id: I.bucket, count: 1 };
-      this.renderer.swingHand();
-      return;
-    }
-    if (def.use === 'bonemeal') {
-      if (w.boneMeal(hit.pos[0], hit.pos[1], hit.pos[2])) {
-        consume();
-        for (let i = 0; i < 8; i++) this.entities.heart(hit.pos[0] + 0.5, hit.pos[1] + 0.8, hit.pos[2] + 0.5);
-        this.renderer.swingHand();
-      }
-      return;
-    }
-    // Armor: right-click to wear.
-    if (def.armor) {
-      const slot = def.armor.slot;
-      const prev = p.armor.slots[slot];
-      p.armor.slots[slot] = held;
-      p.inv.slots[p.selected] = prev;
-      sfx.place('wool');
-      if (held.id >= 358 && held.id <= 361) p.achieve('armor');
-      return;
-    }
-    // Dye recolours white wool.
-    if (def.use === 'dye' && def.dye) {
-      const [x, y, z] = hit.pos;
-      if (hit.id === B.wool || hit.id === B.carpet) { w.setBlock(x, y, z, hit.id === B.carpet ? B.carpet : B[def.dye]); consume(); this.renderer.swingHand(); }
-      return;
-    }
-    // Shovel on grass makes a path.
-    if (def.tool?.kind === 'shovel' && hit.id === B.grass && hit.normal[1] === 1 && w.getBlock(hit.pos[0], hit.pos[1] + 1, hit.pos[2]) === 0) {
-      w.setBlock(hit.pos[0], hit.pos[1], hit.pos[2], B.dirt_path);
-      sfx.place('gravel');
-      this.damageTool(1);
-      this.renderer.swingHand();
-      return;
-    }
-    // Hoe: till grass/dirt.
-    if (def.tool?.kind === 'hoe' && !def.use) {
-      const [x, y, z] = hit.pos;
-      if ((hit.id === B.grass || hit.id === B.dirt) && w.getBlock(x, y + 1, z) === 0 && hit.normal[1] !== -1) {
-        w.setBlock(x, y, z, B.farmland);
-        sfx.place('gravel');
-        this.damageTool(1);
-        this.renderer.swingHand();
-      }
-      return;
-    }
-    // Placing blocks (or items that place a block).
-    const blockId = def.places ?? (held.id < 256 ? held.id : -1);
-    if (blockId < 0) return;
-    this.placeBlock(hit, blockId, consume);
-  }
-
-  private placeTarget(hit: RayHit): [number, number, number] | null {
-    const w = this.world!;
-    const inPlace = BLOCKS[hit.id].replaceable && hit.id !== 0;
-    const t: [number, number, number] = inPlace ? [...hit.pos] : [hit.pos[0] + hit.normal[0], hit.pos[1] + hit.normal[1], hit.pos[2] + hit.normal[2]];
-    const cur = w.getBlock(t[0], t[1], t[2]);
-    if (!BLOCKS[cur].replaceable || t[1] < 0 || t[1] > 255 || !w.isLoaded(t[0], t[2])) return null;
-    return t;
-  }
-
-  private placeBlock(hit: RayHit, blockId: number, consume: () => void): void {
-    const w = this.world!, p = this.player;
-    const d = BLOCKS[blockId];
-    // Slab on slab makes a full block.
-    if ((blockId === B.cobble_slab || blockId === B.plank_slab) && hit.id === blockId && hit.normal[1] === 1) {
-      w.setBlock(hit.pos[0], hit.pos[1], hit.pos[2], blockId === B.cobble_slab ? B.cobblestone : B.planks);
-      sfx.place(d.sound); consume(); this.renderer.swingHand();
-      return;
-    }
-    const t = this.placeTarget(hit);
-    if (!t) return;
-    const [x, y, z] = t;
-    const q = p.quadrant();
-    let meta = 0;
-    const n = hit.normal;
-    if (d.shape === 'torch') {
-      if (n[1] === -1) return;
-      meta = n[1] === 1 ? 0 : n[2] === 1 ? 1 : n[2] === -1 ? 2 : n[0] === 1 ? 3 : 4;
-    } else if (d.shape === 'ladder') {
-      if (n[1] !== 0) return;
-      meta = n[2] === 1 ? 0 : n[2] === -1 ? 2 : n[0] === 1 ? 3 : 1;
-    } else if (blockId === B.furnace || blockId === B.chest || blockId === B.crafting_table || blockId === B.pumpkin) {
-      meta = [0, 3, 2, 1][q];
-    } else if (isLeaves(blockId)) {
-      meta = 1; // player-placed leaves never decay
-    } else if (BLOCKS[blockId].shape === 'stairs') {
-      const upper = n[1] === -1 || (n[1] === 0 && hit.point[1] - Math.floor(hit.point[1]) > 0.5);
-      meta = q | (upper ? 4 : 0);
-    } else if (isLog(blockId) || blockId === B.basalt || blockId === B.hay_bale) {
-      meta = n[0] !== 0 ? 1 : n[2] !== 0 ? 2 : 0; // lie along the axis of the face you clicked
-    } else if (blockId === B.fence_gate) {
-      meta = q === 0 || q === 2 ? 0 : 1;
-    } else if (blockId === B.trapdoor) {
-      const upper = n[1] === -1 || (n[1] === 0 && hit.point[1] - Math.floor(hit.point[1]) > 0.5);
-      meta = [2, 3, 0, 1][q] | (upper ? 8 : 0);
-    } else if (blockId === B.lantern) {
-      meta = n[1] === -1 ? 1 : 0;
-    } else if (blockId === B.button) {
-      meta = n[1] === 1 ? 0 : n[2] === 1 ? 1 : n[2] === -1 ? 2 : n[0] === 1 ? 3 : n[0] === -1 ? 4 : 0;
-      if (n[1] === -1) return;
-    } else if (blockId === B.sign) {
-      if (n[1] === -1) return;
-      meta = n[1] === 1 ? [0, 3, 2, 1][q] : (n[2] === 1 ? 0 : n[2] === -1 ? 2 : n[0] === 1 ? 3 : 1) | 4;
-    }
-    // Keep solid blocks out of entities.
-    if (SOLID[blockId]) {
-      const box = selectionBox(blockId, meta) ?? { min: [0, 0, 0], max: [1, 1, 1] };
-      const bodies = [p.body, ...this.entities!.mobs().map((m) => m.body)];
-      for (const b of bodies) {
-        const a = b.aabb();
-        if (a.max[0] > x + box.min[0] && a.min[0] < x + box.max[0] && a.max[1] > y + box.min[1] && a.min[1] < y + box.max[1] && a.max[2] > z + box.min[2] && a.min[2] < z + box.max[2]) return;
-      }
-    }
-    if (blockId === B.door) {
-      if (!BLOCKS[w.getBlock(x, y + 1, z)].replaceable) return;
-      const dm = [0, 3, 2, 1][q];
-      w.setBlock(x, y + 1, z, B.door, dm | 8);
-      w.setBlock(x, y, z, B.door, dm);
-      if (!w.canStay(x, y, z, B.door, dm)) { w.setBlock(x, y, z, 0); w.setBlock(x, y + 1, z, 0); return; }
-    } else if (blockId === B.bed) {
-      const f = [2, 1, 0, 3][q];
-      const [dx, dz] = [[0, 1], [-1, 0], [0, -1], [1, 0]][f];
-      const hx = x + dx, hz = z + dz;
-      if (!BLOCKS[w.getBlock(hx, y, hz)].replaceable || !SOLID[w.getBlock(hx, y - 1, hz)] || !SOLID[w.getBlock(x, y - 1, z)]) return;
-      w.setBlock(x, y, z, B.bed, f);
-      w.setBlock(hx, y, hz, B.bed, f | 8);
-    } else {
-      if (!w.canStay(x, y, z, blockId, meta)) {
-        // canStay reads the world, so check support with a temporary write.
-        const prev = w.getBlock(x, y, z);
-        if (prev !== 0 && !BLOCKS[prev].replaceable) return;
-        if (!this.supportOk(x, y, z, blockId, meta)) return;
-      }
-      w.setBlock(x, y, z, blockId, meta);
-      if (blockId === B.sapling && p.creative && this.keys.has('ControlLeft')) w.growTree(x, y, z);
-      if (blockId === B.sign) setTimeout(() => this.editSign(x, y, z), 0);
-    }
-    sfx.place(d.sound);
-    consume();
-    this.renderer.swingHand();
-  }
-
-  private supportOk(x: number, y: number, z: number, id: number, meta: number): boolean {
-    return this.world!.canStay(x, y, z, id, meta);
-  }
-
-  private sleep(x: number, y: number, z: number): void {
-    const w = this.world!;
-    if (w.dimension === 'ember') {
-      // Beds don't work down here.
-      w.setBlock(x, y, z, 0);
-      this.entities!.explode(x + 0.5, y + 0.5, z + 0.5, 5, true);
-      return;
-    }
-    if (w.time < 12541 || w.time > 23458) { this.toast('You can only sleep at night.'); return; }
-    const monsters = this.entities!.mobs().some((m) => m.spec.hostile && Math.hypot(m.body.pos[0] - x, m.body.pos[1] - y, m.body.pos[2] - z) < 8);
-    if (monsters) { this.toast('You may not rest now. There are monsters nearby.'); return; }
-    this.player.spawn = [x + 0.5, y + 0.6, z + 0.5];
-    this.player.achieve('sleep');
-    this.fadeEl.style.opacity = '1';
-    setTimeout(() => {
-      w.time = 0;
-      if (w.weather !== 'clear') { w.weather = 'clear'; w.weatherTimer = 12000 + Math.floor(Math.random() * 100000); }
-      this.fadeEl.style.opacity = '0';
-      this.toast('Respawn point set.');
-    }, 1200);
-  }
-
-  private signMeshes = new Map<string, { mesh: THREE.Mesh; text: string }>();
-  private signEditor: HTMLElement | null = null;
-
-  /** Open the text editor for a sign. */
-  editSign(x: number, y: number, z: number): void {
-    const w = this.world;
-    if (!w || w.getBlock(x, y, z) !== B.sign) return;
-    const be = w.getBlockEntity(x, y, z);
-    if (!be || be.kind !== 'sign') return;
-    document.exitPointerLock();
-    if (!this.signEditor) {
-      const el = document.createElement('div');
-      el.className = 'screen dim';
-      el.id = 'sign-editor';
-      el.innerHTML = `<div class="panel title-menu stack"><h2>Edit sign</h2>${[0, 1, 2, 3].map((i) => `<input class="field" maxlength="18" aria-label="Line ${i + 1}" data-line="${i}">`).join('')}<button class="btn primary" type="button">Done</button></div>`;
-      el.querySelectorAll('input').forEach((inp) => inp.addEventListener('keydown', (e) => { e.stopPropagation(); if (e.key === 'Enter') (el.querySelector('button') as HTMLButtonElement).click(); }));
-      this.root.appendChild(el);
-      this.signEditor = el;
-    }
-    const el = this.signEditor;
-    const inputs = [...el.querySelectorAll('input')] as HTMLInputElement[];
-    inputs.forEach((inp, i) => { inp.value = be.lines[i] ?? ''; });
-    const done = el.querySelector('button') as HTMLButtonElement;
-    done.onclick = () => {
-      be.lines = inputs.map((i) => i.value.slice(0, 18));
-      const c = w.getChunk(x >> 4, z >> 4);
-      if (c) c.modified = true;
-      el.classList.remove('show');
-      this.menus.current = null;
-      this.lockPointer();
-    };
-    el.classList.add('show');
-    this.menus.current = 'sign';
-    setTimeout(() => inputs[0].focus(), 0);
-  }
-
-  /** Keep sign text meshes in step with sign block entities in loaded chunks. */
-  private syncSigns(): void {
-    const w = this.world;
-    if (!w) return;
-    const seen = new Set<string>();
-    for (const [key, be] of w.blockEntities) {
-      if (be.kind !== 'sign') continue;
-      const [x, y, z] = key.split(',').map(Number);
-      if (!w.isLoaded(x, z) || w.getBlock(x, y, z) !== B.sign) continue;
-      seen.add(key);
-      const text = be.lines.join('\n');
-      const cur = this.signMeshes.get(key);
-      if (cur && cur.text === text) continue;
-      if (cur) { cur.mesh.removeFromParent(); cur.mesh.geometry.dispose(); }
-      const mesh = this.renderer.signText(be.lines);
-      const m = w.getMeta(x, y, z), f = m & 3, wall = (m & 4) !== 0;
-      const n = [[0, 1], [-1, 0], [0, -1], [1, 0]][f]; // direction the text faces
-      const off = wall ? -0.5 + 2 / 16 + 0.01 : 1 / 16 + 0.01;
-      mesh.position.set(x + 0.5 + n[0] * off, y + (wall ? 0.5 : 0.78), z + 0.5 + n[1] * off);
-      mesh.rotation.y = [0, -Math.PI / 2, Math.PI, Math.PI / 2][f];
-      this.renderer.scene.add(mesh);
-      this.signMeshes.set(key, { mesh, text });
-    }
-    for (const [key, v] of this.signMeshes) if (!seen.has(key)) { v.mesh.removeFromParent(); v.mesh.geometry.dispose(); this.signMeshes.delete(key); }
-  }
-
-  private releaseBow(): void {
-    const charge = this.bowCharge;
-    this.bowCharge = 0;
-    const p = this.player, held = p.held;
-    if (!charge || !held || held.id !== I.bow || !this.entities || !p.alive) return;
-    const t = (charge - 1) / 20;
-    let power = (t * t + t * 2) / 3;
-    if (power < 0.1) return;
-    power = Math.min(1, power);
-    const arrowSlot = p.inv.slots.findIndex((s) => s?.id === I.arrow);
-    if (arrowSlot < 0 && !p.creative) return;
-    const dmg = 2 + (enchLevel(held, 'power') ? enchLevel(held, 'power') * 0.5 + 0.5 : 0);
-    const arrow = this.entities.shoot('arrow', 'player', p.eye(), p.lookDir(), power * 3, 0.0075, dmg, !p.creative);
-    void arrow;
-    if (!p.creative) { p.inv.removeOne(arrowSlot); this.damageTool(1); }
-  }
-
-  private castOrReel(): void {
-    const p = this.player, ents = this.entities!;
-    if (this.bobber && !this.bobber.dead) {
-      const b = this.bobber;
-      if (b.biteTicks > 0) {
-        const r = Math.random();
-        const loot = r < 0.8 ? { id: I.raw_fish, count: 1 } : r < 0.9 ? { id: [I.leather, I.bone, I.string, I.stick][Math.floor(Math.random() * 4)], count: 1 } : { id: [I.book, B.sapling, I.bow, I.iron_ingot][Math.floor(Math.random() * 4)], count: 1 };
-        const e = p.eye();
-        const d = [e[0] - b.body.pos[0], e[1] - b.body.pos[1], e[2] - b.body.pos[2]];
-        ents.dropItem(b.body.pos[0], b.body.pos[1] + 0.3, b.body.pos[2], loot, 0, [d[0] * 0.1, d[1] * 0.1 + Math.hypot(d[0], d[2]) * 0.03, d[2] * 0.1]);
-        ents.dropXp(p.body.pos[0], p.body.pos[1] + 0.5, p.body.pos[2], 1 + Math.floor(Math.random() * 6));
-        if (loot.id === I.raw_fish) p.achieve('fish');
-      }
-      b.dead = true;
-      this.bobber = null;
-      this.damageTool(1);
-      this.renderer.swingHand();
-      return;
-    }
-    const e = p.eye(), d = p.lookDir();
-    this.bobber = ents.add(new Bobber(e[0] + d[0] * 0.5, e[1] + d[1] * 0.5, e[2] + d[2] * 0.5, [d[0] * 0.8, d[1] * 0.8 + 0.15, d[2] * 0.8]));
-    this.renderer.swingHand();
   }
 
   private tickAchievements(dt: number): void {
@@ -1306,39 +556,6 @@ export class Game {
     sfx.levelUp();
   }
 
-  private pickBlock(): void {
-    const p = this.player;
-    if (!this.target) return;
-    let id = this.target.id;
-    if (id === B.furnace_lit) id = B.furnace;
-    if (id === B.lamp_on) id = B.lamp;
-    if (id === B.wheat) id = I.seeds;
-    const inHotbar = p.inv.slots.slice(0, 9).findIndex((s) => s?.id === id);
-    if (inHotbar >= 0) { p.selected = inHotbar; return; }
-    if (p.creative) p.inv.slots[p.selected] = { id, count: maxStack(id) };
-  }
-
-  private dropHeld(all: boolean): void {
-    const p = this.player;
-    const held = p.held;
-    if (!held) return;
-    const n = all ? held.count : 1;
-    this.throwStack({ ...held, count: n });
-    held.count -= n;
-    if (held.count <= 0) p.inv.slots[p.selected] = null;
-  }
-
-  throwStack(s: ItemStack): void {
-    if (!this.entities) return;
-    const p = this.player, d = p.lookDir(), e = p.eye();
-    this.entities.dropItem(e[0], e[1] - 0.3, e[2], s, 40, [d[0] * 0.3, d[1] * 0.3 + 0.1, d[2] * 0.3]);
-  }
-
-  private openScreen(kind: 'crafting'): void {
-    document.exitPointerLock();
-    this.containers.show(kind);
-  }
-
   private onDeath(source: string): void {
     const p = this.player;
     if (!p.creative) {
@@ -1349,7 +566,8 @@ export class Game {
     }
     this.containers.close();
     document.exitPointerLock();
-    this.menus.setDeathReason(DEATH_MESSAGES[source] ?? 'You died.');
+    this.waypoints.setDeath([...p.body.pos] as [number, number, number], this.dimension);
+    this.menus.setDeathReason((DEATH_MESSAGES[source] ?? 'You died.') + ` Your belongings are at ${p.body.pos.map((v) => Math.floor(v)).join(', ')}; it's marked on your screen and map.`);
     this.menus.show('death');
   }
 
@@ -1366,13 +584,111 @@ export class Game {
     p.body.fallDistance = 0;
     this.prevPos = [...p.body.pos];
     this.menus.show(null);
-    this.lockPointer();
+    this.input.lockPointer();
   }
 
+  // ---------- Small actions used by input and the UI ----------
+  /** Turn the view by yaw/pitch deltas (radians). */
+  turn(dYaw: number, dPitch: number): void {
+    const p = this.player;
+    p.yaw += dYaw;
+    p.pitch = Math.max(-Math.PI / 2 + 0.001, Math.min(Math.PI / 2 - 0.001, p.pitch + dPitch));
+  }
+
+  openInventory(): void {
+    document.exitPointerLock();
+    this.containers.show(this.player.creative ? 'creative' : 'player');
+  }
+
+  toggleDebug(): void { this.debug = !this.debug; this.debugEl.classList.toggle('show', this.debug); }
+  toggleHud(): void { this.hudHidden = !this.hudHidden; this.hud.setVisible(!this.hudHidden); }
+
+  /** Creative flight speed: scroll (while sprinting or holding Ctrl) to change it. */
+  adjustFlySpeed(dir: number): void {
+    const p = this.player;
+    p.speed = Math.round(Math.max(0.25, Math.min(20, p.speed * (dir > 0 ? 1.25 : 0.8))) * 100) / 100;
+    this.toast(`Flying speed ${p.speed}×`, 1.5);
+  }
+
+  /** First person, then behind, then in front. */
+  cyclePerspective(): void {
+    this.perspective = (this.perspective + 1) % 3;
+  }
+
+  private shotPending = false;
+  /** Save a PNG of the next frame (the HUD's DOM overlay isn't included, only the world and hand). */
+  screenshot(): void { this.shotPending = true; }
+  private saveScreenshot(): void {
+    this.shotPending = false;
+    // Read the canvas right after rendering, before the browser clears the drawing buffer.
+    this.canvas.toBlob((blob) => {
+      if (!blob) { this.toast('Couldn’t capture a screenshot.'); return; }
+      const d = new Date(), pad = (n: number) => String(n).padStart(2, '0');
+      const name = `blockhaven-${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}_${pad(d.getHours())}-${pad(d.getMinutes())}-${pad(d.getSeconds())}.png`;
+      const a = Object.assign(document.createElement('a'), { href: URL.createObjectURL(blob), download: name });
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+      this.toast(`Screenshot saved as ${name}`, 3);
+    }, 'image/png');
+  }
+
+  // ---------- Third-person avatar ----------
+  avatar: MobModel | null = null;
+  private avatarWalk = 0;
+  private updateAvatar(alpha: number, dt: number): void {
+    const show = this.perspective !== 0 && this.player.alive && this.mode === 'playing';
+    if (!show) { if (this.avatar) this.avatar.root.visible = false; return; }
+    if (!this.avatar) { this.avatar = createAvatar(); this.renderer.scene.add(this.avatar.root); }
+    const a = this.avatar, p = this.player, parts = a.parts;
+    a.root.visible = true;
+    const x = this.prevPos[0] + (p.body.pos[0] - this.prevPos[0]) * alpha;
+    const y = this.prevPos[1] + (p.body.pos[1] - this.prevPos[1]) * alpha;
+    const z = this.prevPos[2] + (p.body.pos[2] - this.prevPos[2]) * alpha;
+    a.root.position.set(x, y, z);
+    a.root.rotation.y = p.yaw;
+    const speed = Math.hypot(p.body.vel[0], p.body.vel[2]);
+    const amp = Math.min(1, speed * 7) * (p.flying ? 0.25 : 1);
+    this.avatarWalk += speed * dt * 70;
+    const s = Math.sin(this.avatarWalk) * 0.8 * amp;
+    parts.legL.rotation.x = s; parts.legR.rotation.x = -s;
+    const swing = this.renderer.swingAmount();
+    parts.armL.rotation.x = -s * 0.8;
+    parts.armR.rotation.x = s * 0.8 - swing * 1.6;
+    parts.head.rotation.x = p.pitch * 0.9;
+    parts.body.rotation.x = p.sneaking ? 0.35 : 0;
+    parts.body.position.y = p.sneaking ? -0.15 : 0;
+    a.shadow.visible = p.body.onGround;
+  }
+
+  // ---------- Pass-throughs kept for scripts and tests ----------
+  /** Block ids by name (so scripts don't hard-code numbers). */
+  get ids(): Record<string, number> { return B; }
+  /** Item ids by name. */
+  get items(): Record<string, number> { return I; }
+  readonly storage = { exportWorld, importWorld, deleteWorld };
+  get target() { return this.actions.target; }
+  get mouse() { return this.input.mouse; }
+  get keys() { return this.input.keys; }
+  get bobber() { return this.actions.bobber; }
+  get cmdEl() { return this.chat.el; }
+  attack(): void { this.actions.attack(); }
+  use(): void { this.actions.use(); }
+  releaseBow(): void { this.actions.releaseBow(); }
+  say(text: string): void { this.chat.say(text); }
+  runCommand(line: string): void { runCommand(this, line.startsWith('/') ? line : '/' + line); }
+
   // ---------- Loop ----------
+  private lastDrawn = 0;
+  private slowTime = 0;
+  private fastTime = 0;
   private frame(now: number): void {
     requestAnimationFrame((t) => this.frame(t));
+    // Frame-rate cap: skip frames that come too soon (with a little slack for timer jitter).
+    const cap = this.settings.fpsCap;
+    if (cap > 0 && now - this.lastDrawn < 1000 / cap - 1) return;
+    this.lastDrawn = now;
     const dt = Math.min(0.25, (now - this.last) / 1000);
+    this.autoQuality(dt);
     this.last = now;
     this.frames++;
     this.fpsTime += dt;
@@ -1403,7 +719,7 @@ export class Game {
       return;
     }
 
-    const paused = this.menus.current === 'pause' || this.menus.current === 'settings';
+    const paused = this.menus.current === 'pause' || this.menus.current === 'settings' || this.menus.current === 'controls';
     if (!paused) {
       this.acc += dt;
       while (this.acc >= TICK) {
@@ -1412,24 +728,25 @@ export class Game {
       }
     }
     const alpha = paused ? 1 : this.acc / TICK;
+    const input = this.input;
+    input.pollGamepad(dt);
+    if (input.controlling) this.turn(input.padLook[0], input.padLook[1]);
     if (this.touch) {
-      this.touch.setVisible(this.controlling && this.player.alive && !this.hudHidden);
+      this.touch.setVisible(input.controlling && this.player.alive && !this.hudHidden);
       const [dx, dy] = this.touch.takeLook();
-      if (this.controlling) {
+      if (input.controlling) {
         const s = 0.0055 * this.settings.sensitivity;
-        this.player.yaw -= dx * s;
-        this.player.pitch -= dy * s * (this.settings.invertY ? -1 : 1);
-        this.player.pitch = Math.max(-Math.PI / 2 + 0.001, Math.min(Math.PI / 2 - 0.001, this.player.pitch));
+        this.turn(-dx * s, -dy * s * (this.settings.invertY ? -1 : 1));
       }
     }
     // After Escape closes a screen the browser won't give the mouse back until you click
     // (Escape doesn't count as a gesture), so say so instead of looking frozen.
-    const needClick = this.everLocked && !this.touchMode && !this.locked && !this.containers.open && !this.menus.current
-      && !this.cmdEl.classList.contains('show') && this.player.alive;
+    const needClick = input.everLocked && !this.touchMode && !input.padActive && !input.locked && !this.containers.open && !this.menus.current
+      && !this.chat.isOpen && !this.map.open && this.player.alive;
     this.resumeEl.classList.toggle('show', needClick);
     w.update(this.player.body.pos[0], this.player.body.pos[2], this.settings.renderDistance);
     this.placeCamera(alpha);
-    this.updateTarget();
+    this.actions.updateTarget();
     this.entities!.render(alpha);
     const cam = this.renderer.camera.position;
     this.renderer.underwater = this.player.body.eyeInWater;
@@ -1446,16 +763,35 @@ export class Game {
     } else this.renderer.updateWeather(dt, cam, () => false, () => false);
     this.renderer.updateSky(w.time, cam);
     const heldId = this.player.held?.id ?? 0;
-    this.renderer.setHeldItem(heldId === I.bow && this.bowCharge > 8 ? -2 : heldId);
+    this.renderer.setHeldItem(heldId === I.bow && this.actions.bowCharge > 8 ? -2 : heldId);
     this.tickAchievements(dt);
-    if (w.tickCount % 5 === 0) this.syncSigns();
+    if (w.tickCount % 5 === 0) this.signs.sync();
+    this.updateAvatar(alpha, dt);
     const handLight = this.entities!.lightAt(cam.x, cam.y, cam.z);
     const moving = Math.hypot(this.player.body.vel[0], this.player.body.vel[2]) > 0.02 && this.player.body.onGround && this.settings.viewBobbing;
-    this.renderer.renderFrame(dt, moving, handLight, !this.hudHidden && this.player.alive);
+    this.renderer.renderFrame(dt, moving && !this.settings.reduceMotion, handLight, !this.hudHidden && this.player.alive && this.perspective === 0);
+    if (this.shotPending) this.saveScreenshot();
     this.hud.update(this.player, dt);
+    this.hud.updateInfo(this);
+    this.map.frame(dt);
     if (this.containers.open && w.tickCount % 2 === 0) this.containers.render();
     if (this.toastTimer > 0) { this.toastTimer -= dt; this.toastEl.style.opacity = this.toastTimer > 0 ? '1' : '0'; }
     if (this.debug) this.updateDebug();
+  }
+
+  /**
+   * Automatic quality: after about two seconds of slow frames (under ~45 fps), render at a lower
+   * resolution, in steps down to 55%; after five seconds of fast ones, step back up.
+   */
+  private autoQuality(dt: number): void {
+    const r = this.renderer;
+    if (!this.settings.autoQuality || this.mode !== 'playing') { if (!this.settings.autoQuality && r.renderScale !== 1) r.setRenderScale(1); return; }
+    const cap = this.settings.fpsCap || 1000;
+    const slow = dt > 1 / Math.min(45, cap * 0.8), fast = dt < 1 / Math.min(70, cap * 0.95);
+    this.slowTime = slow ? this.slowTime + dt : Math.max(0, this.slowTime - dt * 0.5);
+    this.fastTime = fast ? this.fastTime + dt : 0;
+    if (this.slowTime > 2 && r.renderScale > 0.56) { r.setRenderScale(Math.max(0.55, r.renderScale - 0.15)); this.slowTime = 0; this.fastTime = 0; }
+    else if (this.fastTime > 5 && r.renderScale < 1) { r.setRenderScale(Math.min(1, r.renderScale + 0.15)); this.fastTime = 0; }
   }
 
   private nearbyReady(r: number): number {
@@ -1495,49 +831,45 @@ export class Game {
     const targetEye = p.sneaking ? SNEAK_EYE_HEIGHT : EYE_HEIGHT;
     p.eyeHeight += (targetEye - p.eyeHeight) * 0.3;
     cam.position.set(x, y + p.eyeHeight, z);
-    const hurtTilt = p.hurtTime > 0 ? Math.sin((p.hurtTime / 10) * Math.PI) * 0.08 : 0;
-    cam.rotation.set(p.pitch, p.yaw, hurtTilt, 'YXZ');
+    const calm = this.settings.reduceMotion;
+    const hurtTilt = p.hurtTime > 0 && !calm ? Math.sin((p.hurtTime / 10) * Math.PI) * 0.08 : 0;
+    if (this.perspective === 0) cam.rotation.set(p.pitch, p.yaw, hurtTilt, 'YXZ');
+    else {
+      // Third person: pull the camera back (or out in front) along the view line, stopping short of walls.
+      const front = this.perspective === 2;
+      const d = p.lookDir(), sign = front ? 1 : -1;
+      let dist = 4;
+      const eye = [cam.position.x, cam.position.y, cam.position.z] as [number, number, number];
+      const hit = this.world ? raycast(this.world, eye, [d[0] * sign, d[1] * sign, d[2] * sign], dist + 0.3) : null;
+      if (hit) dist = Math.max(0.6, hit.dist - 0.3);
+      cam.position.set(eye[0] + d[0] * sign * dist, eye[1] + d[1] * sign * dist, eye[2] + d[2] * sign * dist);
+      cam.rotation.set(front ? -p.pitch : p.pitch, front ? p.yaw + Math.PI : p.yaw, hurtTilt, 'YXZ');
+    }
     let fov = this.settings.fov;
-    if (p.sprinting) fov *= 1.12;
-    if (p.flying && p.sprinting) fov *= 1.05;
+    if (p.sprinting && !calm) fov *= 1.12;
+    if (p.flying && p.sprinting && !calm) fov *= 1.05;
     this.fovCurrent += (fov - this.fovCurrent) * 0.2;
     if (Math.abs(cam.fov - this.fovCurrent) > 0.01) { cam.fov = this.fovCurrent; cam.updateProjectionMatrix(); }
-  }
-
-  private updateTarget(): void {
-    const w = this.world!;
-    const p = this.player;
-    if (!p.alive || this.containers.open) { this.target = null; this.renderer.setHighlight(null); return; }
-    const hit = raycast(w, p.eye(), p.lookDir(), this.reach());
-    this.target = hit;
-    if (hit) {
-      const box = selectionBox(hit.id, w.getMeta(...hit.pos));
-      this.renderer.setHighlight(hit.pos, box ?? undefined);
-    } else this.renderer.setHighlight(null);
   }
 
   private tick(): void {
     const w = this.world!, p = this.player, ents = this.entities!;
     this.prevPos = [...p.body.pos];
-    const active = this.controlling && p.alive;
-    const k = (c: string) => active && this.keys.has(c);
-    const t = active ? this.touch : null;
-    const forward = Math.max(-1, Math.min(1, (k('KeyW') ? 1 : 0) - (k('KeyS') ? 1 : 0) + (t?.moveY ?? 0)));
-    const strafe = Math.max(-1, Math.min(1, (k('KeyD') ? 1 : 0) - (k('KeyA') ? 1 : 0) + (t?.moveX ?? 0)));
-    p.sneaking = k('ShiftLeft') || k('ShiftRight') || !!t?.sneak;
+    const active = this.input.controlling && p.alive;
+    // Keys (rebindable), the touch stick and a gamepad all feed the same movement.
     // Ctrl sprints; R does too, for keyboards where Ctrl+Space is taken by the system
     // (on macOS it switches input source).
-    if ((k('ControlLeft') || k('ControlRight') || k('KeyR')) && forward > 0) p.sprinting = true;
-    // On a touch screen, pushing the stick all the way forward sprints.
-    if (t && t.moveY > 0.9) p.sprinting = true;
+    const mv = this.input.movement();
+    const { forward, strafe, jump } = mv;
+    p.sneaking = mv.sneak;
+    if (mv.sprint && forward > 0) p.sprinting = true;
     // Bumping a wall ends a sprint on foot; in flight only when it actually stops you, so grazing
     // a cliff face on the way up doesn't make the view pulse.
     const blocked = p.body.collidedH && (!p.flying || Math.hypot(p.body.vel[0], p.body.vel[2]) < 0.1);
-    if (forward <= 0 || (p.sneaking && !p.flying) || (p.food <= 6 && !p.creative) || blocked) p.sprinting = false;
+    if (forward <= 0 || (p.sneaking && !p.flying) || (p.food <= 6 && !p.creative) || blocked) { p.sprinting = false; if (forward <= 0) this.input.sprintLatch = false; }
     if (!p.creative) p.flying = false;
     updateContacts(w, p.body, p.eyeHeight);
     const wasOnGround = p.body.onGround;
-    const jump = k('Space') || !!t?.jump;
     if (p.alive) {
       stepBody(w, p.body, { forward, strafe, jump, sneak: p.sneaking, sprint: p.sprinting, yaw: p.yaw }, p.flying, p.speed);
     }
@@ -1566,7 +898,6 @@ export class Game {
     this.wasInWater = p.body.inWater;
 
     p.tickStats();
-    this.tickBreaking();
     // Regeneration, magma floors and fire.
     if (p.regenTicks > 0) { p.regenTicks--; if (p.regenTicks % 25 === 0) p.health = Math.min(20, p.health + 1); }
     if (p.alive && p.body.onGround && !p.sneaking && w.getBlock(Math.floor(p.body.pos[0]), Math.floor(p.body.pos[1] - 0.1), Math.floor(p.body.pos[2])) === B.magma && w.tickCount % 20 === 0) p.damage(1, 'fire');
@@ -1578,10 +909,6 @@ export class Game {
       if (p.portalTime % 20 === 1) sfx.fizz({ gain: 0.3, pan: 0 });
       if (p.portalTime >= (p.creative ? 1 : 80)) { p.portalTime = 0; this.travel(w.dimension === 'ember' ? 'overworld' : 'ember'); return; }
     } else p.portalTime = 0;
-    if (this.bowCharge > 0) {
-      if (p.held?.id !== I.bow || !this.mouse[2]) this.bowCharge = 0;
-      else this.bowCharge++;
-    }
     // Thunder and lightning.
     if (w.weather === 'thunder' && --this.thunderTimer <= 0) {
       this.thunderTimer = 100 + Math.floor(Math.random() * 400);
@@ -1591,31 +918,7 @@ export class Game {
       requestAnimationFrame(() => { this.lightningEl.style.transition = 'opacity 0.6s'; this.lightningEl.style.opacity = '0'; });
       setTimeout(() => sfx.explode({ gain: 0.5, pan: (Math.random() - 0.5) }), 300 + Math.random() * 1500);
     }
-    // Holding right click repeats placing / keeps eating.
-    if (this.mouse[2] && (active || this.locked)) {
-      if (this.eating > 0) {
-        const held = p.held;
-        const food = held ? itemDef(held.id)?.food : undefined;
-        if (!held || !food) this.eating = 0;
-        else {
-          this.eating++;
-          if (this.eating % 4 === 0) sfx.eat();
-          if (this.eating > 32) {
-            const eff = itemDef(held.id)?.effect;
-            const bowl = held.id === I.mushroom_stew;
-            if (p.eat(held) && !p.creative) {
-              held.count--;
-              if (held.count <= 0) p.inv.slots[p.selected] = bowl ? { id: I.bowl, count: 1 } : null;
-            }
-            if (eff === 'regen') p.regenTicks = 100;
-            this.eating = 0;
-          }
-        }
-      } else if (++this.useCooldown >= 4) {
-        this.useCooldown = 0;
-        this.use();
-      }
-    }
+    this.actions.tick(active);
     w.tick(p.body.pos[0], p.body.pos[1], p.body.pos[2], true);
     ents.tick();
     // Autosave every 30 seconds.
@@ -1648,7 +951,7 @@ export class Game {
       `Entities ${this.entities!.list.length}   Time ${w.time}`,
       `Draw calls ${this.renderer.gl.info.render.calls}   Tris ${this.renderer.gl.info.render.triangles}`,
     ];
-    if (this.target) lines.push(`Looking at ${BLOCKS[this.target.id].name} (${this.target.pos.join(', ')})`);
+    if (this.actions.target) lines.push(`Looking at ${BLOCKS[this.actions.target.id].name} (${this.actions.target.pos.join(', ')})`);
     this.debugEl.innerHTML = lines.map((l) => `<div>${l}</div>`).join('');
   }
 }

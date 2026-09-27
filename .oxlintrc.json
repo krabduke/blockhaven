@@ -1,0 +1,53 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "plugins": [
+    "typescript",
+    "unicorn",
+    "oxc"
+  ],
+  "categories": {
+    "correctness": "error",
+    "suspicious": "warn"
+  },
+  "env": {
+    "browser": true,
+    "es2024": true
+  },
+  "globals": {
+    "__BUILD_ID__": "readonly"
+  },
+  "ignorePatterns": [
+    "dist/**",
+    "node_modules/**"
+  ],
+  "rules": {
+    "no-unused-vars": [
+      "error",
+      {
+        "argsIgnorePattern": "^_",
+        "varsIgnorePattern": "^_"
+      }
+    ],
+    "no-shadow": "off",
+    "unicorn/no-new-array": "off",
+    "typescript/no-non-null-assertion": "off",
+    "unicorn/consistent-function-scoping": "off",
+    "unicorn/prefer-add-event-listener": "off",
+    "no-underscore-dangle": "off",
+    "unicorn/require-post-message-target-origin": "off",
+    "unicorn/no-useless-spread": "off",
+    "unicorn/no-array-sort": "off"
+  },
+  "overrides": [
+    {
+      "files": [
+        "scripts/**/*.mjs",
+        "*.config.*"
+      ],
+      "env": {
+        "node": true,
+        "browser": true
+      }
+    }
+  ]
+}
