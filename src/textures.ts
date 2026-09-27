@@ -717,6 +717,33 @@ tile('arrow', (p) => {
   p.sprite(['.hh', 'hhh', 'hh.'], { h: hex('#bcbcbc') }, 0.04, 12, 1);
   p.sprite(['f.f', '.f.', 'f.f'], { f: hex('#f0f0f0') }, 0.04, 2, 11);
 });
+// ---------- Rails ----------
+const railTile = (rail: RGB, rail2: RGB, tie: RGB, curve: boolean, glow?: RGB) => (p: Painter) => {
+  p.transparent();
+  if (!curve) {
+    for (let y = 1; y < S; y += 4) p.rect(1, y, 14, 2, tie, 0.08);                 // sleepers
+    for (const x of [3, 11]) { p.rect(x, 0, 2, S, rail, 0.04); p.rect(x, 0, 1, S, rail2); }
+    if (glow) for (let y = 0; y < S; y += 2) p.set(7, y, glow), p.set(8, y + 1, glow);
+  } else {
+    // A quarter turn from the south edge to the east edge.
+    for (let k = 0; k < 5; k++) { const a = (k / 4) * Math.PI / 2; p.rect(Math.round(16 - Math.cos(a) * 10) - 1, Math.round(16 - Math.sin(a) * 10) - 1, 3, 3, tie, 0.08); }
+    for (const r of [4.5, 12.5]) for (let t = 0; t <= 60; t++) {
+      const a = (t / 60) * Math.PI / 2;
+      const x = Math.round(16 - Math.cos(a) * r), y = Math.round(16 - Math.sin(a) * r);
+      p.set(x, y, rail); p.set(x - 1, y, rail2);
+    }
+  }
+};
+tile('rail', railTile(hex('#9a9aa0'), hex('#c8c8cc'), hex('#6a4a2a'), false));
+tile('rail_curve', railTile(hex('#9a9aa0'), hex('#c8c8cc'), hex('#6a4a2a'), true));
+tile('powered_rail', railTile(hex('#c8a040'), hex('#e8c860'), hex('#5a3a22'), false, hex('#6a1a14')));
+tile('powered_rail_on', railTile(hex('#e8b840'), hex('#fff0a0'), hex('#5a3a22'), false, hex('#ff5a3a')));
+
+// ---------- Boat, minecart, saddle ----------
+tile('boat', (p) => { p.transparent(); p.sprite(['p............p', 'pp..........pp', 'pdpppppppppppd', '.pdddddddddddp.', '..pppppppppp..'].map((r) => r.slice(0, 14)), { p: hex('#a8804a'), d: hex('#7a5a30') }, 0.05, 1, 6); });
+tile('minecart', (p) => { p.transparent(); p.sprite(['mmmmmmmmmmmm', 'mhhhhhhhhhhm', 'm..........m', 'mmmmmmmmmmmm', '.w.......w..', 'www.....www.', '.w.......w..'], { m: hex('#8a8a90'), h: hex('#b8b8be'), w: hex('#3a3a3e') }, 0.05, 2, 5); });
+tile('saddle', (p) => { p.transparent(); p.sprite(['....llll....', '..llllllll..', '.lllgllllll.', 'lllllllllldl', 'l.dllllld..l', 'i..l....l..i', 'i..l....l..i'], { l: hex('#7a4a28'), d: hex('#5a3418'), g: hex('#c8a048'), i: hex('#9a9aa0') }, 0.05, 2, 4); });
+
 // ---------- Brewing, potions, shield, crossbow ----------
 const bottle = (liquid: RGB | null, splash: boolean) => (p: Painter) => {
   p.transparent();

@@ -120,6 +120,9 @@ POTIONS.forEach((p, i) => {
 item(440, 'shield', 'Shield', { maxStack: 1, use: 'shield', tool: { kind: 'sword', tier: 0, speed: 1, durability: 336, damage: 1 } });
 item(441, 'crossbow', 'Crossbow', { maxStack: 1, use: 'crossbow', tool: { kind: 'sword', tier: 0, speed: 1, durability: 465, damage: 1 } });
 item(442, 'bog_slime', 'Bog Slime');
+item(501, 'boat', 'Boat', { maxStack: 1 });
+item(502, 'minecart', 'Minecart', { maxStack: 1 });
+item(503, 'saddle', 'Saddle', { maxStack: 1 });
 // The rest of the sixteen dyes.
 (['white', 'magenta', 'light_blue', 'lime', 'pink', 'gray', 'light_gray', 'cyan', 'purple', 'brown'] as const).forEach((c, i) => {
   item(443 + i, 'dye_' + c, COLOR_NAMES[c] + ' Dye', { use: 'dye', dye: c });

@@ -407,6 +407,24 @@ export function meshSubchunk(input: MeshInput): SubMesh {
           case 'carpet':
             emitBox(bld, blocks, light, x, y, z, [0, 0, 0], [1, 1 / 16, 1], metaLayer(id, m), i);
             break;
+          case 'rail': {
+            // Flat track (rotated and curved to shape) or a slope climbing one block.
+            const shape = id === B.powered_rail ? m & 7 : m & 15;
+            const layer = metaLayer(id, m);
+            const s = skyAt(i), bl = blkAt(i), lift = 1 / 16;
+            const rot = [0, 1, 1, 1, 0, 0, 0, 1, 2, 3][shape] ?? 0;
+            const h = (px: number, pz: number) => shape === 2 ? px : shape === 3 ? 1 - px : shape === 4 ? 1 - pz : shape === 5 ? pz : 0;
+            const corners: [number, number][] = [[0, 1], [1, 1], [1, 0], [0, 0]];
+            for (const [u, v] of corners) {
+              // Rotate the tile's (u, v) about the centre by `rot` quarter turns to get x/z.
+              let a = u - 0.5, b = v - 0.5;
+              for (let k = 0; k < rot; k++) [a, b] = [-b, a];
+              const px = a + 0.5, pz = b + 0.5;
+              bld.vert(x + px, y + lift + h(px, pz), z + pz, u, v, layer, 0, s, bl, 1, WHITE);
+            }
+            bld.quad(false, true);
+            break;
+          }
           case 'painting': {
             // A canvas hung flat on the wall, facing out.
             const q = WALL_QUADS[m & 3](1 / 32);

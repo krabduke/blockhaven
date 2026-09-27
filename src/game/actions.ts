@@ -2,8 +2,9 @@
 // blocks, fishing, archery, sleeping and dropping items.
 
 import { sfx, spatial } from '../audio';
-import { B, BLOCKS, DYE_COLORS, SOLID, WOOL_KEY, isLeaves, isLog } from '../blocks';
+import { B, BLOCKS, DYE_COLORS, SOLID, WOOL_KEY, isLeaves, isLog, isRail } from '../blocks';
 import { Bobber, TntEntity } from '../entities/entities';
+import { Boat, Minecart } from '../entities/vehicles';
 import { I, coloredItem, enchLevel, itemDef, maxStack, type ItemStack } from '../items';
 import { raycast, selectionBox, type RayHit } from '../physics';
 import type { Game } from '../game';
@@ -114,7 +115,9 @@ export class Actions {
     const eye = p.eye(), dir = p.lookDir();
     const mobHit = this.entities.raycastMob(eye, dir, 3);
     const blockDist = this.target ? this.target.dist : Infinity;
-    if (mobHit && mobHit.dist < blockDist) {
+    const vHit = this.entities.raycastVehicle(eye, dir, 3);
+    if (vHit && vHit.dist < blockDist && (!mobHit || vHit.dist < mobHit.dist) && vHit.vehicle !== this.g.riding) { vHit.vehicle.hit(this.entities); return; }
+    if (mobHit && mobHit.dist < blockDist && mobHit.mob !== this.g.riding) {
       const held = p.held;
       const tool = held ? itemDef(held.id)?.tool : undefined;
       let dmg = tool && held?.id !== I.bow && held?.id !== I.shears && held?.id !== I.fishing_rod ? tool.damage : 1;
@@ -237,11 +240,38 @@ export class Actions {
     const sneaking = p.sneaking;
     const consume = () => { if (!p.creative && held) { held.count--; if (held.count <= 0) p.inv.slots[p.selected] = null; } };
 
-    // Animals: feeding, breeding and shearing.
-    const mobHit = this.entities.raycastMob(eye, dir, 3.5);
+    // Vehicles: climb into a boat or minecart.
+    const vHit = this.entities.raycastVehicle(eye, dir, 3.5);
+    const mobHit0 = this.entities.raycastMob(eye, dir, 3.5);
+    if (vHit && (!hit || vHit.dist < hit.dist) && (!mobHit0 || vHit.dist < mobHit0.dist) && !this.g.riding) {
+      if (!repeat) this.g.mount(vHit.vehicle);
+      return;
+    }
+    // Placing a boat (on water or ground) or a minecart (on a rail).
+    if ((held?.id === I.boat || held?.id === I.minecart) && !repeat) {
+      const fh = raycast(w, eye, dir, this.reach(), held.id === I.boat);
+      if (!fh) return;
+      const [x, y, z] = fh.pos;
+      if (held.id === I.minecart) {
+        if (!isRail(fh.id)) return;
+        this.entities.add(new Minecart(x + 0.5, y + 0.0625, z + 0.5, p.yaw));
+      } else {
+        const onWater = fh.id === B.water;
+        if (!onWater && fh.normal[1] !== 1) return;
+        this.entities.add(new Boat(x + 0.5, y + (onWater ? 0.8 : 1), z + 0.5, p.yaw));
+      }
+      consume();
+      this.renderer.swingHand();
+      return;
+    }
+    // Animals: feeding, breeding, shearing, taming and riding.
+    const mobHit = mobHit0;
     if (mobHit && (!hit || mobHit.dist < hit.dist)) {
       const res = mobHit.mob.interact(this.entities, held);
-      if (res === 'fed') { consume(); this.renderer.swingHand(); return; }
+      if (res === 'fed' || res === 'tamed') { consume(); this.renderer.swingHand(); if (res === 'tamed') p.achieve('tame'); return; }
+      if (res === 'saddled') { consume(); return; }
+      if (res === 'ride') { if (!repeat && !this.g.riding) this.g.mount(mobHit.mob); return; }
+      if (res === 'sit') { if (!repeat) this.renderer.swingHand(); return; }
       if (res === 'sheared') { this.damageTool(1); this.renderer.swingHand(); return; }
       if (res === 'trade') {
         const v = mobHit.mob;
@@ -516,6 +546,9 @@ export class Actions {
     } else if (blockId === B.sign) {
       if (n[1] === -1) return;
       meta = n[1] === 1 ? [0, 3, 2, 1][q] : (n[2] === 1 ? 0 : n[2] === -1 ? 2 : n[0] === 1 ? 3 : 1) | 4;
+    } else if (blockId === B.rail || blockId === B.powered_rail) {
+      if (n[1] === -1) return;
+      meta = q === 0 || q === 2 ? 0 : 1;
     } else if (blockId === B.carpet || blockId === B.stained_glass) {
       meta = color;
     } else if (blockId === B.banner) {
@@ -561,6 +594,7 @@ export class Actions {
       w.setBlock(x, y, z, blockId, meta);
       if (blockId === B.sapling && p.creative && this.g.input.keys.has('ControlLeft')) w.growTree(x, y, z);
       if (blockId === B.sign) setTimeout(() => this.g.signs.edit(x, y, z), 0);
+      if (blockId === B.rail || blockId === B.powered_rail) { w.fitRail(x, y, z); if (blockId === B.powered_rail) w.updatePower(x, y, z); }
     }
     sfx.place(d.sound);
     consume();

@@ -166,7 +166,27 @@ const ANIMATORS: Record<string, Animator> = {
     visible(c.parts.wool, !c.mob.sheared);
     visible(c.parts.tail, !c.mob.sheared);
   },
+  mossback(c) {
+    quadLegs(c, 0.75); bob(c, 1.1, 0.02); breathe(c, 'torso', 0.02, 1.4);
+    const air = !c.mob.body.onGround;
+    if (air) { rot(c.parts.legFL, -0.9); rot(c.parts.legFR, -0.9); rot(c.parts.legBL, 0.8); rot(c.parts.legBR, 0.8); }
+    rot(c.parts.neck, -c.a.graze * 0.9 + Math.sin(c.phase * 2) * 0.04 * c.amp);
+    head(c, c.a.graze * 0.3, 0, 0.6);
+    ears(c, 'earL', 'earR', 0.45);
+    tailWag(c, 'tail', 0, 0.25, 3);
+    visible(c.parts.saddle, c.mob.saddled);
+  },
   burrowfox(c) {
+    visible(c.parts.collar, c.mob.tamed);
+    if (c.mob.sitting) {
+      // Sitting: haunches down, front legs straight, tail curled round.
+      rot(c.parts.legBL, -1.4); rot(c.parts.legBR, -1.4); rot(c.parts.legFL, 0); rot(c.parts.legFR, 0);
+      c.parts.body.position.y = -0.12;
+      c.parts.body.rotation.x = 0.35;
+      head(c, -0.3, Math.sin(c.t * 0.8 + c.a.seed) * 0.15);
+      rot(c.parts.tail, -0.2, 0.9, 0);
+      return;
+    }
     quadLegs(c, 0.85); bob(c, 0.9, 0.03); breathe(c);
     // Curious head tilt when watching you.
     const tilt = c.idle && Math.abs(c.look) < 1 ? Math.sin(c.t * 0.8 + c.a.seed) * 0.25 : 0;

@@ -912,6 +912,101 @@ await wait(300);
   check('dye recolours wool; banners hang in their colour and drop back as themselves; paintings hang on walls', deco.dyedWool && deco.banner && deco.bannerDrop && deco.painting, JSON.stringify(deco));
 }
 
+// --- Getting around: rails and minecarts, boats, taming and riding.
+{
+  await g(() => { Object.defineProperty(window.blockhaven.input, 'locked', { configurable: true, get: () => true }); });
+  const cart = await g(async () => {
+    const G = window.blockhaven, p = G.player, w = G.world, B = G.ids, It = G.items;
+    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+    const [x, , z] = p.body.pos.map(Math.floor);
+    const y = Math.floor(p.body.pos[1]) + 8;
+    // A straight track 14 long that turns a corner, on a stone bed in the air.
+    for (let dx = -2; dx <= 16; dx++) for (let dz = -2; dz <= 8; dz++) { w.setBlock(x + dx, y - 1, z + dz, B.stone); for (let dy = 0; dy <= 3; dy++) w.setBlock(x + dx, y + dy, z + dz, 0); }
+    for (let i = 0; i <= 12; i++) { w.setBlock(x + i, y, z, B.rail); w.fitRail(x + i, y, z); }
+    for (let j = 1; j <= 6; j++) { w.setBlock(x + 12, y, z + j, B.rail); w.fitRail(x + 12, y, z + j); }
+    const shapes = { straight: w.railShape(x + 5, y, z), corner: w.railShape(x + 12, y, z), down: w.railShape(x + 12, y, z + 4) };
+    // Place a cart with the item, get in, and push off along the track.
+    p.creative = false; p.flying = false;
+    p.body.pos = [x + 0.5, y + 1, z + 1.8]; p.body.vel = [0, 0, 0]; p.yaw = 0; p.pitch = -1.0;
+    p.inv.slots[0] = { id: It.minecart, count: 1 }; p.selected = 0;
+    await sleep(150);
+    G.use();
+    const v = G.entities.vehicles().find((e) => e.kind === 'minecart');
+    if (!v) return { shapes, placed: false };
+    G.use();
+    const riding = G.riding === v;
+    // Push it east by giving it a shove (as the powered rails or a slope would).
+    v.body.vel = [0.4, 0, 0];
+    await sleep(2500);
+    const cartPos = [...v.body.pos], playerPos = [...p.body.pos];
+    // Sneak to get out.
+    G.keys.add('ShiftLeft'); await sleep(150); G.keys.delete('ShiftLeft'); await sleep(100);
+    return { shapes, placed: true, riding, cartPos, x, z, turned: cartPos[2] > z + 1.5, seated: Math.hypot(playerPos[0] - cartPos[0], playerPos[2] - cartPos[2]) < 0.5, off: G.riding === null };
+  });
+  check('rails join into straights and corners; a minecart rides the track around a corner with you in it', cart.placed && cart.shapes.straight === 1 && cart.shapes.corner >= 6 && cart.shapes.down === 0 && cart.riding && cart.turned && cart.seated && cart.off, JSON.stringify(cart));
+
+  const boat = await g(async () => {
+    const G = window.blockhaven, p = G.player, w = G.world, B = G.ids, It = G.items;
+    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+    const [x, , z] = p.body.pos.map(Math.floor);
+    const y = Math.floor(p.body.pos[1]) + 10;
+    for (let dx = -4; dx <= 4; dx++) for (let dz = -14; dz <= 4; dz++) { w.setBlock(x + dx, y - 2, z + dz, B.stone); w.setBlock(x + dx, y - 1, z + dz, B.water, 0); for (let dy = 0; dy <= 3; dy++) w.setBlock(x + dx, y + dy, z + dz, 0); }
+    await sleep(200);
+    const boat = new (await import('/src/entities/vehicles.ts')).Boat(x + 0.5, y - 0.2, z + 0.5, 0);
+    G.entities.add(boat);
+    G.mount(boat);
+    p.yaw = 0;
+    G.keys.add('KeyW'); await sleep(1500); G.keys.delete('KeyW');
+    const moved = z + 0.5 - boat.body.pos[2];
+    const floating = Math.abs(boat.body.pos[1] - (y - 0.2)) < 0.4;
+    G.dismount();
+    return { moved, floating, off: G.riding === null };
+  });
+  check('a boat floats, rows forward and lets you off', boat.moved > 3 && boat.floating && boat.off, JSON.stringify(boat));
+
+  const tame = await g(async () => {
+    const G = window.blockhaven, p = G.player, w = G.world, B = G.ids, It = G.items, E = G.entities;
+    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+    const [x, , z] = p.body.pos.map(Math.floor);
+    const y = Math.floor(p.body.pos[1]) + 14;
+    for (let dx = -8; dx <= 8; dx++) for (let dz = -24; dz <= 6; dz++) { w.setBlock(x + dx, y - 1, z + dz, B.grass); for (let dy = 0; dy <= 5; dy++) w.setBlock(x + dx, y + dy, z + dz, 0); }
+    p.body.pos = [x + 0.5, y, z + 0.5]; p.body.vel = [0, 0, 0]; p.yaw = 0; p.pitch = -0.2;
+    const mb = E.spawnMob('mossback', x + 0.5, y, z - 2.2); mb.wanderTimer = 99999; mb.target = null; mb.yaw = 0;
+    await sleep(300);
+    // Feed it until it's tamed (each feeding raises the chance).
+    let feeds = 0;
+    while (!mb.tamed && feeds < 20) { p.inv.slots[0] = { id: It.apple, count: 1 }; p.selected = 0; mb.body.pos = [x + 0.5, y, z - 2.2]; mb.panic = 0; mb.love = 0; mb.breedCooldown = 100; G.use(); feeds++; await sleep(30); }
+    p.inv.slots[0] = { id: It.saddle, count: 1 };
+    G.use();
+    const saddled = mb.saddled;
+    p.inv.slots[0] = null;
+    G.use();
+    const riding = G.riding === mb;
+    p.yaw = 0;
+    G.keys.add('KeyW'); await sleep(1500); G.keys.delete('KeyW');
+    const moved = z - 2.2 - mb.body.pos[2];
+    G.dismount();
+    // A fox: tame it with apples, tell it to sit, then it follows when told to stand.
+    const fox = E.spawnMob('burrowfox', x + 0.5, y, z - 2);
+    fox.wanderTimer = 99999; mb.body.pos = [x + 6, y, z - 20];
+    p.body.pos = [x + 0.5, y, z + 0.5]; p.yaw = 0; p.pitch = -0.4;
+    let fFeeds = 0;
+    while (!fox.tamed && fFeeds < 20) { p.inv.slots[0] = { id: It.apple, count: 1 }; fox.body.pos = [x + 0.5, y, z - 1.6]; fox.panic = 0; G.use(); fFeeds++; await sleep(30); }
+    p.inv.slots[0] = null;
+    G.use();
+    const sat = fox.sitting;
+    G.use();
+    const stood = !fox.sitting;
+    p.body.pos = [x + 0.5, y, z - 14];
+    await sleep(2500);
+    const follow = Math.hypot(fox.body.pos[0] - p.body.pos[0], fox.body.pos[2] - p.body.pos[2]);
+    return { mbTamed: mb.tamed, feeds, saddled, riding, moved, foxTamed: fox.tamed, sat, stood, follow };
+  });
+  check('a mossback tames with food, takes a saddle, and can be ridden', tame.mbTamed && tame.saddled && tame.riding && tame.moved > 3, JSON.stringify(tame));
+  check('a tamed fox sits when told and follows you when it stands', tame.foxTamed && tame.sat && tame.stood && tame.follow < 5, JSON.stringify(tame));
+  await g(() => { const G = window.blockhaven; delete G.input.locked; G.riding = null; const p = G.player; window.__invSnap.forEach((s, i) => { p.inv.slots[i] = s; }); });
+}
+
 // --- Save, quit, reload, and check a block change persisted.
 const marker = await g(async () => {
   const G = window.blockhaven;

@@ -10,6 +10,8 @@ import type { Renderer } from '../render/renderer';
 import { tileIndex } from '../tiles';
 import type { World } from '../world/world';
 import { createModel, type MobModel } from './models';
+import { Entity, dist } from './entity';
+import { Vehicle, makeVehicle, type RiderInput } from './vehicles';
 import { animateMob, newAnimState } from './animate';
 import { tradesFor, type TradeOffer } from '../trading';
 
@@ -67,6 +69,7 @@ export const MOBS: Record<string, MobSpec> = {
   stonewarden: { kind: 'stonewarden', width: 1.4, height: 2.7, health: 100, speed: 0.5, hostile: false, guardian: true, attack: 9, pitch: 70, xp: 0, drops: (r) => [{ id: I.iron_ingot, count: 3 + Math.floor(r() * 3) }] },
   emberwisp: { kind: 'emberwisp', width: 0.9, height: 1.1, health: 12, speed: 0.6, hostile: true, ranged: true, projectile: 'fireball', flying: true, fireImmune: true, habitat: 'ember', pitch: 520, xp: 5, drops: (r) => [{ id: I.ember_core, count: r() < 0.5 ? 1 : 0 }, { id: I.gunpowder, count: Math.floor(r() * 2) }] },
   cinderbrute: { kind: 'cinderbrute', width: 1.1, height: 1.7, health: 30, speed: 0.6, hostile: true, attack: 6, fireImmune: true, habitat: 'ember', pitch: 90, xp: 8, drops: (r) => [{ id: I.cinder_brick, count: Math.floor(r() * 4) }, { id: I.gold_ingot, count: r() < 0.25 ? 1 : 0 }, { id: I.emberquartz, count: Math.floor(r() * 3) }] },
+  mossback: { kind: 'mossback', width: 1.2, height: 1.75, health: 26, speed: 1.0, hostile: false, food: [I.wheat_item, I.apple], pitch: 160, xp: 3, drops: (r) => [{ id: I.leather, count: Math.floor(r() * 3) }] },
   burrowfox: { kind: 'burrowfox', width: 0.6, height: 0.7, health: 10, speed: 0.85, hostile: false, habitat: 'forest', food: [I.apple], pitch: 700, xp: 2, drops: (r) => [{ id: I.leather, count: Math.floor(r() * 2) }] },
   bogfrog: { kind: 'bogfrog', width: 0.5, height: 0.5, health: 6, speed: 0.6, hostile: false, hops: true, habitat: 'swamp', food: [I.seeds], pitch: 250, xp: 1, drops: (r) => [{ id: I.bog_slime, count: r() < 0.6 ? 1 : 0 }] },
   dunescuttler: { kind: 'dunescuttler', width: 0.8, height: 0.5, health: 10, speed: 1.1, hostile: true, attack: 2, habitat: 'desert', pitch: 800, xp: 5, drops: (r) => [{ id: I.string, count: Math.floor(r() * 2) }, { id: I.bone, count: Math.floor(r() * 2) }] },
@@ -79,33 +82,6 @@ export const MOBS: Record<string, MobSpec> = {
   blastcap: { kind: 'blastcap', width: 0.8, height: 1.1, health: 16, speed: 0.8, hostile: true, exploder: true, pitch: 360, xp: 5, drops: (r) => [{ id: I.gunpowder, count: Math.floor(r() * 3) }] },
   brambler: { kind: 'brambler', width: 0.6, height: 1.9, health: 20, speed: 0.7, hostile: true, ranged: true, projectile: 'thorn', burnsInDay: true, pitch: 260, xp: 5, drops: (r) => [{ id: I.arrow, count: Math.floor(r() * 3) }, { id: I.bone, count: Math.floor(r() * 3) }, { id: I.gunpowder, count: Math.floor(r() * 2) }] },
 };
-
-abstract class Entity {
-  dead = false;
-  age = 0;
-  prev: [number, number, number];
-  object: THREE.Object3D;
-  constructor(readonly body: Body, object: THREE.Object3D) {
-    this.prev = [...body.pos];
-    this.object = object;
-  }
-  abstract tick(m: EntityManager): void;
-  render(alpha: number, m: EntityManager): void {
-    const p = this.body.pos;
-    this.object.position.set(this.prev[0] + (p[0] - this.prev[0]) * alpha, this.prev[1] + (p[1] - this.prev[1]) * alpha, this.prev[2] + (p[2] - this.prev[2]) * alpha);
-    const l = m.lightAt(p[0], p[1] + this.body.height / 2, p[2]);
-    this.object.traverse((o) => {
-      const mat = (o as THREE.Mesh).material;
-      if (!mat) return;
-      for (const mm of Array.isArray(mat) ? mat : [mat]) {
-        const bm = mm as THREE.MeshBasicMaterial;
-        const shade = (bm.userData.shade as number | undefined) ?? 1;
-        const hurt = this instanceof Mob && this.hurtTime > 0;
-        bm.color.setRGB(l * shade, l * shade * (hurt ? 0.5 : 1), l * shade * (hurt ? 0.5 : 1));
-      }
-    });
-  }
-}
 
 export class ItemEntity extends Entity {
   pickupDelay: number;
@@ -235,6 +211,16 @@ export class Mob extends Entity {
   love = 0;
   breedCooldown = 0;
   sheared = false;
+  /** Tamed by the player (foxes follow and defend you; mossbacks can be saddled and ridden). */
+  tamed = false;
+  /** A tamed fox told to stay. */
+  sitting = false;
+  saddled = false;
+  /** Mossbacks warm to you with each feeding. */
+  temper = 0;
+  /** Ridden by the player: movement comes from the rider's keys. */
+  ridden = false;
+  riderInput: RiderInput = { forward: 0, strafe: 0, jump: false, yaw: 0, sprint: false };
   eggTimer = 6000 + Math.floor(Math.random() * 6000);
   hurtByPlayer = 0;
   /** Guardians get angry at a player who hits them. */
@@ -301,9 +287,31 @@ export class Mob extends Entity {
   }
 
   /** Right-click with an item. Returns true if the item was used. */
-  interact(m: EntityManager, stack: ItemStack | null): 'fed' | 'sheared' | 'trade' | null {
+  interact(m: EntityManager, stack: ItemStack | null): 'fed' | 'sheared' | 'trade' | 'tamed' | 'saddled' | 'ride' | 'sit' | null {
     if (this.deathTime) return null;
     if (this.spec.trader && !this.baby) return 'trade';
+    const b = this.body.pos;
+    // Taming: foxes take apples, mossbacks warm up to you over several feedings.
+    if (!this.tamed && !this.baby && stack && ((this.spec.kind === 'burrowfox' && stack.id === I.apple) || (this.spec.kind === 'mossback' && this.spec.food?.includes(stack.id)))) {
+      this.temper += this.spec.kind === 'mossback' ? 2 : 4;
+      if (Math.random() * 10 < this.temper) {
+        this.tamed = true;
+        this.panic = 0;
+        for (let i = 0; i < 7; i++) m.heart(b[0], b[1] + this.body.height + 0.2, b[2]);
+        sfx.levelUp();
+        return 'tamed';
+      }
+      for (let i = 0; i < 5; i++) m.puff(b[0], b[1] + this.body.height, b[2]);
+      return 'fed';
+    }
+    if (this.tamed && this.spec.kind === 'mossback') {
+      if (!this.saddled && stack?.id === I.saddle) { this.saddled = true; sfx.place('wool'); return 'saddled'; }
+      if (this.saddled && !this.baby && (!stack || !this.spec.food?.includes(stack.id))) return 'ride';
+    }
+    if (this.tamed && this.spec.kind === 'burrowfox' && (!stack || stack.id !== I.apple)) {
+      this.sitting = !this.sitting;
+      return 'sit';
+    }
     if (!stack) return null;
     if (this.spec.kind === 'woolback' && stack.id === I.shears && !this.sheared && !this.baby) {
       this.sheared = true;
@@ -340,6 +348,8 @@ export class Mob extends Entity {
     if (this.angry > 0) this.angry--;
     if (this.healCooldown > 0) this.healCooldown--;
     this.aiming = false;
+    if (this.ridden) { this.rideTick(m); return; }
+    if (this.tamed && this.spec.kind === 'burrowfox' && this.companionTick(m)) return;
     if (this.spec.flying) { this.flyTick(m); return; }
     if (this.spec.aquatic) { this.swimTick(m); return; }
     let forward = 0;
@@ -514,6 +524,53 @@ export class Mob extends Entity {
     // Despawn far hostiles.
     if ((this.spec.hostile || this.spec.habitat === 'cave' || this.spec.habitat === 'water') && (pd0 > 96 || (pd0 > 40 && Math.random() < 1 / 800))) this.dead = true;
     if (b.pos[1] < -20) this.dead = true;
+  }
+
+  /** Carrying the player: turn toward where they look, run when they sprint, leap with jump. */
+  private rideTick(m: EntityManager): void {
+    const b = this.body, inp = this.riderInput;
+    let dy = inp.yaw - this.yaw;
+    dy = Math.atan2(Math.sin(dy), Math.cos(dy));
+    this.yaw += dy * 0.35;
+    const speed = inp.forward > 0 ? (inp.sprint ? 1.9 : 1.2) : inp.forward < 0 ? 0.5 : 0;
+    const jump = inp.jump && b.onGround;
+    stepBody(m.world, b, { forward: inp.forward > 0 ? 1 : inp.forward < 0 ? -1 : 0, strafe: inp.strafe * 0.5, jump: false, sneak: false, sprint: false, yaw: this.yaw }, false, speed * this.spec.speed);
+    if (jump) { b.vel[1] = 0.62; b.vel[0] -= Math.sin(this.yaw) * 0.25; b.vel[2] -= Math.cos(this.yaw) * 0.25; }
+    b.fallDistance = 0;
+    this.walkAnim += Math.hypot(b.vel[0], b.vel[2]) * 3.5;
+    this.headYaw *= 0.8;
+  }
+
+  /**
+   * A tamed fox: stays put when told to sit, otherwise defends you from nearby monsters and
+   * trots after you, catching up by teleporting if you get far ahead. Returns true when it acted.
+   */
+  private companionTick(m: EntityManager): boolean {
+    const b = this.body, p = m.player;
+    if (this.sitting) {
+      stepBody(m.world, b, { forward: 0, strafe: 0, jump: false, sneak: false, sprint: false, yaw: this.yaw }, false, 0);
+      return true;
+    }
+    const pd = dist(p.body.pos, b.pos);
+    if (pd > 24 && p.alive) {
+      b.pos = [p.body.pos[0] + (Math.random() - 0.5) * 2, p.body.pos[1], p.body.pos[2] + (Math.random() - 0.5) * 2];
+      b.vel = [0, 0, 0];
+      return true;
+    }
+    const foe = m.mobs().find((o) => o.spec.hostile && dist(o.body.pos, p.body.pos) < 10 && dist(o.body.pos, b.pos) < 14);
+    const goal = foe ? foe.body.pos : pd > 3 ? p.body.pos : null;
+    if (!goal) return false;
+    const dx = goal[0] - b.pos[0], dz = goal[2] - b.pos[2];
+    this.yaw = Math.atan2(-dx, -dz);
+    const d = Math.hypot(dx, dz);
+    if (foe) {
+      this.aiming = true;
+      if (d < 1.4 && this.attackCooldown === 0) { this.attackCooldown = 16; foe.hurt(m, 3, b.pos, 0.4); }
+    }
+    stepBody(m.world, b, { forward: d > (foe ? 0.9 : 2) ? 1 : 0, strafe: 0, jump: b.collidedH || b.inWater, sneak: false, sprint: false, yaw: this.yaw }, false, this.spec.speed * (foe || pd > 8 ? 1.4 : 1));
+    this.walkAnim += Math.hypot(b.vel[0], b.vel[2]) * 3.5;
+    if (b.onGround) b.fallDistance = 0;
+    return true;
   }
 
   /** Floating movement for Emberwisps and moths. */
@@ -871,9 +928,6 @@ export class Bobber extends Entity {
   }
 }
 
-function dist(a: number[], b: number[]): number {
-  return Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]);
-}
 
 // ---------- Particles ----------
 class Particles {
@@ -918,6 +972,19 @@ class Particles {
 }
 
 // ---------- Manager ----------
+/** Distance along a ray to an axis-aligned box, or null if it misses within maxDist. */
+export function rayBox(origin: number[], dir: number[], maxDist: number, a: { min: number[]; max: number[] }): number | null {
+  let tmin = 0, tmax = maxDist;
+  for (let k = 0; k < 3; k++) {
+    if (Math.abs(dir[k]) < 1e-9) { if (origin[k] < a.min[k] || origin[k] > a.max[k]) return null; continue; }
+    let t1 = (a.min[k] - origin[k]) / dir[k], t2 = (a.max[k] - origin[k]) / dir[k];
+    if (t1 > t2) [t1, t2] = [t2, t1];
+    tmin = Math.max(tmin, t1); tmax = Math.min(tmax, t2);
+    if (tmin > tmax) return null;
+  }
+  return tmin;
+}
+
 export class EntityManager {
   list: Entity[] = [];
   particles: Particles;
@@ -1112,9 +1179,9 @@ export class EntityManager {
         const y = w.surfaceY(pos[0], pos[2]);
         const biome = this.biomeAt(pos[0], pos[2]);
         if (w.getBlock(pos[0], y - 1, pos[2]) === B.grass && w.getSky(pos[0], y, pos[2]) >= 9) {
-          const kinds = biome === 8 ? ['bogfrog', 'bogfrog', 'hen'] : biome === 2 || biome === 4 || biome === 7 ? ['burrowfox', 'boar', 'woolback'] : ['boar', 'hen', 'woolback'];
+          const kinds = biome === 8 ? ['bogfrog', 'bogfrog', 'hen'] : biome === 2 || biome === 4 || biome === 7 ? ['burrowfox', 'boar', 'woolback', 'mossback'] : ['boar', 'hen', 'woolback', 'boar', 'mossback'];
           const kind = kinds[Math.floor(Math.random() * kinds.length)];
-          const n = kind === 'burrowfox' ? 1 + Math.floor(Math.random() * 2) : 2 + Math.floor(Math.random() * 3);
+          const n = kind === 'burrowfox' ? 1 + Math.floor(Math.random() * 2) : kind === 'mossback' ? 2 + Math.floor(Math.random() * 2) : 2 + Math.floor(Math.random() * 3);
           for (let i = 0; i < n; i++) {
             const sx = pos[0] + Math.floor(Math.random() * 5) - 2, sz = pos[2] + Math.floor(Math.random() * 5) - 2;
             const sy = w.surfaceY(sx, sz);
@@ -1307,21 +1374,42 @@ export class EntityManager {
   }
 
   serialize(): unknown[] {
-    return this.list.filter((e) => e instanceof Mob && e.deathTime === 0 && !(e as Mob).spec.hostile && !(e as Mob).spec.flying && !(e as Mob).spec.aquatic).map((e) => {
+    const mobs = this.list.filter((e) => e instanceof Mob && e.deathTime === 0 && !(e as Mob).spec.hostile && !(e as Mob).spec.flying && !(e as Mob).spec.aquatic).map((e) => {
       const m = e as Mob;
-      return { kind: m.spec.kind, pos: m.body.pos, health: m.health, growing: m.growing, sheared: m.sheared, profession: m.spec.trader ? m.profession : undefined, offers: m.spec.trader ? m.offers : undefined };
+      return {
+        kind: m.spec.kind, pos: m.body.pos, health: m.health, growing: m.growing, sheared: m.sheared, profession: m.spec.trader ? m.profession : undefined, offers: m.spec.trader ? m.offers : undefined,
+        tamed: m.tamed || undefined, sitting: m.sitting || undefined, saddled: m.saddled || undefined,
+      };
     });
+    const vehicles = this.vehicles().map((v) => ({ vehicle: v.kind, pos: v.body.pos, yaw: v.yaw }));
+    return [...mobs, ...vehicles];
+  }
+
+  vehicles(): Vehicle[] {
+    return this.list.filter((e): e is Vehicle => e instanceof Vehicle && !e.dead);
+  }
+
+  /** Nearest vehicle the ray passes through. */
+  raycastVehicle(origin: number[], dir: number[], maxDist: number): { vehicle: Vehicle; dist: number } | null {
+    let best: { vehicle: Vehicle; dist: number } | null = null;
+    for (const v of this.vehicles()) {
+      const t = rayBox(origin, dir, maxDist, v.body.aabb());
+      if (t !== null && (!best || t < best.dist)) best = { vehicle: v, dist: t };
+    }
+    return best;
   }
 
   load(data: unknown): void {
     if (!Array.isArray(data)) return;
-    for (const d of data as { kind: string; pos: [number, number, number]; health: number; growing?: number; sheared?: boolean; profession?: string; offers?: TradeOffer[] }[]) {
+    for (const d of data as { kind: string; vehicle?: string; yaw?: number; pos: [number, number, number]; health: number; growing?: number; sheared?: boolean; profession?: string; offers?: TradeOffer[]; tamed?: boolean; sitting?: boolean; saddled?: boolean }[]) {
+      if (d.vehicle) { const v = makeVehicle(d.vehicle, d.pos[0], d.pos[1], d.pos[2], d.yaw ?? 0); if (v) this.add(v); continue; }
       if (!MOBS[d.kind]) continue;
       const m = this.spawnMob(d.kind, d.pos[0], d.pos[1], d.pos[2], d.profession);
       if (d.offers) m.offers = d.offers;
       m.health = d.health;
       if (d.growing) { m.makeBaby(); m.growing = d.growing; }
       m.sheared = !!d.sheared;
+      m.tamed = !!d.tamed; m.sitting = !!d.sitting; m.saddled = !!d.saddled;
     }
   }
 }

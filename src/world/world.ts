@@ -2,7 +2,7 @@
 // side effects (light, fluids, falling blocks, support), random ticks,
 // block entities, and scheduling chunk generation and meshing.
 
-import { B, BLOCKS, EMIT, LIGHT_OPACITY, SOLID, isLeaves, isLog } from '../blocks';
+import { B, BLOCKS, EMIT, LIGHT_OPACITY, RAIL_DIRS, RAIL_EXITS, SOLID, isLeaves, isLog, isRail, type RailDir } from '../blocks';
 import { SMELTING } from '../crafting';
 import { BREW_TICKS, brewFuel, brewResult } from '../brewing';
 import { Inventory, type Slot } from '../inventory';
@@ -231,6 +231,7 @@ export class World implements ChunkSource {
       case 'plate':
       case 'cake':
       case 'carpet':
+      case 'rail':
         return SOLID[below] === 1 && below !== B.lily_pad;
       case 'button': {
         const off = [[0, -1, 0], [0, 0, -1], [0, 0, 1], [-1, 0, 0], [1, 0, 0]][meta & 7] ?? [0, -1, 0];
@@ -247,6 +248,66 @@ export class World implements ChunkSource {
         return SOLID[below] === 1 && BLOCKS[below].shape === 'cube';
       default:
         return true;
+    }
+  }
+
+  // ---------- Rails ----------
+  /** Rail track shape at a position (0-9), or -1 if there's no rail. */
+  railShape(x: number, y: number, z: number): number {
+    const id = this.getBlock(x, y, z);
+    if (!isRail(id)) return -1;
+    const m = this.getMeta(x, y, z);
+    return id === B.powered_rail ? m & 7 : m & 15;
+  }
+
+  /** Directions from this rail to rails it could join (level, one up, or one down). */
+  private railLinks(x: number, y: number, z: number): { dir: RailDir; up: boolean }[] {
+    const out: { dir: RailDir; up: boolean }[] = [];
+    for (const dir of ['n', 's', 'e', 'w'] as RailDir[]) {
+      const [dx, dz] = RAIL_DIRS[dir];
+      if (isRail(this.getBlock(x + dx, y, z + dz)) || isRail(this.getBlock(x + dx, y - 1, z + dz))) out.push({ dir, up: false });
+      else if (isRail(this.getBlock(x + dx, y + 1, z + dz))) out.push({ dir, up: true });
+    }
+    return out;
+  }
+
+  /** How many ends of a rail's current shape lead to another rail. */
+  private railEndsUsed(x: number, y: number, z: number): number {
+    const s = this.railShape(x, y, z);
+    if (s < 0) return 0;
+    const links = this.railLinks(x, y, z).map((l) => l.dir);
+    const e = RAIL_EXITS[s];
+    return (links.includes(e.a) ? 1 : 0) + (links.includes(e.b) ? 1 : 0);
+  }
+
+  /**
+   * Shape a rail to join its neighbours: straight, sloped toward a rail one block up, or (plain
+   * rails only) curved between two perpendicular neighbours. Neighbours with a free end then
+   * turn to join it, so laying track just works.
+   */
+  fitRail(x: number, y: number, z: number, refitNeighbours = true): void {
+    const id = this.getBlock(x, y, z);
+    if (!isRail(id)) return;
+    const powered = id === B.powered_rail;
+    const links = this.railLinks(x, y, z);
+    const has = (d: RailDir) => links.some((l) => l.dir === d);
+    const up = (d: RailDir) => links.some((l) => l.dir === d && l.up);
+    let shape = this.railShape(x, y, z);
+    const ns = has('n') || has('s'), ew = has('e') || has('w');
+    if (ns && ew && !powered) shape = has('s') && has('e') ? 6 : has('s') && has('w') ? 7 : has('n') && has('w') ? 8 : 9;
+    else if (ns) shape = up('n') ? 4 : up('s') ? 5 : 0;
+    else if (ew) shape = up('e') ? 2 : up('w') ? 3 : 1;
+    const m = this.getMeta(x, y, z);
+    const nm = powered ? (m & 8) | shape : shape;
+    if (nm !== m) this.setMetaQuiet(x, y, z, nm);
+    if (!refitNeighbours) return;
+    for (const l of links) {
+      const [dx, dz] = RAIL_DIRS[l.dir];
+      for (const dy of [0, 1, -1]) {
+        if (!isRail(this.getBlock(x + dx, y + dy, z + dz))) continue;
+        if (this.railEndsUsed(x + dx, y + dy, z + dz) < 2) this.fitRail(x + dx, y + dy, z + dz, false);
+        break;
+      }
     }
   }
 
@@ -336,6 +397,9 @@ export class World implements ChunkSource {
       if (id === B.lamp || id === B.lamp_on) {
         const want = this.isPowered(a, b, c) ? B.lamp_on : B.lamp;
         if (want !== id) this.setBlock(a, b, c, want);
+      } else if (id === B.powered_rail) {
+        const m = this.getMeta(a, b, c), on = this.isPowered(a, b, c) || this.isPowered(a, b - 1, c);
+        if (((m & 8) !== 0) !== on) this.setMetaQuiet(a, b, c, (m & 7) | (on ? 8 : 0));
       } else if (id === B.tnt && this.isPowered(a, b, c)) {
         this.setBlock(a, b, c, 0);
         this.onIgnite(a, b, c);
@@ -529,7 +593,7 @@ export class World implements ChunkSource {
     if (id === B.sand || id === B.gravel) this.schedule(x, y, z, 2);
     if (id === B.portal && !this.portalIntact(x, y, z)) { this.setBlock(x, y, z, 0); return; }
     if (id === B.fire) this.schedule(x, y, z, 30 + Math.floor(this.rand() * 10));
-    if (id === B.wire || id === B.lamp || id === B.lamp_on || id === B.door || id === B.trapdoor || id === B.tnt || id === B.fence_gate) this.schedule(x, y, z, 1);
+    if (id === B.wire || id === B.lamp || id === B.lamp_on || id === B.door || id === B.trapdoor || id === B.tnt || id === B.fence_gate || id === B.powered_rail) this.schedule(x, y, z, 1);
   }
 
   private portalIntact(x: number, y: number, z: number): boolean {
@@ -557,7 +621,7 @@ export class World implements ChunkSource {
       return;
     }
     if (id === B.fire) { this.fireTick(x, y, z); return; }
-    if (id === B.wire || id === B.lamp || id === B.lamp_on || id === B.door || id === B.trapdoor || id === B.tnt || id === B.fence_gate) { this.updatePower(x, y, z); return; }
+    if (id === B.wire || id === B.lamp || id === B.lamp_on || id === B.door || id === B.trapdoor || id === B.tnt || id === B.fence_gate || id === B.powered_rail) { this.updatePower(x, y, z); return; }
     if (id === B.water && this.dimension === 'ember') { this.setBlock(x, y, z, 0); this.onEvent('fizz', x, y, z, id); return; }
     if (id === 0) {
       // A block was removed: wires next to it may lose power.

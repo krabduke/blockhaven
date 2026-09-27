@@ -3,7 +3,7 @@
 
 export type RenderShape = 'none' | 'cube' | 'cross' | 'liquid' | 'torch' | 'door' | 'bed' | 'cactus' | 'ladder' | 'slabBottom' | 'stairs' | 'fence' | 'gate' | 'table'
   | 'pane' | 'trapdoor' | 'lantern' | 'wire' | 'button' | 'plate' | 'sign' | 'flat' | 'vine' | 'cake' | 'carpet' | 'portal' | 'fire' | 'layer'
-  | 'banner' | 'painting';
+  | 'banner' | 'painting' | 'rail';
 export type Layer = 'opaque' | 'cutout' | 'translucent';
 export type Tool = 'pickaxe' | 'axe' | 'shovel' | 'sword' | null;
 export type SoundKind = 'stone' | 'wood' | 'gravel' | 'grass' | 'sand' | 'glass' | 'wool' | 'snow' | 'none';
@@ -307,6 +307,9 @@ def(170, 'stained_glass', 'White Stained Glass', { layer: 'translucent', opaque:
 def(171, 'banner', 'White Banner', { shape: 'banner', layer: 'cutout', solid: false, opaque: false, hardness: 1, tool: 'axe', sound: 'wool', tiles: 'banner_white', icon: 'banner_white', metaTiles: DYE_COLORS.map((c) => 'banner_' + c), metaShift: 2 });
 // Paintings hang on walls (meta: facing | artwork << 2).
 def(172, 'painting', 'Painting', { shape: 'painting', layer: 'cutout', solid: false, opaque: false, hardness: 0.2, sound: 'wood', tiles: 'painting_0', icon: 'painting_item', metaTiles: Array.from({ length: 16 }, (_, i) => 'painting_' + i), metaShift: 2 });
+// Rails: meta is the track shape (see RAIL_EXITS); powered rails add 8 when powered.
+def(173, 'rail', 'Rail', { shape: 'rail', layer: 'cutout', solid: false, opaque: false, hardness: 0.7, tool: 'pickaxe', sound: 'stone', needsSupport: true, tiles: 'rail', icon: 'rail', metaTiles: ['rail', 'rail', 'rail', 'rail', 'rail', 'rail', 'rail_curve', 'rail_curve', 'rail_curve', 'rail_curve', 'rail', 'rail', 'rail', 'rail', 'rail', 'rail'] });
+def(174, 'powered_rail', 'Powered Rail', { shape: 'rail', layer: 'cutout', solid: false, opaque: false, hardness: 0.7, tool: 'pickaxe', sound: 'stone', needsSupport: true, tiles: 'powered_rail', icon: 'powered_rail', metaTiles: ['powered_rail', 'powered_rail', 'powered_rail', 'powered_rail', 'powered_rail', 'powered_rail', 'powered_rail', 'powered_rail', 'powered_rail_on', 'powered_rail_on', 'powered_rail_on', 'powered_rail_on', 'powered_rail_on', 'powered_rail_on', 'powered_rail_on', 'powered_rail_on'] });
 def(160, 'brewing_stand', 'Brewing Stand', { shape: 'table', opaque: false, lightOpacity: 0, emit: 3, tiles: { top: 'brewing_top', side: 'brewing_side', bottom: 'cobblestone' }, hardness: 0.5, tool: 'pickaxe', harvestTier: 0, icon: 'brewing_item' });
 def(115, 'bell', 'Village Bell', { shape: 'lantern', layer: 'cutout', opaque: false, hardness: 5, tool: 'pickaxe', tiles: 'bell', icon: 'bell_item', sound: 'stone' });
 
@@ -348,3 +351,20 @@ export function isLog(id: number): boolean {
   return id === B.log || id === B.birch_log || id === B.spruce_log || id === B.sunwood_log || id === B.blossom_log || id === B.jungle_log;
 }
 export const WOOL_COLORS = ['wool', 'wool_red', 'wool_orange', 'wool_yellow', 'wool_green', 'wool_blue', 'wool_black'] as const;
+
+// ---------- Rails ----------
+/** Unit steps north (-z), south (+z), east (+x), west (-x). */
+export const RAIL_DIRS = { n: [0, -1], s: [0, 1], e: [1, 0], w: [-1, 0] } as const;
+export type RailDir = keyof typeof RAIL_DIRS;
+/**
+ * The two ends of each track shape, and which end (if any) climbs one block:
+ * 0 north-south, 1 east-west, 2-5 slopes rising east/west/north/south, 6-9 curves.
+ */
+export const RAIL_EXITS: { a: RailDir; b: RailDir; up?: RailDir }[] = [
+  { a: 'n', b: 's' }, { a: 'w', b: 'e' },
+  { a: 'w', b: 'e', up: 'e' }, { a: 'e', b: 'w', up: 'w' }, { a: 's', b: 'n', up: 'n' }, { a: 'n', b: 's', up: 's' },
+  { a: 's', b: 'e' }, { a: 's', b: 'w' }, { a: 'n', b: 'w' }, { a: 'n', b: 'e' },
+];
+export function isRail(id: number): boolean {
+  return id === B.rail || id === B.powered_rail;
+}

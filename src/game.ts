@@ -3,7 +3,8 @@
 
 import { initAudio, setVolume, sfx, spatial } from './audio';
 import { B, BLOCKS, SOLID } from './blocks';
-import { EntityManager, MOBS, TntEntity } from './entities/entities';
+import { EntityManager, MOBS, Mob, TntEntity } from './entities/entities';
+import type { Vehicle } from './entities/vehicles';
 import { createAvatar } from './entities/avatar';
 import type { MobModel } from './entities/models';
 import { I, itemDef } from './items';
@@ -70,6 +71,8 @@ export const ACHIEVEMENTS: Record<string, [string, string]> = {
   gate: ['Into the fire', 'Light an Ember Gate'],
   ember: ['Down below', 'Enter the Emberdeep'],
   trade: ['Fair deal', 'Trade with a villager'],
+  tame: ['Best friends', 'Tame a fox or a mossback'],
+  brew: ['Local brewery', 'Brew a potion'],
 };
 
 type Mode = 'title' | 'loading' | 'playing';
@@ -117,6 +120,9 @@ export class Game {
   readonly map: WorldMap;
   /** 0 first person, 1 behind, 2 in front. */
   perspective = 0;
+  /** What the player is riding (a boat, a minecart or a saddled mossback). */
+  riding: Vehicle | Mob | null = null;
+  private wasSneaking = false;
   private acc = 0;
   private last = performance.now();
   private fps = 0;
@@ -263,7 +269,7 @@ export class Game {
         const p = this.player.body.pos;
         const sp = spatial(p[0], p[1] + 1.6, p[2], this.player.yaw, x + 0.5, y + 0.5, z + 0.5);
         if (kind === 'fizz') sfx.fizz(sp);
-        else if (kind === 'brewed') sfx.brewed(sp);
+        else if (kind === 'brewed') { sfx.brewed(sp); if (Math.hypot(x - p[0], z - p[2]) < 12) this.player.achieve('brew'); }
         else if (kind === 'break' && this.mode === 'playing') {
           this.entities?.blockBreakParticles(x, y, z, id, 16);
           sfx.breakBlock(BLOCKS[id].sound, sp);
@@ -290,6 +296,7 @@ export class Game {
   private disposeWorld(): void {
     this.signs.clear();
     this.history.clear();
+    this.riding = null;
     this.map.clear();
     this.entities?.clear();
     this.entities = null;
@@ -598,6 +605,48 @@ export class Game {
     this.input.lockPointer();
   }
 
+  // ---------- Riding ----------
+  mount(what: Vehicle | Mob): void {
+    this.riding = what;
+    const p = this.player;
+    p.sprinting = false;
+    p.flying = false;
+    this.seatPlayer();
+    this.prevPos = [...p.body.pos];
+    this.toast(what instanceof Mob ? 'Look where you want to go; sprint to gallop, jump to leap. Sneak to get off.' : 'W and S to move, A and D to steer. Sneak to get off.', 3);
+  }
+
+  dismount(): void {
+    const r = this.riding;
+    if (!r) return;
+    this.riding = null;
+    r.ridden = false;
+    // Step off to the side, clear of the vehicle.
+    const p = this.player, w = this.world!, rp = r.body.pos;
+    const side = r.body.width / 2 + 0.6;
+    for (const a of [Math.PI / 2, -Math.PI / 2, 0, Math.PI]) {
+      const yaw = r.yaw + a;
+      const x = rp[0] - Math.sin(yaw) * side, z = rp[2] - Math.cos(yaw) * side;
+      const y = Math.floor(rp[1] + 0.5);
+      if (!SOLID[w.getBlock(Math.floor(x), y, Math.floor(z))] && !SOLID[w.getBlock(Math.floor(x), y + 1, Math.floor(z))]) {
+        p.body.pos = [x, y, z];
+        p.body.vel = [0, 0, 0];
+        return;
+      }
+    }
+    p.body.pos = [rp[0], rp[1] + r.body.height + 0.1, rp[2]];
+  }
+
+  /** Keep the player sitting on whatever they ride. */
+  private seatPlayer(): void {
+    const r = this.riding!, p = this.player;
+    const seat = r instanceof Mob ? r.body.height * 0.72 : r.seat;
+    p.body.pos = [r.body.pos[0], r.body.pos[1] + seat - 0.45, r.body.pos[2]];
+    p.body.vel = [...r.body.vel] as [number, number, number];
+    p.body.fallDistance = 0;
+    p.body.onGround = true;
+  }
+
   // ---------- Small actions used by input and the UI ----------
   /** Turn the view by yaw/pitch deltas (radians). */
   turn(dYaw: number, dPitch: number): void {
@@ -888,7 +937,17 @@ export class Game {
     updateContacts(w, p.body, p.eyeHeight);
     const wasOnGround = p.body.onGround;
     if (p.blocking) p.sprinting = false;
-    if (p.alive) {
+    // Riding: the keys steer the mount; sneak climbs off.
+    const ride = this.riding;
+    if (ride && (ride.dead || !p.alive)) this.dismount();
+    if (this.riding) {
+      const inp = { forward, strafe, jump, yaw: p.yaw, sprint: mv.sprint };
+      if (this.riding instanceof Mob) { this.riding.ridden = true; this.riding.riderInput = inp; }
+      else { this.riding.ridden = true; this.riding.input = inp; }
+      if (mv.sneak && !this.wasSneaking) this.dismount();
+    }
+    this.wasSneaking = mv.sneak;
+    if (p.alive && !this.riding) {
       const speed = p.speed * (1 + 0.2 * p.effectLevel('swiftness')) * Math.max(0.2, 1 - 0.15 * p.effectLevel('slowness'));
       stepBody(w, p.body, { forward, strafe, jump, sneak: p.sneaking, sprint: p.sprinting, yaw: p.yaw, jumpBoost: p.effectLevel('leaping'), slowFall: p.effects.has('slow_falling') }, p.flying, speed);
     }
@@ -940,6 +999,7 @@ export class Game {
     this.actions.tick(active);
     w.tick(p.body.pos[0], p.body.pos[1], p.body.pos[2], true);
     ents.tick();
+    if (this.riding) this.seatPlayer();
     // Autosave every 30 seconds.
     if (++this.autosave >= 600) { this.autosave = 0; this.save(); }
   }

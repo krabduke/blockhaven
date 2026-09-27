@@ -55,7 +55,7 @@ All taken in-game at render distance 16 with the default Fancy graphics.
 - Day and night on a 20-minute cycle, with sun, moon, stars, drifting clouds, and rain, snow and thunderstorms
 
 **Blocks and building**
-- 172 blocks, including stairs, slabs, fences, fence gates, doors, trapdoors, ladders, glass and glass panes, iron bars, lanterns, signs you can write on, wool, carpets, stained glass and banners in all sixteen dye colours (mix dyes: red and white make pink, blue and green make cyan), sixteen original paintings to hang, slate, marble, terracotta, hay bales, cake, bookshelves, TNT and lamps
+- 174 blocks, including stairs, slabs, fences, fence gates, doors, trapdoors, ladders, glass and glass panes, iron bars, lanterns, signs you can write on, wool, carpets, stained glass and banners in all sixteen dye colours (mix dyes: red and white make pink, blue and green make cyan), sixteen original paintings to hang, slate, marble, terracotta, hay bales, cake, bookshelves, TNT and lamps
 - Power: buttons, pressure plates and levers send power along spark dust wire to light lamps, open doors, trapdoors and gates, and set off TNT
 - Fire that spreads through wood, wool and leaves and burns out on its own, and puts itself out in the rain
 - Smooth lighting with ambient occlusion; sunlight and torchlight both flood-fill through the world
@@ -103,6 +103,12 @@ Every creature is built from hand-placed boxes with procedurally painted fur, wo
 - World backups: export any world to a file and import it on another browser or device; rename and duplicate worlds
 - Installable as an app (Add to Home Screen) and playable offline; when a new version is published the game offers to save and reload
 - A frame-rate cap, and automatic quality that lowers the resolution when frames get slow
+
+**Getting around**
+- Boats: place one on water, climb in, row with W and S and steer with A and D
+- Rails and minecarts: track joins itself into straights, curves and slopes as you lay it; carts keep their speed through bends, speed up downhill, and powered rails (lit by spark dust, levers or buttons) push them along or brake them
+- The **Mossback**, an original creature: a tall mossy-antlered deer that roams plains and forests. Feed it apples or wheat until it trusts you, put a saddle on it, and ride it: it goes where you look, gallops when you sprint and leaps when you jump
+- Tame a **Burrowfox** with apples: it wears a red collar, follows you (catching up if you get far ahead), fights monsters that come near you, and sits or stands when you right-click it
 
 **Game modes**
 - Survival, and Creative (fly, instant breaking, and every block and item in a searchable palette)

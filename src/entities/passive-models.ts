@@ -148,6 +148,7 @@ function burrowfox(): MobModel {
     { name: 'head', size: [6, 5, 5], pivot: [0, 10, -5.5], offset: [0, 0.5, -2.5], paint: face },
     { name: 'muzzle', size: [3, 2, 3.5], pivot: [0, 9.5, -10.5], offset: [0, -0.5, -1.7], paint: muzzle, parent: 'head' },
     { name: 'lids', size: [2, 1, 0.4], pivot: [2, 12, -10.7], offset: [0, 0, 0], paint: tone('#d0692a'), parent: 'head', extra: [{ size: [2, 1, 0.4], offset: [-4, 0, 0], paint: tone('#d0692a') }] },
+    { name: 'collar', size: [6.4, 1.5, 3], pivot: [0, 10.2, -5.8], offset: [0, 0, 0], paint: faces(tone('#b8302a'), { [FRONT]: (g, w) => px(g, '#f0c040', Math.floor(w / 2), 0, 1, 1) }), parent: 'head' },
     { name: 'earL', size: [2, 4, 1], pivot: [-1.8, 13, -6.5], offset: [0, 2, 0], paint: ear, parent: 'head', rot: [0, 0, 0.12] },
     { name: 'earR', size: [2, 4, 1], pivot: [1.8, 13, -6.5], offset: [0, 2, 0], paint: ear, parent: 'head', rot: [0, 0, -0.12] },
     { name: 'tail', size: [4, 4, 10], pivot: [0, 10, 5.5], offset: [0, -0.5, 4.5], paint: coat, rot: [0.55, 0, 0], extra: [{ size: [4.4, 4.4, 3], offset: [0, -0.5, 10.5], paint: tone('#f4ecde') }] },
@@ -156,6 +157,55 @@ function burrowfox(): MobModel {
     parts.push({ name: n, size: [2, 6, 2], pivot: [x, 6, z], offset: [0, -3, 0], paint: sock });
   }
   return build('burrowfox', parts, 0.95);
+}
+
+// ---------------------------------------------------------------- Mossback
+// A tall, gentle deer: a fawn coat with pale dapples, a strip of living moss down its spine with
+// tiny flowers, branching antlers hung with moss, long legs and a white tail. Tame it with apples
+// or wheat, saddle it, and ride it.
+function mossback(): MobModel {
+  const coat = spots(fur('#a8784a', { top: '#96683e', under: '#e8d8b8' }), '#e8dcc0', 0.035, 1, [TOP, LEFT, RIGHT]);
+  const moss: Paint = (g, w, h, f, rand) => {
+    fur('#5a8a36', { top: '#6a9a3e', strand: 0.3 })(g, w, h, f, rand);
+    if (f === TOP) for (let i = 0; i < Math.max(2, (w * h) / 10); i++) px(g, ['#f0e060', '#e890a8', '#f0f0f0'][i % 3], Math.floor(rand() * w), Math.floor(rand() * h));
+  };
+  const face = withFace(fur('#9a6a3e', { top: '#86582e' }), (g, w) => {
+    eye(g, 0, 2, '#2a1a10', 'r', { big: true }); eye(g, w - 3, 2, '#2a1a10', 'l', { big: true });
+    px(g, '#e8d8b8', 1, 6, w - 2, 2);
+  });
+  const snout = faces(tone('#e8d8b8', { top: '#9a6a3e' }), { [FRONT]: (g, w) => { px(g, '#241810', 1, 0, w - 2, 2); } });
+  const antler = tone('#d8c8a0', { bottom: '#a89878' });
+  const leg = bands([['#a8784a', 11], ['#8a603a', 3], ['#2a1e16', 2]]);
+  const saddle = faces(tone('#6a3a20', { top: '#7a4a28' }), { [TOP]: (g, w, h) => { px(g, '#c8a048', 0, Math.floor(h / 2), w, 1); } });
+  const parts: PartSpec[] = [
+    { name: 'torso', size: [11, 11, 22], pivot: [0, 16, 0], offset: [0, 5, 0], paint: coat },
+    { name: 'moss', size: [5, 2, 18], pivot: [0, 26, 0], offset: [0, 1, -0.5], paint: moss, parent: 'torso', extra: [{ size: [3, 2, 3], offset: [0, 2.2, -5], paint: moss }, { size: [3, 1.5, 3], offset: [1, 2, 4], paint: moss }] },
+    { name: 'saddle', size: [12, 2, 9], pivot: [0, 27, -1], offset: [0, 0.5, 0], paint: saddle, parent: 'torso', extra: [{ size: [1, 7, 2], offset: [-6.3, -3.5, 0], paint: tone('#4a2a18') }, { size: [1, 7, 2], offset: [6.3, -3.5, 0], paint: tone('#4a2a18') }] },
+    { name: 'neck', size: [6, 12, 6], pivot: [0, 24, -9], offset: [0, 5, -1], paint: coat, rot: [0.35, 0, 0] },
+    { name: 'head', size: [7, 7, 8], pivot: [0, 35, -12], offset: [0, 1, -3], paint: face, parent: 'neck' },
+    { name: 'snout', size: [5, 4, 4], pivot: [0, 34, -19], offset: [0, 0, -1.5], paint: snout, parent: 'head' },
+    { name: 'lids', size: [2, 2, 0.4], pivot: [2.5, 37, -19.1], offset: [0, 0, 0], paint: tone('#86582e'), parent: 'head', extra: [{ size: [2, 2, 0.4], offset: [-5, 0, 0], paint: tone('#86582e') }] },
+    { name: 'earL', size: [4, 2, 1], pivot: [-3.5, 38, -12], offset: [-2, 0, 0], paint: fur('#9a6a3e'), parent: 'head', rot: [0, 0, 0.3] },
+    { name: 'earR', size: [4, 2, 1], pivot: [3.5, 38, -12], offset: [2, 0, 0], paint: fur('#9a6a3e'), parent: 'head', rot: [0, 0, -0.3] },
+    { name: 'tail', size: [3, 5, 2], pivot: [0, 25, 11], offset: [0, -2, 0.5], paint: tone('#f0ece0'), parent: 'torso', rot: [0.3, 0, 0] },
+  ];
+  // Antlers: a main beam that forks twice, with moss hanging from the tines.
+  for (const s of [-1, 1]) {
+    const L = s < 0 ? 'L' : 'R';
+    parts.push(
+      { name: 'antler' + L, size: [1.5, 7, 1.5], pivot: [2.2 * s, 39, -13], offset: [0, 3.5, 0], paint: antler, parent: 'head', rot: [-0.25, 0, -0.45 * s],
+        extra: [
+          { size: [1.2, 4, 1.2], offset: [1.8 * s, 6, -1], paint: antler, rot: [-0.5, 0, -0.6 * s] },
+          { size: [1.2, 5, 1.2], offset: [-0.8 * s, 7.5, 1], paint: antler, rot: [0.4, 0, 0.3 * s] },
+          { size: [1.2, 3, 1.2], offset: [0.5 * s, 3, -1.8], paint: antler, rot: [-0.9, 0, 0] },
+          { size: [2, 2.5, 1.5], offset: [1.2 * s, 5, -0.2], paint: moss },
+        ] },
+    );
+  }
+  for (const [n, x, z] of [['legFL', -3.5, -8], ['legFR', 3.5, -8], ['legBL', -3.5, 8], ['legBR', 3.5, 8]] as const) {
+    parts.push({ name: n, size: [3, 16, 3], pivot: [x, 16, z], offset: [0, -8, 0], paint: leg, extra: [{ size: [3.3, 1.5, 3.6], offset: [0, -15.3, -0.2], paint: hoof }] });
+  }
+  return build('mossback', parts, 1.7);
 }
 
 // ---------------------------------------------------------------- Bogfrog
@@ -381,6 +431,6 @@ function stonewarden(): MobModel {
 }
 
 export const PASSIVE_MODELS: Record<string, (variant?: string) => MobModel> = {
-  boar, hen, woolback, burrowfox, bogfrog, cavemoth, streamfish, villager, stonewarden,
+  boar, hen, woolback, burrowfox, bogfrog, cavemoth, streamfish, villager, stonewarden, mossback,
 };
 
