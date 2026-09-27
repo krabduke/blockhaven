@@ -477,6 +477,75 @@ await wait(200);
 const planks = await g(() => { const G = window.blockhaven; const n = G.player.inv.count(5); G.containers.close(); return n; });
 check('crafting a log into planks via the inventory screen', crafted && planks === 4, `planks: ${planks}`);
 
+// --- Closing the inventory and the chat bar every way a player might.
+// Headless Chromium can't capture the mouse, so a stand-in follows Chrome's rules: capturing needs a
+// recent click or key press (Escape doesn't count), and the change fires 'pointerlockchange'.
+await g(() => {
+  const G = window.blockhaven, cv = G.canvas;
+  window.__lock = false;
+  const fire = () => document.dispatchEvent(new Event('pointerlockchange'));
+  Object.defineProperty(document, 'pointerLockElement', { configurable: true, get: () => (window.__lock ? cv : null) });
+  cv.requestPointerLock = () => { if (navigator.userActivation.isActive && !window.__lock) { window.__lock = true; setTimeout(fire, 0); return Promise.resolve(); } return Promise.reject(new Error('needs a gesture')); };
+  document.exitPointerLock = () => { if (window.__lock) { window.__lock = false; setTimeout(fire, 0); } };
+  G.player.creative = true;
+});
+const ui = () => g(() => { const G = window.blockhaven; return { inv: G.containers.open, chat: G.cmdEl.classList.contains('show'), locked: !!document.pointerLockElement, hint: !!document.querySelector('#resume')?.classList.contains('show') }; });
+// A missing button should fail its check, not stop the run.
+const tap = async (sel) => { try { await page.click(sel, { timeout: 1500 }); } catch { /* reported by the check below */ } await wait(250); };
+const press = async (key) => { await page.keyboard.press(key); await wait(250); };
+await page.mouse.click(500, 320); await wait(250);
+await press('KeyE');
+let u = await ui();
+const opened = u.inv && !u.locked;
+await press('KeyE');
+u = await ui();
+check('E opens and closes the inventory', opened && !u.inv && u.locked, JSON.stringify(u));
+await press('KeyE');
+await tap('input.search'); await page.keyboard.type('stone'); await press('Escape');
+u = await ui();
+check('Escape closes the creative inventory while typing in its search box', !u.inv, JSON.stringify(u));
+await press('KeyW');
+await g(() => { window.blockhaven.containers.close(); document.activeElement?.blur(); });
+await page.mouse.click(500, 320); await wait(250);
+await press('KeyE');
+let wasOpen = (await ui()).inv;
+await tap('#container .close-x');
+check('the close button closes the inventory', wasOpen && !(await ui()).inv);
+await g(() => window.blockhaven.containers.close());
+await press('KeyE');
+wasOpen = (await ui()).inv;
+await wait(500); // clicks in the first moments after opening are ignored (see containers.ts)
+await page.mouse.click(8, 8); await wait(250);
+check('clicking the backdrop closes the inventory', wasOpen && !(await ui()).inv);
+await g(() => window.blockhaven.containers.close());
+await press('KeyT');
+await g(() => document.querySelector('#cmd input').blur());
+await press('Escape');
+check('Escape closes the chat bar even after its box loses focus', !(await ui()).chat);
+await g(() => { const G = window.blockhaven; G.cmdEl.classList.remove('show'); });
+await press('KeyT');
+wasOpen = (await ui()).chat;
+await tap('#cmd .close-x');
+check('the chat close button closes the chat bar', wasOpen && !(await ui()).chat);
+await g(() => { const G = window.blockhaven; G.cmdEl.classList.remove('show'); });
+await page.mouse.click(500, 320); await wait(250);
+await press('KeyT'); await page.keyboard.type('/time set day'); await press('Enter');
+check('Enter runs a command and closes the chat bar', !(await ui()).chat);
+// Escape long after the last gesture can't recapture the mouse: the game says so, and any key resumes.
+await press('KeyE'); await wait(6000); await press('Escape');
+u = await ui();
+const hinted = !u.inv && !u.locked && u.hint;
+await press('KeyW');
+u = await ui();
+check('after Escape without a recent gesture, a hint shows and any key resumes', hinted && u.locked && !u.hint, JSON.stringify(u));
+await g(() => {
+  const G = window.blockhaven;
+  document.exitPointerLock();
+  delete document.pointerLockElement; delete document.exitPointerLock; delete G.canvas.requestPointerLock;
+  G.player.creative = false;
+});
+await wait(300);
+
 // --- Save, quit, reload, and check a block change persisted.
 const marker = await g(async () => {
   const G = window.blockhaven;

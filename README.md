@@ -111,7 +111,7 @@ Open the same link on your phone and turn it sideways. Touch controls appear aut
 | **Use** | Tap to place, eat, open doors and chests (hold to draw a bow) |
 | **Jump** | Jump; double-tap to fly in Creative |
 | **Sneak** | Toggles sneaking |
-| Top buttons | Commands (`/`), drop item, inventory (▦) and pause |
+| Top buttons | Commands (`/`), drop item, inventory (▦) and pause. Screens close with their × button |
 | Hotbar | Tap a slot to select it |
 
 Phones start with lighter graphics (render distance 6, no sun shadows or bloom); you can raise them in Settings.
@@ -129,9 +129,9 @@ Phones start with lighter graphics (render distance 6, no sun shadows or bloom);
 | Right click | Place, use, eat, open, draw a bow, cast a rod |
 | Middle click | Pick the block you're looking at |
 | 1–9 or scroll wheel | Choose a hotbar slot |
-| E | Inventory |
+| E | Inventory (E, Esc, the × button or a click outside the panel closes it) |
 | Q | Drop one item (Ctrl+Q drops the stack) |
-| T or / | Commands |
+| T or / | Commands (Enter runs, Esc or × closes) |
 | F3 | Debug info |
 | F1 | Hide the HUD |
 | Esc | Pause |

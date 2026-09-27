@@ -126,6 +126,10 @@ export class Game {
   private cmdInput: HTMLInputElement;
   private chatlog: HTMLElement;
   private debugEl: HTMLElement;
+  private resumeEl: HTMLElement;
+  /** Set once the mouse has been captured this session (the resume hint only makes sense after that). */
+  private everLocked = false;
+  private cmdOpenedAt = 0;
   private vignette: HTMLElement;
   private waterOverlay: HTMLElement;
   private fadeEl: HTMLElement;
@@ -187,6 +191,7 @@ export class Game {
     this.cmdInput = this.cmdEl.querySelector('input')!;
     this.chatlog = root.querySelector('#chatlog')!;
     this.debugEl = root.querySelector('#debug')!;
+    this.resumeEl = root.querySelector('#resume')!;
     this.vignette = root.querySelector('#vignette')!;
     this.waterOverlay = root.querySelector('#water-overlay')!;
     this.fadeEl = root.querySelector('#fade')!;
@@ -527,8 +532,16 @@ export class Game {
   }
 
   private bindInput(): void {
-    this.canvas.addEventListener('click', () => { initAudio(); this.lockPointer(); });
+    this.canvas.addEventListener('click', () => {
+      initAudio();
+      // Clicking back into the world closes an open chat bar (but not the delayed click that
+      // follows the tap which opened it on a touch screen).
+      if (this.cmdEl.classList.contains('show')) { if (performance.now() - this.cmdOpenedAt > 400) this.closeCommand(); }
+      else this.lockPointer();
+    });
+    this.cmdEl.querySelector('.close-x')!.addEventListener('click', () => this.closeCommand());
     document.addEventListener('pointerlockchange', () => {
+      if (this.locked) this.everLocked = true;
       if (!this.locked && this.mode === 'playing' && !this.containers.open && !this.menus.current && !this.cmdEl.classList.contains('show') && this.player.alive) {
         this.menus.show('pause');
       }
@@ -576,6 +589,13 @@ export class Game {
   private keyDown(e: KeyboardEvent): void {
     if (this.mode !== 'playing') return;
     const code = e.code;
+    // The chat bar is open but its text box lost focus (you clicked elsewhere): Escape still
+    // closes it, and typing goes back into it.
+    if (this.cmdEl.classList.contains('show')) {
+      if (code === 'Escape') { e.preventDefault(); this.closeCommand(); }
+      else if (!e.ctrlKey && !e.metaKey && !e.altKey) this.cmdInput.focus();
+      return;
+    }
     if (['F1', 'F3', 'Tab'].includes(code)) e.preventDefault();
     if (this.containers.open) {
       if (code === 'KeyE' || code === 'Escape') { e.preventDefault(); this.containers.close(); }
@@ -591,6 +611,9 @@ export class Game {
       this.openCommand(code === 'Slash' ? '/' : '');
       return;
     }
+    // Any key other than Escape counts as a gesture, so it can take the mouse back after a screen
+    // was closed with Escape.
+    if (!this.controlling && code !== 'Escape') this.lockPointer();
     if (!this.controlling) return;
     this.keys.add(code);
     if (code === 'Space') {
@@ -619,6 +642,7 @@ export class Game {
   }
 
   private openCommand(prefix: string): void {
+    this.cmdOpenedAt = performance.now();
     document.exitPointerLock();
     this.cmdEl.classList.add('show');
     this.cmdInput.value = prefix;
@@ -1398,6 +1422,11 @@ export class Game {
         this.player.pitch = Math.max(-Math.PI / 2 + 0.001, Math.min(Math.PI / 2 - 0.001, this.player.pitch));
       }
     }
+    // After Escape closes a screen the browser won't give the mouse back until you click
+    // (Escape doesn't count as a gesture), so say so instead of looking frozen.
+    const needClick = this.everLocked && !this.touchMode && !this.locked && !this.containers.open && !this.menus.current
+      && !this.cmdEl.classList.contains('show') && this.player.alive;
+    this.resumeEl.classList.toggle('show', needClick);
     w.update(this.player.body.pos[0], this.player.body.pos[2], this.settings.renderDistance);
     this.placeCamera(alpha);
     this.updateTarget();

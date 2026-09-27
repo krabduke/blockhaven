@@ -40,6 +40,7 @@ export class ContainerScreen {
   private progressEls: { cook?: HTMLElement; burn?: HTMLElement } = {};
   private search = '';
   onClose: () => void = () => {};
+  private openedAt = 0;
   onDrop: (stack: ItemStack) => void = () => {};
   /** Taking smelted items out of a furnace gives experience. */
   onSmeltTaken: (stack: ItemStack) => void = () => {};
@@ -68,7 +69,13 @@ export class ContainerScreen {
       this.tooltip.style.left = e.clientX + 14 + 'px';
       this.tooltip.style.top = e.clientY - 30 + 'px';
     });
+    // Clicking the empty backdrop closes the screen (when you aren't holding a stack; then it drops it).
+    let downOnBackdrop = false;
+    // (Ignore the first moments after opening: on touch screens the tap that opened the screen
+    // is followed by a delayed click at the same spot.)
+    this.root.addEventListener('click', (e) => { if (e.target === this.root && downOnBackdrop && performance.now() - this.openedAt > 400) this.close(); });
     this.root.addEventListener('mousedown', (e) => {
+      downOnBackdrop = e.target === this.root && !this.cursor && e.button === 0;
       if (e.target === this.root && this.cursor) {
         // Clicking outside the panel drops the held stack.
         const drop = e.button === 2 ? { ...this.cursor, count: 1 } : this.cursor;
@@ -93,6 +100,7 @@ export class ContainerScreen {
     this.craftW = kind === 'crafting' ? 3 : 2;
     this.craftGrid = new Array(this.craftW * this.craftW).fill(null);
     this.open = true;
+    this.openedAt = performance.now();
     this.build();
     this.root.classList.add('show');
   }
@@ -168,6 +176,14 @@ export class ContainerScreen {
     const panel = document.createElement('div');
     panel.className = 'panel inv';
     this.root.appendChild(panel);
+    const closeBtn = document.createElement('button');
+    closeBtn.className = 'close-x';
+    closeBtn.type = 'button';
+    closeBtn.textContent = '×';
+    closeBtn.title = 'Close (E or Esc)';
+    closeBtn.setAttribute('aria-label', 'Close');
+    closeBtn.addEventListener('click', () => this.close());
+    panel.appendChild(closeBtn);
     const inv = this.player.inv;
 
     if (this.kind === 'creative') {
@@ -179,7 +195,12 @@ export class ContainerScreen {
       search.placeholder = 'Search items';
       search.value = this.search;
       search.addEventListener('input', () => { this.search = search.value; this.build(); const s = this.root.querySelector('input.search') as HTMLInputElement; s.focus(); s.setSelectionRange(s.value.length, s.value.length); });
-      search.addEventListener('keydown', (e) => e.stopPropagation());
+      // Typing goes to the search box, but Escape still closes the screen and Enter leaves the box.
+      search.addEventListener('keydown', (e) => {
+        e.stopPropagation();
+        if (e.key === 'Escape') { e.preventDefault(); this.close(); }
+        else if (e.key === 'Enter') search.blur();
+      });
       panel.appendChild(search);
       const q = this.search.trim().toLowerCase();
       const ids = creativeItems().filter((id) => !q || (itemDef(id)?.name.toLowerCase().includes(q) ?? false));
