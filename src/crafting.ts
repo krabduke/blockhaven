@@ -58,6 +58,10 @@ r([' I', 'I '], { I: I.iron_ingot }, I.shears);
 s([I.bone], I.bone_meal, 3);
 r(['SS', 'SS'], { S: I.snowball }, B.snow);
 r(['  S', ' SX', 'S X'], { S: I.stick, X: I.string }, I.fishing_rod);
+r(['G G', ' G '], { G: B.glass }, I.glass_bottle, 3);
+r([' E ', 'CCC'], { E: I.ember_core, C: B.cobblestone }, B.brewing_stand);
+r(['PIP', 'PPP', ' P '], { P: PLANKS, I: I.iron_ingot }, I.shield);
+r(['SIS', 'XAX', ' S '], { S: I.stick, I: I.iron_ingot, X: I.string, A: I.arrow }, I.crossbow);
 r(['GG', 'GG'], { G: I.glow_dust }, B.glowstone);
 // Emberdeep, village and building blocks.
 r(['BB', 'BB'], { B: I.cinder_brick }, B.cinder_bricks);

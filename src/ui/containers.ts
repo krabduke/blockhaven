@@ -4,16 +4,17 @@
 import { sfx } from '../audio';
 import { SMELTING, craft } from '../crafting';
 import type { Inventory, Slot } from '../inventory';
-import { ENCHANT_NAMES, creativeCategory, creativeItems, itemDef, maxDurability, maxStack, type CreativeTab, type ItemStack } from '../items';
+import { BREW_TICKS, brewFuel, isBrewIngredient } from '../brewing';
+import { ENCHANT_NAMES, I, creativeCategory, creativeItems, itemDef, maxDurability, maxStack, type CreativeTab, type ItemStack } from '../items';
 
 const TABS: [CreativeTab, string][] = [['all', 'All'], ['building', 'Building'], ['nature', 'Nature'], ['decor', 'Decoration'], ['power', 'Power'], ['tools', 'Tools & combat'], ['food', 'Food & farming'], ['misc', 'Other']];
 import { offers, roman } from '../enchanting';
 import { PROFESSION_NAMES, type TradeOffer } from '../trading';
 import type { Player } from '../player';
-import type { FurnaceBE } from '../world/world';
+import type { BrewingBE, FurnaceBE } from '../world/world';
 import { slotHTML } from './hud';
 
-export type ContainerKind = 'player' | 'crafting' | 'furnace' | 'chest' | 'creative' | 'enchant' | 'trade';
+export type ContainerKind = 'player' | 'crafting' | 'furnace' | 'chest' | 'creative' | 'enchant' | 'trade' | 'brewing';
 
 interface SlotRef {
   get(): Slot;
@@ -35,6 +36,7 @@ export class ContainerScreen {
   private craftGrid: Slot[] = [];
   private craftW = 2;
   private furnace: FurnaceBE | null = null;
+  private brewing: BrewingBE | null = null;
   private chest: Inventory | null = null;
   private cursorEl: HTMLElement;
   private tooltip: HTMLElement;
@@ -97,7 +99,8 @@ export class ContainerScreen {
   private villager: { offers: TradeOffer[]; profession: string } | null = null;
   onTraded: () => void = () => {};
 
-  show(kind: ContainerKind, opts: { furnace?: FurnaceBE; chest?: Inventory; bookshelves?: number; villager?: { offers: TradeOffer[]; profession: string } } = {}): void {
+  show(kind: ContainerKind, opts: { furnace?: FurnaceBE; chest?: Inventory; bookshelves?: number; villager?: { offers: TradeOffer[]; profession: string }; brewing?: BrewingBE } = {}): void {
+    this.brewing = opts.brewing ?? null;
     this.kind = kind;
     this.villager = opts.villager ?? null;
     this.bookshelves = opts.bookshelves ?? 0;
@@ -319,6 +322,30 @@ export class ContainerScreen {
       out.role = 'output';
       top.appendChild(this.slot(out, true));
       this.progressEls = { cook: prog.firstElementChild as HTMLElement, burn: flame.firstElementChild as HTMLElement };
+    } else if (this.kind === 'brewing' && this.brewing) {
+      // Ingredient on top, fuel to the left, three bottles along the bottom.
+      const bw = this.brewing;
+      const stand = document.createElement('div');
+      stand.className = 'brew';
+      const ing = this.invRef(bw.inv, 0, 'container');
+      ing.accepts = (s) => isBrewIngredient(s.id);
+      const fuel = this.invRef(bw.inv, 1, 'container');
+      fuel.accepts = (s) => brewFuel(s.id) > 0;
+      const bottles = [2, 3, 4].map((i) => { const r = this.invRef(bw.inv, i, 'container'); r.accepts = (s) => s.id === I.water_bottle || !!itemDef(s.id)?.potion; return r; });
+      const head = document.createElement('h3'); head.textContent = 'Brewing Stand';
+      const fuelBar = document.createElement('div'); fuelBar.className = 'brew-fuel'; fuelBar.innerHTML = '<i></i>';
+      const bubbles = document.createElement('div'); bubbles.className = 'brew-progress'; bubbles.innerHTML = '<i></i>';
+      const fuelCol = document.createElement('div'); fuelCol.className = 'brew-col';
+      fuelCol.append(this.slot(fuel), fuelBar);
+      const mid = document.createElement('div'); mid.className = 'brew-col';
+      mid.append(this.slot(ing), bubbles);
+      const row = document.createElement('div'); row.className = 'brew-bottles';
+      for (const b of bottles) row.appendChild(this.slot(b));
+      const top2 = document.createElement('div'); top2.className = 'brew-top';
+      top2.append(fuelCol, mid);
+      stand.append(head, top2, row);
+      top.appendChild(stand);
+      this.progressEls = { cook: bubbles.firstElementChild as HTMLElement, burn: fuelBar.firstElementChild as HTMLElement };
     } else if (this.kind === 'chest' && this.chest) {
       const chest = this.chest;
       const t = document.createElement('div');
@@ -429,6 +456,10 @@ export class ContainerScreen {
       if (r.el && r.el.dataset.k !== html) { r.el.innerHTML = html; r.el.dataset.k = html; }
     }
     this.cursorEl.innerHTML = this.cursor ? slotHTML(this.cursor.id, this.cursor.count, this.cursor.damage, !!this.cursor.ench?.length) : '';
+    if (this.brewing && this.progressEls.cook) {
+      this.progressEls.cook.style.height = `${(this.brewing.brew / BREW_TICKS) * 100}%`;
+      this.progressEls.burn!.style.width = `${Math.min(100, (this.brewing.fuel / 10) * 100)}%`;
+    }
     if (this.furnace && this.progressEls.cook) {
       this.progressEls.cook.style.width = `${(this.furnace.cook / 200) * 100}%`;
       this.progressEls.burn!.style.height = `${this.furnace.burnMax ? (this.furnace.burn / this.furnace.burnMax) * 100 : 0}%`;
@@ -603,6 +634,16 @@ export class ContainerScreen {
       left = inv.add(stack, 0, 36);
     } else if (this.kind === 'chest' && this.chest) {
       left = this.chest.add(stack);
+    } else if (this.kind === 'brewing' && this.brewing) {
+      const bw = this.brewing.inv;
+      const target = brewFuel(stack.id) > 0 && !isBrewIngredient(stack.id) ? [1] : isBrewIngredient(stack.id) ? [0] : stack.id === I.water_bottle || itemDef(stack.id)?.potion ? [2, 3, 4] : [];
+      left = stack;
+      for (const t of target) {
+        if (!left) break;
+        const cur = bw.slots[t];
+        if (!cur) { bw.slots[t] = t >= 2 ? { ...left, count: 1 } : left; left = t >= 2 && left.count > 1 ? { ...left, count: left.count - 1 } : null; }
+        else if (cur.id === left.id && t < 2) { const n = Math.min(left.count, maxStack(left.id) - cur.count); cur.count += n; left = left.count - n > 0 ? { ...left, count: left.count - n } : null; }
+      }
     } else if (this.kind === 'furnace' && this.furnace) {
       const f = this.furnace.inv;
       const target = itemDef(stack.id)?.fuelTicks && !isSmeltable(stack.id) ? 1 : 0;

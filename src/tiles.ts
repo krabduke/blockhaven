@@ -23,6 +23,7 @@ for (const b of BLOCKS) {
 for (let i = 0; i <= 7; i++) add('wheat_' + i);
 for (let i = 0; i <= 3; i++) add('carrots_' + i);
 add('bow_pull');
+add('crossbow_loaded');
 add('door_top');
 add('bed_foot');
 add('water_flow');

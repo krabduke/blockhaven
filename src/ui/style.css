@@ -357,3 +357,23 @@ body.touch, body.touch canvas#game { touch-action: none; overscroll-behavior: no
 #update-bar { position: fixed; top: 10px; left: 50%; transform: translateX(-50%); z-index: 60; display: flex; align-items: center; gap: 10px;
   background: var(--loam); border: var(--px) solid var(--loam-deep); box-shadow: inset var(--px) var(--px) 0 var(--bark-light); padding: 8px 12px; font-size: 17px; }
 #update-bar .btn { width: auto; font-size: 16px; padding: 5px 12px; }
+
+/* ---------- Status effects ---------- */
+#effects { position: fixed; right: 10px; top: calc(160px * var(--ui, 1)); z-index: 6; display: flex; flex-direction: column; gap: 4px; pointer-events: none; zoom: var(--ui, 1); }
+#effects .fx { display: grid; grid-template-columns: 20px auto; column-gap: 6px; align-items: center; background: rgba(20, 14, 10, 0.72); border-left: 3px solid var(--moss); padding: 3px 8px 3px 5px; font-size: 14px; }
+#effects .fx.bad { border-left-color: var(--danger); }
+#effects .fx img { grid-row: span 2; width: 20px; height: 20px; image-rendering: pixelated; }
+#effects .fx b { font-weight: 400; color: var(--bone-dim); font-size: 13px; }
+#effects .fx.ending { animation: fx-blink 0.5s steps(2) infinite; }
+@keyframes fx-blink { 50% { opacity: 0.45; } }
+@media (prefers-reduced-motion: reduce) { #effects .fx.ending { animation: none; } }
+
+/* ---------- Brewing stand ---------- */
+.brew { display: flex; flex-direction: column; align-items: center; gap: 8px; min-width: 220px; }
+.brew-top { display: flex; gap: 24px; align-items: flex-start; }
+.brew-col { display: flex; flex-direction: column; align-items: center; gap: 6px; }
+.brew-fuel { width: 44px; height: 8px; background: #1b1410; border: 1px solid #000; }
+.brew-fuel i { display: block; height: 100%; width: 0; background: var(--lantern); }
+.brew-progress { width: 10px; height: 34px; background: #1b1410; border: 1px solid #000; display: flex; align-items: flex-end; }
+.brew-progress i { display: block; width: 100%; height: 0; background: #d85a8a; }
+.brew-bottles { display: flex; gap: 10px; }

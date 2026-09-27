@@ -1,6 +1,7 @@
 // Dropped items, primed TNT, and mobs: their AI, spawning, combat and rendering.
 
 import * as THREE from 'three';
+import { EFFECTS, type EffectId } from '../effects';
 import { sfx, spatial } from '../audio';
 import { B, BLOCKS, SOLID } from '../blocks';
 import { I, itemDef, type ItemStack } from '../items';
@@ -22,6 +23,7 @@ export interface PlayerLike {
   damage(amount: number, source: string, knock?: [number, number]): void;
   pickUp(stack: ItemStack): ItemStack | null;
   addXp(n: number): void;
+  addEffect(id: EffectId, ticks: number, level?: number): void;
 }
 
 interface MobSpec {
@@ -66,7 +68,7 @@ export const MOBS: Record<string, MobSpec> = {
   emberwisp: { kind: 'emberwisp', width: 0.9, height: 1.1, health: 12, speed: 0.6, hostile: true, ranged: true, projectile: 'fireball', flying: true, fireImmune: true, habitat: 'ember', pitch: 520, xp: 5, drops: (r) => [{ id: I.ember_core, count: r() < 0.5 ? 1 : 0 }, { id: I.gunpowder, count: Math.floor(r() * 2) }] },
   cinderbrute: { kind: 'cinderbrute', width: 1.1, height: 1.7, health: 30, speed: 0.6, hostile: true, attack: 6, fireImmune: true, habitat: 'ember', pitch: 90, xp: 8, drops: (r) => [{ id: I.cinder_brick, count: Math.floor(r() * 4) }, { id: I.gold_ingot, count: r() < 0.25 ? 1 : 0 }, { id: I.emberquartz, count: Math.floor(r() * 3) }] },
   burrowfox: { kind: 'burrowfox', width: 0.6, height: 0.7, health: 10, speed: 0.85, hostile: false, habitat: 'forest', food: [I.apple], pitch: 700, xp: 2, drops: (r) => [{ id: I.leather, count: Math.floor(r() * 2) }] },
-  bogfrog: { kind: 'bogfrog', width: 0.5, height: 0.5, health: 6, speed: 0.6, hostile: false, hops: true, habitat: 'swamp', food: [I.seeds], pitch: 250, xp: 1, drops: () => [] },
+  bogfrog: { kind: 'bogfrog', width: 0.5, height: 0.5, health: 6, speed: 0.6, hostile: false, hops: true, habitat: 'swamp', food: [I.seeds], pitch: 250, xp: 1, drops: (r) => [{ id: I.bog_slime, count: r() < 0.6 ? 1 : 0 }] },
   dunescuttler: { kind: 'dunescuttler', width: 0.8, height: 0.5, health: 10, speed: 1.1, hostile: true, attack: 2, habitat: 'desert', pitch: 800, xp: 5, drops: (r) => [{ id: I.string, count: Math.floor(r() * 2) }, { id: I.bone, count: Math.floor(r() * 2) }] },
   frostling: { kind: 'frostling', width: 0.5, height: 1.4, health: 14, speed: 0.75, hostile: true, ranged: true, projectile: 'snowball', habitat: 'cold', pitch: 1100, xp: 5, drops: (r) => [{ id: I.snowball, count: 1 + Math.floor(r() * 4) }, ...(r() < 0.2 ? [{ id: B.ice, count: 1 }] : [])] },
   cavemoth: { kind: 'cavemoth', width: 0.6, height: 0.5, health: 4, speed: 0.4, hostile: false, flying: true, habitat: 'cave', pitch: 1400, xp: 0, drops: () => [] },
@@ -621,6 +623,8 @@ export type ProjectileKind = 'arrow' | 'thorn' | 'snowball' | 'egg' | 'fireball'
 
 export class Projectile extends Entity {
   stuck = 0;
+  /** Splash potions thrown by the player carry an effect. */
+  effect: { id: EffectId; ticks: number } | null = null;
   constructor(readonly kind: ProjectileKind, readonly owner: Mob | 'player', x: number, y: number, z: number, vel: [number, number, number], readonly baseDamage: number, renderer: Renderer, readonly pickup: boolean) {
     const body = new Body(x, y, z, 0.25, 0.25);
     body.vel = vel;
@@ -722,6 +726,24 @@ export class Projectile extends Entity {
   private impact(m: EntityManager): void {
     const b = this.body;
     if (this.kind === 'fireball') { m.explode(b.pos[0], b.pos[1], b.pos[2], 1.2, true); return; }
+    if (this.kind === 'potion' && this.effect) {
+      // A thrown splash potion: everything within 4 blocks gets the effect, stronger nearer the middle.
+      sfx.breakBlock('glass', m.spatialFor(b.pos));
+      const col = new THREE.Color(EFFECTS[this.effect.id].color);
+      for (let i = 0; i < 32; i++) m.particles.add(new THREE.Vector3(...b.pos), new THREE.Vector3((Math.random() - 0.5) * 0.3, Math.random() * 0.18, (Math.random() - 0.5) * 0.3), col.clone().offsetHSL(0, 0, (Math.random() - 0.5) * 0.15), 22, 0.08, 0.01);
+      const { id, ticks } = this.effect;
+      const p = m.player;
+      const dp = Math.hypot(p.body.pos[0] - b.pos[0], p.body.pos[1] + 0.9 - b.pos[1], p.body.pos[2] - b.pos[2]);
+      if (p.alive && dp < 4) p.addEffect(id, Math.round(ticks * (1 - dp / 5)));
+      for (const mob of m.mobs()) {
+        const d = Math.hypot(mob.body.pos[0] - b.pos[0], mob.body.pos[1] - b.pos[1], mob.body.pos[2] - b.pos[2]);
+        if (d >= 4) continue;
+        if (id === 'healing') mob.health = Math.min(mob.spec.health, mob.health + 4);
+        else if (id === 'poison') mob.hurt(m, 2, b.pos, 0.1, true);
+        else if (id === 'slowness') { mob.body.vel[0] *= 0.2; mob.body.vel[2] *= 0.2; }
+      }
+      return;
+    }
     if (this.kind === 'potion') {
       sfx.breakBlock('glass', m.spatialFor(b.pos));
       for (let i = 0; i < 24; i++) m.particles.add(new THREE.Vector3(...b.pos), new THREE.Vector3((Math.random() - 0.5) * 0.25, Math.random() * 0.15, (Math.random() - 0.5) * 0.25), new THREE.Color(0.6 + Math.random() * 0.2, 0.3, 0.85), 18, 0.08, 0.01);

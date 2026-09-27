@@ -4,6 +4,7 @@
 
 import { B, BLOCKS, EMIT, LIGHT_OPACITY, SOLID, isLeaves, isLog } from '../blocks';
 import { SMELTING } from '../crafting';
+import { BREW_TICKS, brewFuel, brewResult } from '../brewing';
 import { Inventory, type Slot } from '../inventory';
 import { itemDef, type ItemStack } from '../items';
 import { mulberry32 } from '../noise';
@@ -17,7 +18,9 @@ import type { Spawn } from './worldgen';
 export interface ChestBE { kind: 'chest'; inv: Inventory }
 export interface FurnaceBE { kind: 'furnace'; inv: Inventory; burn: number; burnMax: number; cook: number }
 export interface SignBE { kind: 'sign'; lines: string[] }
-export type BlockEntity = ChestBE | FurnaceBE | SignBE;
+/** Slots: 0 ingredient, 1 fuel, 2-4 bottles. */
+export interface BrewingBE { kind: 'brewing'; inv: Inventory; fuel: number; brew: number }
+export type BlockEntity = ChestBE | FurnaceBE | SignBE | BrewingBE;
 
 const HORIZ: [number, number][] = [[1, 0], [-1, 0], [0, 1], [0, -1]];
 
@@ -61,7 +64,7 @@ export class World implements ChunkSource {
   onSubMesh: (cx: number, sy: number, cz: number, mesh: SubMesh | null) => void = () => {};
   onChunkUnload: (cx: number, cz: number) => void = () => {};
   onDrop: (x: number, y: number, z: number, stack: ItemStack) => void = () => {};
-  onEvent: (kind: 'fizz' | 'break', x: number, y: number, z: number, id: number) => void = () => {};
+  onEvent: (kind: 'fizz' | 'break' | 'brewed', x: number, y: number, z: number, id: number) => void = () => {};
   /** Creatures a freshly generated chunk wants spawned (villagers, guardians). */
   onSpawns: (spawns: Spawn[]) => void = () => {};
   /** TNT set off by power. */
@@ -152,7 +155,7 @@ export class World implements ChunkSource {
     if (id === B.spawner) this.spawners.add(`${x},${y},${z}`);
     if (old !== id) {
       const key = `${x},${y},${z}`;
-      if (this.blockEntities.has(key) && id !== B.furnace && id !== B.furnace_lit && id !== B.chest && id !== B.sign) {
+      if (this.blockEntities.has(key) && id !== B.furnace && id !== B.furnace_lit && id !== B.chest && id !== B.sign && id !== B.brewing_stand) {
         const be = this.blockEntities.get(key)!;
         if (be.kind !== 'sign') for (const s of be.inv.slots) if (s) this.onDrop(x + 0.5, y + 0.5, z + 0.5, s);
         this.blockEntities.delete(key);
@@ -683,9 +686,34 @@ export class World implements ChunkSource {
       }
       else if (id === B.furnace || id === B.furnace_lit) be = { kind: 'furnace', inv: new Inventory(3), burn: 0, burnMax: 0, cook: 0 };
       else if (id === B.sign) be = { kind: 'sign', lines: ['', '', '', ''] };
+      else if (id === B.brewing_stand) be = { kind: 'brewing', inv: new Inventory(5), fuel: 0, brew: 0 };
       if (be) this.blockEntities.set(key, be);
     }
     return be;
+  }
+
+  /** Brewing stands: ingredient + fuel turn bottles into potions over BREW_TICKS. */
+  private tickBrewing(): void {
+    for (const [key, be] of this.blockEntities) {
+      if (be.kind !== 'brewing') continue;
+      const [x, , z] = key.split(',').map(Number);
+      if (!this.isLoaded(x, z)) continue;
+      const [ing, fuel] = be.inv.slots;
+      const bottles = [2, 3, 4];
+      const can = !!ing && bottles.some((i) => { const b = be.inv.slots[i]; return b && brewResult(ing.id, b.id) !== undefined; });
+      if (be.fuel === 0 && can && fuel && brewFuel(fuel.id)) { be.fuel = brewFuel(fuel.id); be.inv.removeOne(1); }
+      if (!can || be.fuel === 0) { be.brew = 0; continue; }
+      if (++be.brew < BREW_TICKS) continue;
+      be.brew = 0;
+      be.fuel--;
+      for (const i of bottles) {
+        const b = be.inv.slots[i];
+        const r = b ? brewResult(ing!.id, b.id) : undefined;
+        if (r !== undefined) be.inv.slots[i] = { id: r, count: 1 };
+      }
+      be.inv.removeOne(0);
+      this.onEvent('brewed', x, 0, z, 0);
+    }
   }
 
   private tickFurnaces(): void {
@@ -748,6 +776,7 @@ export class World implements ChunkSource {
       for (const s of due) this.scheduledTick(s.x, s.y, s.z);
     }
     this.tickFurnaces();
+    this.tickBrewing();
     if (randomTicks) this.randomTicks(px, py, pz);
   }
 
@@ -1049,14 +1078,18 @@ export class World implements ChunkSource {
   serializeBlockEntities(): unknown {
     const out: Record<string, unknown> = {};
     for (const [k, be] of this.blockEntities) {
-      out[k] = be.kind === 'sign' ? { kind: 'sign', lines: be.lines } : be.kind === 'chest' ? { kind: 'chest', slots: be.inv.toJSON() } : { kind: 'furnace', slots: be.inv.toJSON(), burn: be.burn, burnMax: be.burnMax, cook: be.cook };
+      out[k] = be.kind === 'sign' ? { kind: 'sign', lines: be.lines }
+        : be.kind === 'chest' ? { kind: 'chest', slots: be.inv.toJSON() }
+          : be.kind === 'brewing' ? { kind: 'brewing', slots: be.inv.toJSON(), fuel: be.fuel, brew: be.brew }
+            : { kind: 'furnace', slots: be.inv.toJSON(), burn: be.burn, burnMax: be.burnMax, cook: be.cook };
     }
     return out;
   }
 
   loadBlockEntities(data: unknown): void {
     if (!data || typeof data !== 'object') return;
-    for (const [k, v] of Object.entries(data as Record<string, { kind: string; slots: Slot[]; burn?: number; burnMax?: number; cook?: number; lines?: string[] }>)) {
+    for (const [k, v] of Object.entries(data as Record<string, { kind: string; slots: Slot[]; burn?: number; burnMax?: number; cook?: number; lines?: string[]; fuel?: number; brew?: number }>)) {
+      if (v.kind === 'brewing') { const inv = new Inventory(5); inv.load(v.slots); this.blockEntities.set(k, { kind: 'brewing', inv, fuel: v.fuel ?? 0, brew: v.brew ?? 0 }); continue; }
       if (v.kind === 'sign') { this.blockEntities.set(k, { kind: 'sign', lines: (v.lines ?? []).slice(0, 4).map(String) }); continue; }
       if (v.kind === 'chest') {
         const inv = new Inventory(27); inv.load(v.slots);

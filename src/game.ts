@@ -33,6 +33,7 @@ import { WorldMap } from './ui/map';
 const TICK = 1 / 20;
 const DEATH_MESSAGES: Record<string, string> = {
   fall: 'You hit the ground too hard.',
+  poison: 'Poison got the better of you.',
   drowning: 'You ran out of air.',
   lava: 'You tried to swim in lava.',
   fire: 'You burned to death.',
@@ -261,6 +262,7 @@ export class Game {
         const p = this.player.body.pos;
         const sp = spatial(p[0], p[1] + 1.6, p[2], this.player.yaw, x + 0.5, y + 0.5, z + 0.5);
         if (kind === 'fizz') sfx.fizz(sp);
+        else if (kind === 'brewed') sfx.brewed(sp);
         else if (kind === 'break' && this.mode === 'playing') {
           this.entities?.blockBreakParticles(x, y, z, id, 16);
           sfx.breakBlock(BLOCKS[id].sound, sp);
@@ -336,6 +338,14 @@ export class Game {
       if (!p.creative) this.toast(this.touchMode ? 'Hold Mine on a tree to get started. Tap ▦ for your inventory.' : 'Punch a tree to get started. Press E for your inventory.');
     }
     p.onDeath = (src) => this.onDeath(src);
+    p.onBlock = (amount) => {
+      sfx.shieldBlock();
+      const sh = p.held;
+      if (sh?.id === I.shield && !p.creative) {
+        sh.damage = (sh.damage ?? 0) + Math.max(1, Math.ceil(amount));
+        if (sh.damage >= (itemDef(sh.id)?.tool?.durability ?? 336)) { p.inv.slots[p.selected] = null; sfx.breakBlock('wood'); }
+      }
+    };
     p.onAchievement = (id) => this.achQueue.push(id);
     p.onHurt = () => { this.vignette.classList.add('hurt'); setTimeout(() => this.vignette.classList.remove('hurt'), 250); };
     this.player = p;
@@ -762,8 +772,9 @@ export class Game {
       });
     } else this.renderer.updateWeather(dt, cam, () => false, () => false);
     this.renderer.updateSky(w.time, cam);
-    const heldId = this.player.held?.id ?? 0;
-    this.renderer.setHeldItem(heldId === I.bow && this.actions.bowCharge > 8 ? -2 : heldId);
+    const held = this.player.held, heldId = held?.id ?? 0;
+    this.renderer.setHeldItem(heldId, heldId === I.bow && this.actions.bowCharge > 8 ? 'pull' : held?.charged ? 'loaded' : this.player.blocking ? 'block' : '');
+    this.renderer.nightVision = this.player.effects.has('night_vision') ? Math.min(1, (this.player.effects.get('night_vision')!.ticks) / 200) : 0;
     this.tickAchievements(dt);
     if (w.tickCount % 5 === 0) this.signs.sync();
     this.updateAvatar(alpha, dt);
@@ -772,7 +783,7 @@ export class Game {
     this.renderer.renderFrame(dt, moving && !this.settings.reduceMotion, handLight, !this.hudHidden && this.player.alive && this.perspective === 0);
     if (this.shotPending) this.saveScreenshot();
     this.hud.update(this.player, dt);
-    this.hud.updateInfo(this);
+    this.hud.updateInfo(this, dt);
     this.map.frame(dt);
     if (this.containers.open && w.tickCount % 2 === 0) this.containers.render();
     if (this.toastTimer > 0) { this.toastTimer -= dt; this.toastEl.style.opacity = this.toastTimer > 0 ? '1' : '0'; }
@@ -860,7 +871,10 @@ export class Game {
     // Ctrl sprints; R does too, for keyboards where Ctrl+Space is taken by the system
     // (on macOS it switches input source).
     const mv = this.input.movement();
-    const { forward, strafe, jump } = mv;
+    let { forward, strafe } = mv;
+    const { jump } = mv;
+    // A raised shield slows you to a walk.
+    if (p.blocking) { forward *= 0.3; strafe *= 0.3; }
     p.sneaking = mv.sneak;
     if (mv.sprint && forward > 0) p.sprinting = true;
     // Bumping a wall ends a sprint on foot; in flight only when it actually stops you, so grazing
@@ -870,8 +884,10 @@ export class Game {
     if (!p.creative) p.flying = false;
     updateContacts(w, p.body, p.eyeHeight);
     const wasOnGround = p.body.onGround;
+    if (p.blocking) p.sprinting = false;
     if (p.alive) {
-      stepBody(w, p.body, { forward, strafe, jump, sneak: p.sneaking, sprint: p.sprinting, yaw: p.yaw }, p.flying, p.speed);
+      const speed = p.speed * (1 + 0.2 * p.effectLevel('swiftness')) * Math.max(0.2, 1 - 0.15 * p.effectLevel('slowness'));
+      stepBody(w, p.body, { forward, strafe, jump, sneak: p.sneaking, sprint: p.sprinting, yaw: p.yaw, jumpBoost: p.effectLevel('leaping'), slowFall: p.effects.has('slow_falling') }, p.flying, speed);
     }
     if (p.flying && p.body.onGround) p.flying = false;
     // Landing.

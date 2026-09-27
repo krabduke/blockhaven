@@ -1,4 +1,5 @@
 import { B, BLOCKS } from './blocks';
+import { EFFECTS, POTIONS, type EffectId } from './effects';
 
 // Item ids 0-255 are the blocks themselves; 256+ are pure items.
 
@@ -18,11 +19,13 @@ export interface ItemDef {
   fuelTicks?: number;
   armor?: { slot: 0 | 1 | 2 | 3; points: number; durability: number };
   /** Right-click-and-hold / throw behaviours. */
-  use?: 'bow' | 'throw' | 'shears' | 'bonemeal' | 'rod' | 'ignite' | 'dye' | 'firecharge';
+  use?: 'bow' | 'throw' | 'shears' | 'bonemeal' | 'rod' | 'ignite' | 'dye' | 'firecharge' | 'shield' | 'crossbow';
   /** Extra effect when eaten. */
   effect?: 'regen';
   /** Dye colour -> wool block key. */
   dye?: string;
+  /** Potions: the effect, how long it lasts, and whether it's thrown. */
+  potion?: { effect: EffectId; ticks: number; splash: boolean };
 }
 
 export interface Enchant { id: EnchantId; level: number }
@@ -105,6 +108,16 @@ item(414, 'fire_charge', 'Fire Charge', { use: 'firecharge' });
 item(415, 'golden_apple', 'Golden Apple', { food: { hunger: 4, saturation: 9.6 }, effect: 'regen' });
 item(416, 'red_berries', 'Red Berries', { food: { hunger: 2, saturation: 0.4 } });
 item(417, 'crystal_shard', 'Crystal Shard');
+item(418, 'glass_bottle', 'Glass Bottle', { maxStack: 16 });
+item(419, 'water_bottle', 'Water Bottle', { maxStack: 1 });
+POTIONS.forEach((p, i) => {
+  const name = EFFECTS[p.effect].name;
+  item(420 + i, `potion_${p.effect}`, `Potion of ${name}`, { maxStack: 1, icon: `potion_${p.effect}`, potion: { effect: p.effect, ticks: p.ticks, splash: false } });
+  item(430 + i, `splash_potion_${p.effect}`, `Splash Potion of ${name}`, { maxStack: 1, icon: `splash_potion_${p.effect}`, use: 'throw', potion: { effect: p.effect, ticks: Math.round(p.ticks * 0.75), splash: true } });
+});
+item(440, 'shield', 'Shield', { maxStack: 1, use: 'shield', tool: { kind: 'sword', tier: 0, speed: 1, durability: 336, damage: 1 } });
+item(441, 'crossbow', 'Crossbow', { maxStack: 1, use: 'crossbow', tool: { kind: 'sword', tier: 0, speed: 1, durability: 465, damage: 1 } });
+item(442, 'bog_slime', 'Bog Slime');
 
 // Planks, logs and wooden things burn too.
 for (const k of ['planks', 'log', 'birch_log', 'spruce_log', 'crafting_table', 'bookshelf', 'chest', 'plank_slab', 'ladder', 'sapling']) {
@@ -195,6 +208,8 @@ export interface ItemStack {
   count: number;
   /** Durability used up, for tools and armor. */
   damage?: number;
+  /** A crossbow with an arrow loaded. */
+  charged?: boolean;
   ench?: Enchant[];
 }
 

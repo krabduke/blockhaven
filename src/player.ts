@@ -1,4 +1,5 @@
 import { sfx } from './audio';
+import { EFFECTS, type ActiveEffect, type EffectId } from './effects';
 import { Inventory } from './inventory';
 import { enchLevel, itemDef, type ItemStack } from './items';
 import { Body } from './physics';
@@ -48,6 +49,12 @@ export class Player {
   regenTicks = 0;
   /** Movement multiplier set with /speed (walking and flying). */
   speed = 1;
+  /** Active status effects (from potions and some foods). */
+  effects = new Map<EffectId, ActiveEffect>();
+  /** Raising a shield: hits from in front are blocked. */
+  blocking = false;
+  /** Called when the shield takes a hit (so the game can wear it down and play a sound). */
+  onBlock: (amount: number) => void = () => {};
   onDeath: (source: string) => void = () => {};
   onHurt: () => void = () => {};
 
@@ -111,9 +118,30 @@ export class Player {
     this.onAchievement(id);
   }
 
+  effectLevel(id: EffectId): number { return this.effects.get(id)?.level ?? 0; }
+
+  /** Start (or extend) an effect; instant ones apply at once. */
+  addEffect(id: EffectId, ticks: number, level = 1): void {
+    if (id === 'healing') { this.health = Math.min(20, this.health + 4 * level); return; }
+    const cur = this.effects.get(id);
+    if (!cur || cur.level < level || cur.ticks < ticks) this.effects.set(id, { level: Math.max(level, cur?.level ?? 0), ticks: Math.max(ticks, cur?.ticks ?? 0) });
+  }
+
   damage(amount: number, source: string, knock?: [number, number]): void {
     if (!this.alive || this.creative && source !== 'void') return;
     if (this.invulnerable > 0) return;
+    if (this.effects.has('fire_resistance') && (source === 'fire' || source === 'lava')) return;
+    // A raised shield stops hits from in front (the knock direction points away from the attacker).
+    if (this.blocking && knock && (knock[0] || knock[1])) {
+      const d = this.lookDir();
+      if (-(knock[0] * d[0] + knock[1] * d[2]) > 0.2) {
+        this.onBlock(amount);
+        this.body.vel[0] += knock[0] * 0.15;
+        this.body.vel[2] += knock[1] * 0.15;
+        this.invulnerable = 5;
+        return;
+      }
+    }
     // Armor and Protection (not for starvation, drowning, the void or commands).
     if (!['starvation', 'drowning', 'void', 'command'].includes(source)) {
       const armor = Math.min(20, this.armorPoints);
@@ -194,8 +222,14 @@ export class Player {
         this.foodTimer = 0;
       }
     } else this.foodTimer = 0;
+    // Effects.
+    for (const [id, e] of this.effects) {
+      if (id === 'regeneration' && e.ticks % Math.max(10, 50 >> (e.level - 1)) === 0) this.health = Math.min(20, this.health + 1);
+      if (id === 'poison' && e.ticks % Math.max(5, 25 >> (e.level - 1)) === 0 && this.health > 1) this.damage(1, 'poison');
+      if (--e.ticks <= 0) this.effects.delete(id);
+    }
     // Air.
-    if (this.body.eyeInWater) {
+    if (this.body.eyeInWater && !this.effects.has('water_breathing')) {
       this.air--;
       if (this.air <= -20) {
         this.air = 0;
@@ -220,6 +254,7 @@ export class Player {
       pos: this.body.pos, yaw: this.yaw, pitch: this.pitch, inv: this.inv.toJSON(), selected: this.selected,
       armor: this.armor.toJSON(), xpLevel: this.xpLevel, xpProgress: this.xpProgress, xpTotal: this.xpTotal, achievements: [...this.achievements],
       health: this.health, food: this.food, saturation: this.saturation, flying: this.flying, spawn: this.spawn,
+      effects: [...this.effects].map(([id, e]) => [id, e.level, e.ticks]),
     };
   }
 
@@ -240,5 +275,7 @@ export class Player {
     this.saturation = d.saturation ?? 5;
     this.flying = !!d.flying;
     if (d.spawn) this.spawn = d.spawn;
+    this.effects.clear();
+    for (const [id, level, ticks] of (d.effects ?? []) as [EffectId, number, number][]) if (EFFECTS[id]) this.effects.set(id, { level, ticks });
   }
 }

@@ -17,6 +17,8 @@ export class Actions {
   useCooldown = 0;
   eating = 0;
   bowCharge = 0;
+  /** Ticks spent loading a crossbow (it loads after 25). */
+  crossbowLoad = 0;
   bobber: Bobber | null = null;
 
   constructor(private g: Game) {}
@@ -31,6 +33,21 @@ export class Actions {
   tick(active: boolean): void {
     const p = this.player;
     this.tickBreaking();
+    const holding = this.g.input.mouse[2] && (active || this.g.input.locked);
+    p.blocking = holding && p.alive && p.held?.id === I.shield;
+    if (this.crossbowLoad > 0) {
+      const cb = p.held;
+      if (!holding || cb?.id !== I.crossbow) this.crossbowLoad = 0;
+      else if (++this.crossbowLoad >= 25) {
+        this.crossbowLoad = 0;
+        const slot = p.inv.slots.findIndex((s) => s?.id === I.arrow);
+        if (p.creative || slot >= 0) {
+          if (!p.creative) p.inv.removeOne(slot);
+          cb.charged = true;
+          sfx.click();
+        }
+      }
+    }
     if (this.bowCharge > 0) {
       if (p.held?.id !== I.bow || !this.g.input.mouse[2]) this.bowCharge = 0;
       else this.bowCharge++;
@@ -39,8 +56,19 @@ export class Actions {
     if (this.g.input.mouse[2] && (active || this.g.input.locked)) {
       if (this.eating > 0) {
         const held = p.held;
-        const food = held ? itemDef(held.id)?.food : undefined;
-        if (!held || !food) this.eating = 0;
+        const hdef = held ? itemDef(held.id) : undefined;
+        const drink = hdef?.potion && !hdef.potion.splash ? hdef.potion : undefined;
+        const food = hdef?.food;
+        if (!held || (!food && !drink)) this.eating = 0;
+        else if (drink) {
+          this.eating++;
+          if (this.eating % 4 === 0) sfx.eat();
+          if (this.eating > 32) {
+            p.addEffect(drink.effect, drink.ticks);
+            if (!p.creative) p.inv.slots[p.selected] = { id: I.glass_bottle, count: 1 };
+            this.eating = 0;
+          }
+        }
         else {
           this.eating++;
           if (this.eating % 4 === 0) sfx.eat();
@@ -57,7 +85,7 @@ export class Actions {
         }
       } else if (++this.useCooldown >= 4) {
         this.useCooldown = 0;
-        this.use();
+        this.use(true);
       }
     }
   }
@@ -92,6 +120,7 @@ export class Actions {
       let dmg = tool && held?.id !== I.bow && held?.id !== I.shears && held?.id !== I.fishing_rod ? tool.damage : 1;
       const sharp = enchLevel(held, 'sharpness');
       if (sharp) dmg += 0.5 * sharp + 0.5;
+      dmg += 3 * p.effectLevel('strength');
       const crit = p.body.vel[1] < -0.1 && !p.body.onGround && !p.body.inWater;
       if (crit) dmg *= 1.5;
       mobHit.mob.hurt(this.entities, dmg, p.body.pos, p.sprinting ? 0.7 : 0.4, true);
@@ -192,11 +221,17 @@ export class Actions {
     }
   }
 
-  use(): void {
+  /**
+   * Right click. `repeat` is true when called again because the button is still held (every 4
+   * ticks, so you can keep placing blocks): drawing a bow, loading a crossbow and casting a rod
+   * only start on a fresh press, or holding the button would keep restarting them.
+   */
+  use(repeat = false): void {
     const w = this.world, p = this.player;
     if (!w || !this.entities || !p.alive) return;
     const held = p.held;
     const def = held ? itemDef(held.id) : undefined;
+    if (repeat && (def?.use === 'bow' || def?.use === 'crossbow' || def?.use === 'rod' || def?.use === 'shield' || def?.potion && !def.potion.splash)) return;
     const eye = p.eye(), dir = p.lookDir();
     const hit = raycast(w, eye, dir, this.reach(), held?.id === I.bucket);
     const sneaking = p.sneaking;
@@ -230,11 +265,41 @@ export class Actions {
     if (def?.use === 'bow') { this.bowCharge = 1; return; }
     if (def?.use === 'rod') { this.castOrReel(); return; }
     if (def?.use === 'throw' && held) {
-      this.entities.shoot(held.id === I.snowball ? 'snowball' : 'egg', 'player', eye, dir, 1.5, 0.02);
+      if (def.potion) {
+        // Splash potions arc a little higher and slower than snowballs.
+        const proj = this.entities.shoot('potion', 'player', eye, [dir[0], dir[1] + 0.15, dir[2]], 1.0, 0.01, 0);
+        proj.effect = { id: def.potion.effect, ticks: def.potion.ticks };
+      } else this.entities.shoot(held.id === I.snowball ? 'snowball' : 'egg', 'player', eye, dir, 1.5, 0.02);
       consume();
       this.renderer.swingHand();
       return;
     }
+    // Shields are raised by holding right click (see tick); they never place anything.
+    if (def?.use === 'shield') return;
+    if (def?.use === 'crossbow' && held) {
+      if (held.charged) {
+        const dmg = 3 + (enchLevel(held, 'power') ? enchLevel(held, 'power') * 0.5 + 0.5 : 0);
+        this.entities.shoot('arrow', 'player', eye, dir, 3.2, 0.002, dmg, !p.creative);
+        held.charged = false;
+        this.damageTool(1);
+        sfx.click();
+        this.renderer.swingHand();
+      } else if (p.creative || p.inv.slots.some((s) => s?.id === I.arrow)) this.crossbowLoad = 1;
+      return;
+    }
+    // Filling a glass bottle from water.
+    if (held?.id === I.glass_bottle) {
+      const wh = raycast(w, eye, dir, this.reach(), true);
+      if (wh && wh.id === B.water) {
+        sfx.splash();
+        if (held.count === 1) p.inv.slots[p.selected] = { id: I.water_bottle, count: 1 };
+        else { held.count--; const left = p.inv.add({ id: I.water_bottle, count: 1 }); if (left) this.throwStack(left); }
+        this.renderer.swingHand();
+      }
+      return;
+    }
+    // Drinking a potion works like eating.
+    if (def?.potion && !def.potion.splash) { this.eating = 1; return; }
 
     if (hit && !sneaking) {
       const [x, y, z] = hit.pos;
@@ -257,6 +322,7 @@ export class Actions {
         return;
       }
       if (id === B.crafting_table) { this.openScreen('crafting'); return; }
+      if (id === B.brewing_stand) { const be = w.getBlockEntity(x, y, z); if (be?.kind === 'brewing') { document.exitPointerLock(); this.containers.show('brewing', { brewing: be }); } return; }
       if (id === B.furnace || id === B.furnace_lit) { const be = w.getBlockEntity(x, y, z); if (be?.kind === 'furnace') { document.exitPointerLock(); this.containers.show('furnace', { furnace: be }); } return; }
       if (id === B.chest) { const be = w.getBlockEntity(x, y, z); if (be?.kind === 'chest') { document.exitPointerLock(); this.containers.show('chest', { chest: be.inv }); } return; }
       if (id === B.door) {

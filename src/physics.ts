@@ -358,6 +358,10 @@ export interface MoveInput {
   sneak: boolean;
   sprint: boolean;
   yaw: number;
+  /** Leaping effect level (higher jumps). */
+  jumpBoost?: number;
+  /** Slow falling: drift down gently and take no fall damage. */
+  slowFall?: boolean;
 }
 
 /** One 20 Hz physics tick for a walking/swimming/flying body. */
@@ -411,7 +415,7 @@ export function stepBody(w: BlockReader, body: Body, input: MoveInput, flying: b
   const accel = body.onGround ? 0.1 * (0.16277136 / (slip * slip * slip)) : 0.02;
   accelVec(accel * (input.sprint ? 1.3 : 1) * speedMul);
   if (input.jump && body.onGround) {
-    body.vel[1] = 0.42;
+    body.vel[1] = 0.42 + (input.jumpBoost ?? 0) * 0.1;
     if (input.sprint) { body.vel[0] -= sin * 0.2; body.vel[2] -= cos * 0.2; }
   }
   if (body.onLadder) {
@@ -428,6 +432,7 @@ export function stepBody(w: BlockReader, body: Body, input: MoveInput, flying: b
   moveBody(w, body, body.vel[0], body.vel[1], body.vel[2], 0.6, input.sneak);
   if (body.onLadder && (body.collidedH || input.jump)) body.vel[1] = 0.2;
   body.vel[1] = (body.vel[1] - 0.08) * 0.98;
+  if (input.slowFall && body.vel[1] < -0.07) { body.vel[1] = -0.07; body.fallDistance = 0; }
   body.vel[0] *= slip; body.vel[2] *= slip;
   const dy = body.pos[1] - prevY;
   if (dy < 0 && !body.onGround) body.fallDistance -= dy;

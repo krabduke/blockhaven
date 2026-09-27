@@ -110,6 +110,10 @@ export const sfx = {
   },
   fuse(s: Spatial) { noise(5000, 0.5, 0.6, 'highpass', 0.25 * s.gain, 0, s.pan); },
   door(open: boolean) { noise(open ? 500 : 350, 2, 0.18, 'bandpass', 0.8); tone(open ? 180 : 140, 0.12, 'triangle', 0.05); },
+  /** A soft bubbling chime when a brew finishes. */
+  brewed(s: Spatial = { gain: 1, pan: 0 }) { [392, 523, 659].forEach((f, i) => tone(f, 0.18, 'sine', 0.05 * s.gain, f * 1.02, i * 0.07)); noise(900, 1, 0.3, 'bandpass', 0.15 * s.gain, 0.05, s.pan); },
+  /** A dull wooden thunk when a shield takes a hit. */
+  shieldBlock() { noise(260, 1.4, 0.12, 'lowpass', 0.6); tone(120, 0.1, 'triangle', 0.08, 90); },
   levelUp() { [523, 659, 784].forEach((f, i) => tone(f, 0.15, 'triangle', 0.08, undefined, i * 0.08)); },
 };
 

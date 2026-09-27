@@ -274,6 +274,7 @@ def(156, 'geode_shell', 'Geode Shell', rock({ hardness: 2.5 }));
 def(157, 'mud_bricks', 'Mud Bricks', rock({ hardness: 1.5 }));
 def(158, 'polished_limestone', 'Polished Limestone', rock({ hardness: 1.2 }));
 def(159, 'deepstone_bricks', 'Deepstone Bricks', rock({ hardness: 3.5 }));
+def(160, 'brewing_stand', 'Brewing Stand', { shape: 'table', opaque: false, lightOpacity: 0, emit: 3, tiles: { top: 'brewing_top', side: 'brewing_side', bottom: 'cobblestone' }, hardness: 0.5, tool: 'pickaxe', harvestTier: 0, icon: 'brewing_item' });
 def(115, 'bell', 'Village Bell', { shape: 'lantern', layer: 'cutout', opaque: false, hardness: 5, tool: 'pickaxe', tiles: 'bell', icon: 'bell_item', sound: 'stone' });
 
 // Fill gaps so lookups never return undefined.

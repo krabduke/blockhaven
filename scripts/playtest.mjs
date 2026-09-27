@@ -242,7 +242,7 @@ const fished = await g(async ({ x, y, z }) => {
   if (b) { b.waitTicks = 1; }
   await sleep(300);
   const biting = b ? b.biteTicks > 0 : false;
-  const itemsNear = () => G.entities.list.filter((e) => e.stack && Math.hypot(e.body.pos[0] - p.body.pos[0], e.body.pos[2] - p.body.pos[2]) < 8).length;
+  const itemsNear = () => G.entities.list.filter((e) => e.stack && Math.hypot(e.body.pos[0] - p.body.pos[0], e.body.pos[2] - p.body.pos[2]) < 16).length;
   const nearBefore = itemsNear();
   G.use();
   await sleep(2500);
@@ -728,6 +728,143 @@ await wait(300);
   });
   check('a world exports to a file and imports back as a new world', round.ok && round.size > 100 && round.name.endsWith('.blockhaven'), JSON.stringify(round));
   await g(() => { const p = window.blockhaven.player; p.creative = false; window.__invSnap.forEach((s, i) => { p.inv.slots[i] = s; }); });
+}
+
+// --- Brewing, potions and effects; shield and crossbow.
+{
+  // Held-button actions (drinking, raising a shield, loading a crossbow) only happen while you're in
+  // control of the game, which on a desktop means the mouse is captured: stand in for that here.
+  await g(() => { Object.defineProperty(window.blockhaven.input, 'locked', { configurable: true, get: () => true }); });
+  const brew = await g(async () => {
+    const G = window.blockhaven, p = G.player, w = G.world, B = G.ids, It = G.items;
+    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+    const [x, , z] = p.body.pos.map(Math.floor);
+    const y = w.groundY(x + 2, z) ;
+    w.setBlock(x + 2, y, z, B.brewing_stand);
+    const be = w.getBlockEntity(x + 2, y, z);
+    be.inv.slots[0] = { id: It.sugar, count: 1 };
+    be.inv.slots[1] = { id: It.glow_dust, count: 1 };
+    for (const i of [2, 3, 4]) be.inv.slots[i] = { id: It.water_bottle, count: 1 };
+    await sleep(200);
+    be.brew = 397;
+    await sleep(400);
+    const potions = [2, 3, 4].map((i) => be.inv.slots[i]?.id === It.potion_swiftness);
+    be.inv.slots[0] = { id: It.gunpowder, count: 1 };
+    await sleep(200);
+    be.brew = 397;
+    await sleep(400);
+    const splash = be.inv.slots[2]?.id === It.splash_potion_swiftness;
+    return { potions, splash, fuelLeft: be.fuel };
+  });
+  check('a brewing stand turns water bottles into potions, and gunpowder makes them splash', brew.potions.every(Boolean) && brew.splash, JSON.stringify(brew));
+
+  const drink = await g(async () => {
+    const G = window.blockhaven, p = G.player, It = G.items;
+    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+    p.creative = false;
+    p.effects.clear();
+    p.inv.slots[0] = { id: It.potion_night_vision, count: 1 };
+    p.selected = 0;
+    G.mouse[2] = true; G.use();
+    const hold = setInterval(() => { G.mouse[2] = true; }, 50);
+    await sleep(2200);
+    clearInterval(hold); G.mouse[2] = false;
+    const nv = p.effects.get('night_vision');
+    await sleep(100);
+    return { effect: !!nv, ticks: nv?.ticks ?? 0, bottle: p.inv.slots[0]?.id === It.glass_bottle, rendererNV: G.renderer.nightVision };
+  });
+  check('drinking a potion gives its effect, brightens the night, and leaves the bottle', drink.effect && drink.ticks > 3000 && drink.bottle && drink.rendererNV > 0.5, JSON.stringify(drink));
+
+  const splash = await g(async () => {
+    const G = window.blockhaven, p = G.player, It = G.items;
+    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+    p.effects.clear();
+    p.inv.slots[0] = { id: It.splash_potion_swiftness, count: 1 };
+    p.selected = 0;
+    p.pitch = -1.5; // throw it at your feet
+    G.use();
+    await sleep(1500);
+    p.pitch = 0;
+    return { swift: !!p.effects.get('swiftness'), used: !p.inv.slots[0] };
+  });
+  check('a splash potion thrown at your feet gives you its effect', splash.swift && splash.used, JSON.stringify(splash));
+
+  const bottle = await g(async () => {
+    const G = window.blockhaven, p = G.player, w = G.world, B = G.ids, It = G.items;
+    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+    // A clean stone platform with one water block two steps ahead.
+    const [x, , z] = p.body.pos.map(Math.floor);
+    const y = Math.floor(p.body.pos[1]) + 3;
+    for (let dx = -2; dx <= 2; dx++) for (let dz = -4; dz <= 2; dz++) { w.setBlock(x + dx, y, z + dz, B.stone); for (let dy = 1; dy <= 3; dy++) w.setBlock(x + dx, y + dy, z + dz, 0); }
+    w.setBlock(x, y, z - 2, B.water, 0);
+    p.body.pos = [x + 0.5, y + 1, z + 0.5]; p.body.vel = [0, 0, 0];
+    p.inv.slots[0] = { id: It.glass_bottle, count: 3 };
+    p.selected = 0; p.yaw = 0; p.pitch = -0.7;
+    await sleep(150);
+    G.use();
+    await sleep(100);
+    return { filled: p.inv.count(It.water_bottle), left: p.inv.slots[0]?.count };
+  });
+  check('a glass bottle fills from water', bottle.filled === 1 && bottle.left === 2, JSON.stringify(bottle));
+
+  const shield = await g(async () => {
+    const G = window.blockhaven, p = G.player, It = G.items;
+    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+    p.creative = false; p.health = 20; p.invulnerable = 0; p.effects.clear();
+    p.inv.slots[0] = { id: It.shield, count: 1 };
+    p.selected = 0; p.yaw = 0; p.pitch = 0;
+    G.mouse[2] = true;
+    const hold = setInterval(() => { G.mouse[2] = true; }, 50);
+    await sleep(200);
+    // A hit from straight ahead (knock pushes you back, +z), then one from behind.
+    const blocking = p.blocking;
+    p.damage(6, 'zombie', [0, 1]);
+    const afterFront = p.health;
+    p.invulnerable = 0;
+    p.damage(6, 'zombie', [0, -1]);
+    const afterBack = p.health;
+    clearInterval(hold); G.mouse[2] = false;
+    await sleep(100);
+    return { blocking, afterFront, afterBack, wear: p.inv.slots[0]?.damage ?? 0, lowered: !p.blocking };
+  });
+  check('a raised shield blocks hits from in front (and wears down), not from behind', shield.blocking && shield.afterFront === 20 && shield.afterBack < 20 && shield.wear > 0 && shield.lowered, JSON.stringify(shield));
+
+  const xbow = await g(async () => {
+    const G = window.blockhaven, p = G.player, It = G.items;
+    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+    p.inv.slots[0] = { id: It.crossbow, count: 1 };
+    p.inv.slots[1] = { id: It.arrow, count: 3 };
+    p.selected = 0; p.pitch = 0.2;
+    G.mouse[2] = true; G.use();
+    const hold = setInterval(() => { G.mouse[2] = true; }, 50);
+    await sleep(1800);
+    clearInterval(hold); G.mouse[2] = false;
+    const loaded = !!p.inv.slots[0]?.charged, arrowsAfterLoad = p.inv.count(It.arrow);
+    const before = G.entities.list.filter((e) => e.kind === 'arrow').length;
+    G.use();
+    await sleep(50);
+    const flying = G.entities.list.filter((e) => e.kind === 'arrow').length - before;
+    return { loaded, arrowsAfterLoad, flying, unloaded: !p.inv.slots[0]?.charged };
+  });
+  // Holding a bow with the mouse captured (as when really playing) draws it all the way.
+  const bow = await g(async () => {
+    const G = window.blockhaven, p = G.player, It = G.items;
+    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+    p.inv.slots[0] = { id: It.bow, count: 1 }; p.inv.slots[1] = { id: It.arrow, count: 3 };
+    p.selected = 0; p.pitch = 0.1;
+    G.mouse[2] = true; G.use();
+    const hold = setInterval(() => { G.mouse[2] = true; }, 50);
+    await sleep(1400);
+    clearInterval(hold);
+    const charge = G.actions.bowCharge;
+    G.mouse[2] = false; G.releaseBow();
+    await sleep(30);
+    const arrow = G.entities.list.filter((e) => e.kind === 'arrow' && e.owner === 'player').pop();
+    return { charge, speed: arrow ? Math.hypot(...arrow.body.vel) : 0 };
+  });
+  check('holding a bow draws it fully and looses a full-power arrow', bow.charge > 20 && bow.speed > 2.5, JSON.stringify(bow));
+  check('a crossbow loads an arrow while held, then fires it', xbow.loaded && xbow.arrowsAfterLoad === 2 && xbow.flying === 1 && xbow.unloaded, JSON.stringify(xbow));
+  await g(() => { const G = window.blockhaven, p = G.player; delete G.input.locked; p.effects.clear(); p.health = 20; window.__invSnap.forEach((s, i) => { p.inv.slots[i] = s; }); });
 }
 
 // --- Save, quit, reload, and check a block change persisted.

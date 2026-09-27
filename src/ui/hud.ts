@@ -1,10 +1,11 @@
 // Heads-up display: crosshair, hotbar, health / hunger / air meters.
 
 import * as THREE from 'three';
-import { itemDef, maxDurability } from '../items';
+import { I, itemDef, maxDurability } from '../items';
 import type { Player } from '../player';
 import type { Game } from '../game';
 import { BIOME_NAMES } from '../world/worldgen';
+import { EFFECTS, formatTicks } from '../effects';
 import { iconURL } from './icons';
 
 type Pix = string[];
@@ -59,6 +60,9 @@ export class Hud {
   private lastSel = -1;
   private lastKey = '';
   private coords: HTMLElement;
+  private effectsEl: HTMLElement;
+  private effectsKey = '';
+  private effectsTimer = 0;
   private markerLayer: HTMLElement;
   private markers = new Map<string, HTMLElement>();
   private tmp = new THREE.Vector3();
@@ -67,6 +71,10 @@ export class Hud {
     this.coords = document.createElement('div');
     this.coords.id = 'coords';
     parent.appendChild(this.coords);
+    this.effectsEl = document.createElement('div');
+    this.effectsEl.id = 'effects';
+    this.effectsEl.setAttribute('aria-label', 'Active effects');
+    parent.appendChild(this.effectsEl);
     this.markerLayer = document.createElement('div');
     this.markerLayer.id = 'markers';
     parent.appendChild(this.markerLayer);
@@ -172,8 +180,27 @@ export class Hud {
     }
   }
 
+  /** Active potion effects with time left (refreshed twice a second). */
+  private updateEffects(g: Game, dt: number): void {
+    this.effectsTimer -= dt;
+    if (this.effectsTimer > 0) return;
+    this.effectsTimer = 0.5;
+    const p = g.player;
+    const list = g.mode === 'playing' && !g.hudHidden ? [...p.effects] : [];
+    const key = list.map(([id, e]) => `${id}${e.level}:${formatTicks(e.ticks)}`).join('|');
+    if (key === this.effectsKey) return;
+    this.effectsKey = key;
+    this.effectsEl.innerHTML = list.map(([id, e]) => {
+      const def = EFFECTS[id];
+      const icon = I['potion_' + id];
+      const lvl = e.level > 1 ? ' ' + ['', 'I', 'II', 'III', 'IV'][e.level] : '';
+      return `<div class="fx${def.good ? '' : ' bad'}${e.ticks < 200 ? ' ending' : ''}">${icon ? `<img src="${iconURL(icon)}" alt="">` : ''}<span>${def.name}${lvl}</span><b>${formatTicks(e.ticks)}</b></div>`;
+    }).join('');
+  }
+
   /** Coordinates line and on-screen waypoint markers. */
-  updateInfo(g: Game): void {
+  updateInfo(g: Game, dt = 0.016): void {
+    this.updateEffects(g, dt);
     const show = g.mode === 'playing' && !g.hudHidden && !!g.world;
     const p = g.player;
     this.coords.style.display = show && g.settings.showCoords ? 'block' : 'none';

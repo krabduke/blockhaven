@@ -69,7 +69,8 @@ All taken in-game at render distance 16 with the default Fancy graphics.
 - Chests, beds (sleep through the night and set your respawn point) and dropped-item pickup
 - Armor in leather, gold, iron and diamond, with an armor bar and damage reduction
 - Experience from mobs, ores, smelting, breeding and fishing, plus an enchanting table that uses it (Efficiency, Sharpness, Protection, Unbreaking, Power, Feather Falling). Bookshelves around the table unlock stronger enchantments
-- Bows and arrows with a charge-up draw, snowballs, eggs and a fishing rod
+- Bows and arrows with a charge-up draw, a crossbow that you load by holding right click and fire with the next click, a shield that blocks hits from in front while raised, snowballs, eggs and a fishing rod
+- Brewing: fill glass bottles at water and brew them on a brewing stand (fuelled by glow dust or an ember core) into potions of Swiftness (sugar), Healing (red berries), Regeneration (golden apple), Fire Resistance (emberquartz), Night Vision (carrot), Water Breathing (raw fish), Strength (crystal shard), Leaping (bog slime, dropped by bogfrogs), Slow Falling (feather) and Poison (rotten flesh). Add gunpowder to make any of them a splash potion that affects everything nearby. Active effects and their time left show on screen
 - Farming: till with a hoe, then plant wheat and carrots, which grow in the light. Bone meal speeds up crops, saplings and grass
 - Achievements for the classic milestones
 

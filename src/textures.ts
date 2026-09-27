@@ -4,6 +4,7 @@
 import { hashString, mulberry32 } from './noise';
 import { TILE_NAMES, TINTED, baseTile } from './tiles';
 import { BIOME_TINT } from './world/worldgen';
+import { EFFECTS } from './effects';
 
 type RGB = [number, number, number];
 const S = 16;
@@ -715,6 +716,71 @@ tile('arrow', (p) => {
   p.sprite(['.hh', 'hhh', 'hh.'], { h: hex('#bcbcbc') }, 0.04, 12, 1);
   p.sprite(['f.f', '.f.', 'f.f'], { f: hex('#f0f0f0') }, 0.04, 2, 11);
 });
+// ---------- Brewing, potions, shield, crossbow ----------
+const bottle = (liquid: RGB | null, splash: boolean) => (p: Painter) => {
+  p.transparent();
+  const glass = hex('#c8dcec'), rim = hex('#8aa4b8'), cork = hex('#9a6a3a');
+  // A round flask (drinkable) or a squat, wide-necked one (splash).
+  const rows = splash
+    ? ['....cccc....', '....gccg....', '...gg..gg...', '..g......g..', '.g........g.', 'g..........g', 'g..........g', 'g..........g', '.g........g.', '..gggggggg..']
+    : ['.....cc.....', '.....cc.....', '....gccg....', '....g..g....', '...g....g...', '..g......g..', '.g........g.', '.g........g.', '.g........g.', '..g......g..', '...gggggg...'];
+  const oy = splash ? 4 : 3;
+  p.sprite(rows, { c: cork, g: rim }, 0.02, 2, oy);
+  // Fill: glass-tinted interior, liquid in the lower part.
+  for (let y = 0; y < rows.length; y++) {
+    const r = rows[y];
+    const a = r.indexOf('g'), b = r.lastIndexOf('g');
+    if (a < 0 || b <= a) continue;
+    for (let x = a + 1; x < b; x++) {
+      const deep = y >= (splash ? 4 : 5);
+      const c = liquid && deep ? liquid : glass;
+      p.set(2 + x, oy + y, [c[0] * (0.92 + 0.08 * ((x + y) % 2)), c[1] * (0.92 + 0.08 * ((x + y) % 2)), c[2] * (0.92 + 0.08 * ((x + y) % 2))], liquid && deep ? 255 : 110);
+    }
+  }
+  if (liquid) p.set(2 + (splash ? 3 : 4), oy + (splash ? 5 : 6), hex('#ffffff'), 200);
+};
+tile('glass_bottle', bottle(null, false));
+tile('water_bottle', bottle(hex('#3b6fd6'), false));
+for (const [effect, def] of Object.entries(EFFECTS)) {
+  tile('potion_' + effect, bottle(hex(def.color), false));
+  tile('splash_potion_' + effect, bottle(hex(def.color), true));
+}
+tile('brewing_top', (p) => {
+  p.fill(hex('#7a7a7e'), 0.08);
+  p.border(hex('#4a4a4e'));
+  p.rect(7, 7, 2, 2, hex('#e8c848'));
+  for (const [x, y] of [[3, 3], [11, 3], [7, 12]]) p.rect(x, y, 2, 2, hex('#b8d0e0'));
+});
+tile('brewing_side', (p) => {
+  p.transparent();
+  p.rect(0, 12, 16, 4, hex('#6a6a6e'), 0.08);
+  p.rect(7, 1, 2, 11, hex('#e8c848'), 0.06);
+  for (const x of [1, 11]) { p.rect(x, 7, 4, 5, hex('#b8d0e0'), 0.04); p.rect(x + 1, 9, 2, 3, hex('#d85a8a')); }
+});
+tile('brewing_item', (p) => {
+  p.transparent();
+  p.rect(2, 13, 12, 2, hex('#6a6a6e'), 0.08);
+  p.rect(7, 2, 2, 11, hex('#e8c848'), 0.06);
+  for (const x of [2, 10]) { p.rect(x, 8, 4, 5, hex('#b8d0e0'), 0.04); p.rect(x + 1, 10, 2, 3, hex('#d85a8a')); }
+});
+tile('shield', (p) => {
+  p.transparent();
+  const rows = ['.mmmmmmmmmm.', 'mwwwwwwwwwwm', 'mwwwwwwwwwwm', 'mwwbbbbbbwwm', 'mwwbwwwwbwwm', 'mwwbwwwwbwwm', 'mwwbbbbbbwwm', 'mwwwwwwwwwwm', '.mwwwwwwwwm.', '..mwwwwwwm..', '...mmwwmm...', '.....mm.....'];
+  p.sprite(rows, { m: hex('#8a8a90'), w: hex('#9a6a3a'), b: hex('#c8a048') }, 0.05, 2, 2);
+});
+const crossbowSprite = (loaded: boolean) => (p: Painter) => {
+  p.transparent();
+  const wood = hex('#8a5a2a'), dark = hex('#5a3a1a'), metal = hex('#9a9aa0'), str = hex('#dcdcdc');
+  for (let i = 0; i < 11; i++) { p.set(3 + i, 12 - i, i % 2 ? wood : dark); p.set(4 + i, 12 - i, dark); }   // stock
+  const limb: [number, number][] = [[2, 6], [3, 5], [4, 4], [5, 3], [6, 2], [9, 13], [10, 12], [11, 11], [12, 10], [13, 9]];
+  for (const [x, y] of limb) p.set(x, y, metal);
+  for (let i = 0; i < 8; i++) p.set(2 + i + (loaded ? 1 : 0), 6 + i - (loaded ? 1 : 0), str);             // string
+  if (loaded) { for (let i = 0; i < 6; i++) p.set(6 + i, 9 - i, hex('#c8c8c8')); p.set(12, 3, hex('#e8e8e8')); p.set(12, 4, hex('#e8e8e8')); }
+};
+tile('crossbow', crossbowSprite(false));
+tile('crossbow_loaded', crossbowSprite(true));
+tile('bog_slime', (p) => { p.transparent(); p.sprite(['...gggg...', '..gGggGg..', '.gggggggg.', 'gggGggggGg', 'gggggggggg', '.gggGgggg.', '..gggggg..'], { g: hex('#6a9a3a'), G: hex('#a8d060') }, 0.06, 3, 5); });
+
 tile('shears', (p) => { p.transparent(); p.sprite(['......mm', '.....mhm', '....mhm.', '...mhm..', 'kkmhm...', 'k.km....', 'kkk.....'], { m: hex('#9a9a9a'), h: hex('#e8e8e8'), k: hex('#5a3a2a') }, 0.03, 4, 4); });
 tile('bone_meal', (p) => { p.transparent(); for (let i = 0; i < 30; i++) p.set(4 + Math.floor(p.rand() * 8), 6 + Math.floor(p.rand() * 7), hex('#eeeadb')); });
 tile('snowball', (p) => { p.transparent(); p.sprite(['..www..', '.wwwww.', 'wwwwwws', 'wwwwwss', '.wwwss.', '..sss..'], { w: hex('#fbfdff'), s: hex('#c8d8e8') }, 0.02, 4, 5); });

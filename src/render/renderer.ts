@@ -359,7 +359,9 @@ export class Renderer {
   readonly handCamera: THREE.PerspectiveCamera;
   private hand: THREE.Group;
   private handItem: THREE.Object3D | null = null;
-  private handItemId = -1;
+  private handItemKey = '';
+  /** Night vision strength 0..1 (raises the darkest light level). */
+  nightVision = 0;
   private swing = 0;
   private bob = 0;
   renderDistance = 8;
@@ -877,12 +879,16 @@ export class Renderer {
   }
 
   // ---------- First-person hand ----------
-  setHeldItem(id: number): void {
-    if (id === this.handItemId) return;
-    this.handItemId = id;
+  /**
+   * What's in the hand. `pose`: 'pull' (drawn bow), 'loaded' (crossbow with a bolt), 'block'
+   * (shield raised in front of you), or '' for the normal pose.
+   */
+  setHeldItem(id: number, pose: '' | 'pull' | 'loaded' | 'block' = ''): void {
+    const key = id + ':' + pose;
+    if (key === this.handItemKey) return;
+    this.handItemKey = key;
     if (this.handItem) { this.hand.remove(this.handItem); }
-    const pulledBow = id === -2;
-    const def = itemDef(pulledBow ? 283 : id);
+    const def = itemDef(id);
     let obj: THREE.Object3D;
     if (!def || id === 0) {
       const arm = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.22, 0.7), this.armMaterials());
@@ -894,9 +900,16 @@ export class Renderer {
       obj.position.set(0.4, -0.34, -0.6);
       obj.rotation.set(0.1, 0.8, 0);
     } else {
-      const m = this.itemModel(pulledBow ? 'bow_pull' : def.icon!, 0.36);
-      m.position.set(0.4, -0.28, -0.6);
-      m.rotation.set(0.05, -1.25, 0.2);
+      const tile = pose === 'pull' ? 'bow_pull' : pose === 'loaded' ? 'crossbow_loaded' : def.icon!;
+      const m = this.itemModel(tile, pose === 'block' ? 0.5 : 0.36);
+      if (pose === 'block') {
+        // The shield comes up in front of you, face on.
+        m.position.set(0.18, -0.22, -0.5);
+        m.rotation.set(0, -Math.PI / 2 + 0.25, 0);
+      } else {
+        m.position.set(0.4, -0.28, -0.6);
+        m.rotation.set(0.05, -1.25, 0.2);
+      }
       obj = m;
     }
     this.handItem = obj;
@@ -1060,6 +1073,7 @@ export class Renderer {
       }
     });
     this.flushTerrain();
+    if (this.nightVision > 0) this.uniforms.uMinLight.value = Math.max(this.uniforms.uMinLight.value as number, this.nightVision * 0.8);
     if (this.noDraw) return;
     this.renderShadows();
     const usePost = this.post && this.fancy;
