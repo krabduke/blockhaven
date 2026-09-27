@@ -2,9 +2,9 @@
 // blocks, fishing, archery, sleeping and dropping items.
 
 import { sfx, spatial } from '../audio';
-import { B, BLOCKS, SOLID, isLeaves, isLog } from '../blocks';
+import { B, BLOCKS, DYE_COLORS, SOLID, WOOL_KEY, isLeaves, isLog } from '../blocks';
 import { Bobber, TntEntity } from '../entities/entities';
-import { I, enchLevel, itemDef, maxStack, type ItemStack } from '../items';
+import { I, coloredItem, enchLevel, itemDef, maxStack, type ItemStack } from '../items';
 import { raycast, selectionBox, type RayHit } from '../physics';
 import type { Game } from '../game';
 
@@ -428,8 +428,15 @@ export class Actions {
     }
     // Dye recolours white wool.
     if (def.use === 'dye' && def.dye) {
+      // Dye recolours wool, and the colour of carpets, stained glass and banners.
       const [x, y, z] = hit.pos;
-      if (hit.id === B.wool || hit.id === B.carpet) { w.setBlock(x, y, z, hit.id === B.carpet ? B.carpet : B[def.dye]); consume(); this.renderer.swingHand(); }
+      const ci = DYE_COLORS.indexOf(def.dye), m = w.getMeta(x, y, z);
+      let done = true;
+      if (Object.values(WOOL_KEY).some((k) => B[k] === hit.id)) w.setBlock(x, y, z, B[WOOL_KEY[def.dye]]);
+      else if (hit.id === B.carpet || hit.id === B.stained_glass) w.setMeta(x, y, z, ci);
+      else if (hit.id === B.banner) w.setMeta(x, y, z, (m & ~(15 << 2)) | (ci << 2));
+      else done = false;
+      if (done) { consume(); this.renderer.swingHand(); }
       return;
     }
     // Shovel on grass makes a path.
@@ -454,7 +461,7 @@ export class Actions {
     // Placing blocks (or items that place a block).
     const blockId = def.places ?? (held.id < 256 ? held.id : -1);
     if (blockId < 0) return;
-    this.placeBlock(hit, blockId, consume);
+    this.placeBlock(hit, blockId, consume, def.placeMeta ?? 0);
   }
 
   private placeTarget(hit: RayHit): [number, number, number] | null {
@@ -466,7 +473,7 @@ export class Actions {
     return t;
   }
 
-  private placeBlock(hit: RayHit, blockId: number, consume: () => void): void {
+  private placeBlock(hit: RayHit, blockId: number, consume: () => void, color = 0): void {
     const w = this.world!, p = this.player;
     const d = BLOCKS[blockId];
     // Slab on slab makes a full block.
@@ -509,6 +516,17 @@ export class Actions {
     } else if (blockId === B.sign) {
       if (n[1] === -1) return;
       meta = n[1] === 1 ? [0, 3, 2, 1][q] : (n[2] === 1 ? 0 : n[2] === -1 ? 2 : n[0] === 1 ? 3 : 1) | 4;
+    } else if (blockId === B.carpet || blockId === B.stained_glass) {
+      meta = color;
+    } else if (blockId === B.banner) {
+      // On a wall it hangs flat against it; on the ground it stands on a pole, facing you.
+      if (n[1] === -1) return;
+      const wall = n[2] === 1 ? 0 : n[2] === -1 ? 2 : n[0] === 1 ? 3 : 1;
+      meta = n[1] === 1 ? ([2, 3, 0, 1][q] | 64) : wall;
+      meta |= color << 2;
+    } else if (blockId === B.painting) {
+      if (n[1] !== 0) return;
+      meta = (n[2] === 1 ? 0 : n[2] === -1 ? 2 : n[0] === 1 ? 3 : 1) | (Math.floor(Math.random() * 16) << 2);
     }
     // Keep solid blocks out of entities.
     if (SOLID[blockId]) {
@@ -623,6 +641,7 @@ export class Actions {
     if (id === B.furnace_lit) id = B.furnace;
     if (id === B.lamp_on) id = B.lamp;
     if (id === B.wheat) id = I.seeds;
+    if (id === B.carpet || id === B.stained_glass || id === B.banner) id = coloredItem(id, (this.world!.getMeta(...this.target.pos) >> (BLOCKS[id].metaShift ?? 0)) & 15);
     const inHotbar = p.inv.slots.slice(0, 9).findIndex((s) => s?.id === id);
     if (inHotbar >= 0) { p.selected = inHotbar; return; }
     if (p.creative) p.inv.slots[p.selected] = { id, count: maxStack(id) };

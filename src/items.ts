@@ -1,4 +1,4 @@
-import { B, BLOCKS } from './blocks';
+import { B, BLOCKS, COLOR_NAMES, DYE_COLORS, WOOL_KEY, type DyeColor } from './blocks';
 import { EFFECTS, POTIONS, type EffectId } from './effects';
 
 // Item ids 0-255 are the blocks themselves; 256+ are pure items.
@@ -22,8 +22,10 @@ export interface ItemDef {
   use?: 'bow' | 'throw' | 'shears' | 'bonemeal' | 'rod' | 'ignite' | 'dye' | 'firecharge' | 'shield' | 'crossbow';
   /** Extra effect when eaten. */
   effect?: 'regen';
-  /** Dye colour -> wool block key. */
-  dye?: string;
+  /** Dyes: the colour they give. */
+  dye?: DyeColor;
+  /** Metadata to place the block with (colour of a carpet, banner or stained glass). */
+  placeMeta?: number;
   /** Potions: the effect, how long it lasts, and whether it's thrown. */
   potion?: { effect: EffectId; ticks: number; splash: boolean };
 }
@@ -94,12 +96,12 @@ item(400, 'amber', 'Amber');
 item(401, 'emberquartz', 'Emberquartz');
 item(402, 'cinder_brick', 'Cinder Brick');
 item(403, 'ember_core', 'Ember Core', { fuelTicks: 2400 });
-item(404, 'dye_red', 'Red Dye', { use: 'dye', dye: 'wool_red' });
-item(405, 'dye_yellow', 'Yellow Dye', { use: 'dye', dye: 'wool_yellow' });
-item(406, 'dye_green', 'Green Dye', { use: 'dye', dye: 'wool_green' });
-item(407, 'dye_blue', 'Blue Dye', { use: 'dye', dye: 'wool_blue' });
-item(408, 'dye_black', 'Black Dye', { use: 'dye', dye: 'wool_black' });
-item(409, 'dye_orange', 'Orange Dye', { use: 'dye', dye: 'wool_orange' });
+item(404, 'dye_red', 'Red Dye', { use: 'dye', dye: 'red' });
+item(405, 'dye_yellow', 'Yellow Dye', { use: 'dye', dye: 'yellow' });
+item(406, 'dye_green', 'Green Dye', { use: 'dye', dye: 'green' });
+item(407, 'dye_blue', 'Blue Dye', { use: 'dye', dye: 'blue' });
+item(408, 'dye_black', 'Black Dye', { use: 'dye', dye: 'black' });
+item(409, 'dye_orange', 'Orange Dye', { use: 'dye', dye: 'orange' });
 item(410, 'bowl', 'Bowl', { fuelTicks: 100 });
 item(411, 'mushroom_stew', 'Mushroom Stew', { maxStack: 1, food: { hunger: 6, saturation: 7.2 } });
 item(412, 'melon_slice', 'Melon Slice', { food: { hunger: 2, saturation: 1.2 } });
@@ -118,6 +120,18 @@ POTIONS.forEach((p, i) => {
 item(440, 'shield', 'Shield', { maxStack: 1, use: 'shield', tool: { kind: 'sword', tier: 0, speed: 1, durability: 336, damage: 1 } });
 item(441, 'crossbow', 'Crossbow', { maxStack: 1, use: 'crossbow', tool: { kind: 'sword', tier: 0, speed: 1, durability: 465, damage: 1 } });
 item(442, 'bog_slime', 'Bog Slime');
+// The rest of the sixteen dyes.
+(['white', 'magenta', 'light_blue', 'lime', 'pink', 'gray', 'light_gray', 'cyan', 'purple', 'brown'] as const).forEach((c, i) => {
+  item(443 + i, 'dye_' + c, COLOR_NAMES[c] + ' Dye', { use: 'dye', dye: c });
+});
+// Coloured carpets, stained glass and banners share one block each and carry their colour in
+// its metadata; the white one is the block's own item.
+DYE_COLORS.forEach((c, i) => {
+  if (i === 0) return;
+  item(452 + i, 'carpet_' + c, COLOR_NAMES[c] + ' Carpet', { icon: WOOL_KEY[c], places: B.carpet, placeMeta: i });
+  item(467 + i, 'stained_glass_' + c, COLOR_NAMES[c] + ' Stained Glass', { icon: 'stained_glass_' + c, places: B.stained_glass, placeMeta: i });
+  item(482 + i, 'banner_' + c, COLOR_NAMES[c] + ' Banner', { icon: 'banner_' + c, places: B.banner, placeMeta: i, maxStack: 16 });
+});
 
 // Planks, logs and wooden things burn too.
 for (const k of ['planks', 'log', 'birch_log', 'spruce_log', 'crafting_table', 'bookshelf', 'chest', 'plank_slab', 'ladder', 'sapling']) {
@@ -201,6 +215,13 @@ export function creativeCategory(id: number): CreativeTab {
   if (d.tool || d.armor || d.use === 'bow' || d.use === 'rod' || d.use === 'shears' || d.use === 'ignite' || /arrow|shield|crossbow|bolt/.test(k)) return 'tools';
   if (d.food || /seed|wheat|carrot|egg|sugar|milk|honey|bone_meal|potato|beet/.test(k)) return 'food';
   return 'misc';
+}
+
+/** Item for a metadata-coloured block in a given colour (0 = the block's own item). */
+export function coloredItem(blockId: number, color: number): number {
+  if (color === 0) return blockId;
+  const key = blockId === B.carpet ? 'carpet_' : blockId === B.stained_glass ? 'stained_glass_' : blockId === B.banner ? 'banner_' : '';
+  return key ? I[key + DYE_COLORS[color]] ?? blockId : blockId;
 }
 
 export interface ItemStack {

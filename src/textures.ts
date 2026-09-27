@@ -5,6 +5,7 @@ import { hashString, mulberry32 } from './noise';
 import { TILE_NAMES, TINTED, baseTile } from './tiles';
 import { BIOME_TINT } from './world/worldgen';
 import { EFFECTS } from './effects';
+import { COLOR_HEX, DYE_COLORS, WOOL_KEY } from './blocks';
 
 type RGB = [number, number, number];
 const S = 16;
@@ -907,6 +908,90 @@ tile('dye_green', dye(hex('#4a8a2a')));
 tile('dye_blue', dye(hex('#3a4ab0')));
 tile('dye_black', dye(hex('#2a2628')));
 tile('dye_orange', dye(hex('#e8781f')));
+
+// ---------- Sixteen colours: wool, stained glass, banners, dyes ----------
+for (const c of DYE_COLORS) {
+  const col = hex(COLOR_HEX[c]);
+  const wk = WOOL_KEY[c];
+  if (!painters[wk]) tile(wk, woolTile(col));
+  if (!painters['dye_' + c]) tile('dye_' + c, dye(col));
+  // Stained glass: a tinted, see-through pane with a darker leaded rim and a highlight streak.
+  tile('stained_glass_' + c, (p) => {
+    for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) {
+      const edge = x === 0 || y === 0 || x === S - 1 || y === S - 1;
+      const streak = (x + y === 5 || x + y === 6) && x > 1 && y > 1;
+      const k = edge ? 0.62 : streak ? 1.35 : 1;
+      p.set(x, y, [Math.min(255, col[0] * k), Math.min(255, col[1] * k), Math.min(255, col[2] * k)], edge ? 240 : streak ? 190 : 150);
+    }
+  });
+  // Banner: cloth in the colour with a woven border and a lantern emblem in a contrasting tone.
+  tile('banner_' + c, (p) => {
+    p.transparent();
+    const light = [0, 1, 2, 3, 4, 5, 6, 8].includes(DYE_COLORS.indexOf(c));
+    const trim = light ? hex('#3a2a20') : hex('#e8dcc0');
+    for (let y = 0; y < S; y++) for (let x = 2; x < 14; x++) {
+      if (y === S - 1 && (x % 3 === 0)) continue; // notched hem
+      const n = 0.94 + ((x * 7 + y * 13) % 5) * 0.03;
+      p.set(x, y, [col[0] * n, col[1] * n, col[2] * n]);
+    }
+    p.rect(2, 1, 12, 1, trim); p.rect(3, 13, 10, 1, trim);
+    for (let y = 2; y < 13; y++) { p.set(3, y, trim); p.set(12, y, trim); }
+    // Emblem: a little lantern.
+    p.rect(7, 4, 2, 1, trim); p.rect(6, 5, 4, 5, trim); p.rect(7, 6, 2, 3, hex('#f2b544')); p.rect(7, 10, 2, 1, trim);
+  });
+}
+
+// ---------- Paintings: sixteen small original artworks in wooden frames ----------
+type Art = (p: Painter, px: (x: number, y: number, c: string) => void) => void;
+const framed = (art: Art) => (p: Painter) => {
+  p.fill(hex('#1a1410'));
+  const px = (x: number, y: number, c: string) => { if (x >= 1 && y >= 1 && x < S - 1 && y < S - 1) p.set(x, y, hex(c)); };
+  art(p, px);
+  for (let i = 0; i < S; i++) {
+    for (const [x, y] of [[i, 0], [i, S - 1], [0, i], [S - 1, i]]) p.set(x, y, (x + y) % 4 === 0 ? hex('#8a5a2a') : hex('#6a4420'));
+  }
+};
+const sky = (px: (x: number, y: number, c: string) => void, top: string, bottom: string, until = 15) => {
+  for (let y = 1; y < until; y++) for (let x = 1; x < 15; x++) px(x, y, y < until / 2 ? top : bottom);
+};
+const ARTS: Art[] = [
+  // 0 Sunset over rolling hills.
+  (_p, px) => { sky(px, '#f08a4a', '#f8c060'); for (let x = 1; x < 15; x++) { const h = 10 + Math.round(Math.sin(x * 0.7) * 1.5); for (let y = h; y < 15; y++) px(x, y, y === h ? '#5a8a36' : '#3e6a28'); } px(10, 5, '#fff0b0'); px(11, 5, '#fff0b0'); px(10, 6, '#ffe080'); px(11, 6, '#ffe080'); },
+  // 1 Moonlit night over the sea.
+  (_p, px) => { sky(px, '#10183a', '#1a2a5a', 10); for (let y = 10; y < 15; y++) for (let x = 1; x < 15; x++) px(x, y, (x + y) % 3 ? '#1a3a6a' : '#2a5a8a'); px(4, 3, '#f0f0e0'); px(5, 3, '#f0f0e0'); px(4, 4, '#f0f0e0'); px(5, 4, '#d8d8c8'); for (const [x, y] of [[9, 2], [12, 4], [7, 6], [13, 7], [2, 7]]) px(x, y, '#c8d8ff'); for (let y = 10; y < 15; y += 2) px(4 + (y % 3), y, '#c8d8e8'); },
+  // 2 Autumn forest.
+  (_p, px) => { sky(px, '#a8c8e8', '#c8e0f0'); for (const [tx, c] of [[3, '#c8642a'], [7, '#e8a030'], [11, '#b8342a']] as [number, string][]) { for (let y = 4; y < 10; y++) for (let x = tx - 2; x <= tx + 2; x++) if (Math.abs(x - tx) + Math.abs(y - 7) < 4) px(x, y, c); for (let y = 10; y < 14; y++) px(tx, y, '#5a3a1e'); } for (let x = 1; x < 15; x++) px(x, 14, '#6a8a3a'); },
+  // 3 Snowy peaks.
+  (_p, px) => { sky(px, '#8ab8e8', '#b8d8f0'); for (let x = 1; x < 15; x++) { const h = 3 + Math.abs(((x * 3) % 12) - 6); for (let y = h; y < 15; y++) px(x, y, y < h + 2 ? '#f0f4f8' : y < h + 5 ? '#8a8e96' : '#5a6a4a'); } },
+  // 4 A boar, side on.
+  (_p, px) => { sky(px, '#d8c89a', '#c8b886'); for (let y = 6; y < 11; y++) for (let x = 3; x < 12; x++) px(x, y, '#6e5038'); for (let y = 7; y < 10; y++) for (let x = 11; x < 14; x++) px(x, y, '#634630'); px(13, 9, '#d09a84'); px(12, 8, '#140e0a'); for (const x of [4, 6, 9, 11]) { px(x, 11, '#241c16'); px(x, 12, '#241c16'); } for (let x = 4; x < 10; x++) px(x, 5, '#2e2016'); px(13, 10, '#eee4c8'); },
+  // 5 Lighthouse on a cliff.
+  (_p, px) => { sky(px, '#2a3a6a', '#4a5a8a'); for (let y = 11; y < 15; y++) for (let x = 1; x < 15; x++) px(x, y, x < 9 ? '#5a5a5e' : '#1a3a6a'); for (let y = 4; y < 11; y++) for (let x = 5; x < 8; x++) px(x, y, y % 3 === 0 ? '#b8302a' : '#f0ece0'); px(5, 3, '#ffe080'); px(6, 3, '#fff4b0'); px(7, 3, '#ffe080'); for (let x = 8; x < 15; x++) px(x, 3, '#6a6a40'); },
+  // 6 Still life: flowers in a vase.
+  (_p, px) => { sky(px, '#5a3a4a', '#4a2e3a', 15); for (let y = 10; y < 14; y++) for (let x = 6; x < 10; x++) px(x, y, '#3a6a8a'); for (const [x, y, c] of [[5, 5, '#e8c830'], [8, 3, '#b8302a'], [10, 5, '#e890a8'], [7, 6, '#f0f0f0'], [9, 7, '#7a3ab0']] as [number, number, string][]) { px(x, y, c); px(x + 1, y, c); px(x, y + 1, c); } for (let y = 6; y < 10; y++) px(8, y, '#4a8a2a'); for (let x = 1; x < 15; x++) px(x, 14, '#6a4428'); },
+  // 7 Desert dunes and a lone cactus.
+  (_p, px) => { sky(px, '#f0c878', '#f8e0a0'); for (let x = 1; x < 15; x++) { const h = 9 + Math.round(Math.sin(x * 0.5 + 1) * 2); for (let y = h; y < 15; y++) px(x, y, (x + y) % 5 ? '#dccf9a' : '#c8b980'); } for (let y = 5; y < 10; y++) px(11, y, '#3f8a2f'); px(10, 7, '#3f8a2f'); px(12, 6, '#3f8a2f'); px(3, 3, '#ffffff'); px(4, 3, '#fff8d8'); },
+  // 8 Abstract: warm blocks.
+  (_p, px) => { const cols = ['#c8642a', '#e8c830', '#b8302a', '#f0e0c0', '#3a4ab0']; for (let y = 1; y < 15; y++) for (let x = 1; x < 15; x++) px(x, y, cols[(Math.floor(x / 5) + Math.floor(y / 4) * 2) % cols.length]); for (let i = 1; i < 15; i++) { px(5, i, '#1a1410'); px(i, 5, '#1a1410'); px(10, i, '#1a1410'); } },
+  // 9 Abstract: spiral.
+  (_p, px) => { sky(px, '#2a8a90', '#2a8a90', 15); let x = 7, y = 7, dx = 1, dy = 0, len = 1; for (let n = 0; n < 60; n += 0) { for (let k = 0; k < len; k++) { px(x, y, '#f0e0c0'); x += dx; y += dy; n++; } [dx, dy] = [-dy, dx]; if (dy === 0) len++; } },
+  // 10 A village at dusk.
+  (_p, px) => { sky(px, '#6a4a8a', '#e88a5a', 10); for (let x = 1; x < 15; x++) for (let y = 12; y < 15; y++) px(x, y, '#3e5a28'); for (const hx of [2, 8]) { for (let y = 8; y < 12; y++) for (let x = hx; x < hx + 5; x++) px(x, y, '#c8a068'); for (let k = 0; k < 3; k++) for (let x = hx + k; x < hx + 5 - k; x++) px(x, 7 - k, '#8a3a2a'); px(hx + 2, 10, '#ffd060'); } },
+  // 11 Waves and a sailing boat.
+  (_p, px) => { sky(px, '#b8d8f0', '#d8ecf8', 9); for (let y = 9; y < 15; y++) for (let x = 1; x < 15; x++) px(x, y, (x + y * 2) % 4 === 0 ? '#e8f0f8' : '#3a6ad6'); for (let y = 3; y < 8; y++) for (let x = 7; x < 7 + (y - 2); x++) px(x, y, '#f0ece0'); for (let y = 2; y < 9; y++) px(6, y, '#5a3a1e'); for (let x = 3; x < 11; x++) px(x, 9, '#6a4428'); },
+  // 12 A cave with glowing crystals.
+  (_p, px) => { sky(px, '#1a1418', '#241c22', 15); for (const [x, y] of [[3, 12], [5, 11], [10, 12], [12, 10], [8, 13]]) { px(x, y, '#7af0e8'); px(x, y - 1, '#c8fff8'); } for (let x = 1; x < 15; x++) { px(x, 1, '#3a3438'); px(x, 14, '#3a3438'); if (x % 3 === 0) px(x, 2, '#3a3438'); } },
+  // 13 A tree in blossom.
+  (_p, px) => { sky(px, '#e8f0f8', '#f0f4f8'); for (let y = 3; y < 9; y++) for (let x = 3; x < 13; x++) if (Math.hypot(x - 8, y - 6) < 4.5) px(x, y, (x * y) % 3 ? '#f0a8c8' : '#f8d0e0'); for (let y = 9; y < 14; y++) px(8, y, '#6a4428'); for (let x = 1; x < 15; x++) px(x, 14, '#7ac83a'); },
+  // 14 Portrait: a frostling.
+  (_p, px) => { sky(px, '#3a4a6a', '#2a3a5a', 15); for (let y = 5; y < 12; y++) for (let x = 5; x < 11; x++) px(x, y, '#b8d8f0'); px(6, 7, '#2a6ad8'); px(9, 7, '#2a6ad8'); for (let x = 6; x < 10; x++) px(x, 10, '#6a9ac8'); for (const [x, y] of [[6, 3], [8, 2], [10, 3], [7, 4], [9, 4]]) px(x, y, '#e8f6ff'); },
+  // 15 The Emberdeep: a lava sea under glowing rock.
+  (_p, px) => { sky(px, '#3a1410', '#5a1c10', 10); for (let y = 10; y < 15; y++) for (let x = 1; x < 15; x++) px(x, y, (x + y) % 3 ? '#e2581c' : '#ffb13b'); for (const x of [3, 7, 12]) { px(x, 1, '#f8d060'); px(x, 2, '#e8a040'); } for (let x = 5; x < 10; x++) px(x, 9, '#2e2a2c'); },
+];
+ARTS.forEach((art, i) => tile('painting_' + i, framed(art)));
+tile('painting_item', framed(ARTS[0]));
+
+
 tile('bowl', (p) => { p.transparent(); p.sprite(['wwwwwwwwwwww', '.bbbbbbbbbb.', '..bbbbbbbb..', '...bbbbbb...'], { w: C.plankDark, b: C.plank }, 0.05, 2, 8); });
 tile('mushroom_stew', (p) => { painters.bowl(p); p.rect(3, 7, 10, 2, hex('#c8986a'), 0.08); p.set(5, 7, hex('#d02a2a')); p.set(9, 7, hex('#9a6a4a')); });
 tile('melon_slice', (p) => { p.transparent(); p.sprite(['gggggggggg', '.rrrrrrrr.', '..rkrrkr..', '...rrrr...', '....rr....'], { g: hex('#4a8a22'), r: hex('#e8404a'), k: hex('#1a1a1a') }, 0.05, 3, 5); });

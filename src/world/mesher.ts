@@ -127,6 +127,27 @@ function faceUV(face: number, x: number, y: number, z: number): [number, number]
 }
 
 // Precompute tile layers per block/face.
+/** Layer for blocks that take their look from metadata (colours, artworks). */
+const META_LAYERS = new Map<number, Int16Array>();
+function metaLayer(id: number, m: number): number {
+  let t = META_LAYERS.get(id);
+  if (!t) {
+    const d = BLOCKS[id];
+    t = Int16Array.from({ length: 16 }, (_, k) => tileIndex(d.metaTiles?.[k] ?? d.tiles[0]));
+    META_LAYERS.set(id, t);
+  }
+  return t[(m >> (BLOCKS[id].metaShift ?? 0)) & 15];
+}
+
+/** A quad flat against the wall a block hangs on (facing as for ladders), `d` out from the wall, corners BL BR TR TL. */
+const WALL_QUADS: ((d: number) => [number, number, number][])[] = [
+  (d) => [[0, 0, d], [1, 0, d], [1, 1, d], [0, 1, d]],
+  (d) => [[1 - d, 0, 0], [1 - d, 0, 1], [1 - d, 1, 1], [1 - d, 1, 0]],
+  (d) => [[1, 0, 1 - d], [0, 0, 1 - d], [0, 1, 1 - d], [1, 1, 1 - d]],
+  (d) => [[d, 0, 1], [d, 0, 0], [d, 1, 0], [d, 1, 1]],
+];
+const WALL_UV = [[0, 1], [1, 1], [1, 0], [0, 0]];
+
 const TILE_LAYERS: Int16Array = (() => {
   const t = new Int16Array(256 * 6).fill(-1);
   for (const b of BLOCKS) {
@@ -192,7 +213,7 @@ export function meshSubchunk(input: MeshInput): SubMesh {
               // Lying logs: the end-grain faces point along the axis.
               const end = axis === 1 ? f < 2 : f >= 4;
               layer = TILE_LAYERS[id * 6 + (end ? 2 : 0)];
-            } else layer = TILE_LAYERS[id * 6 + f];
+            } else layer = def.metaTiles ? metaLayer(id, m) : TILE_LAYERS[id * 6 + f];
             if (id === B.chest) { box(bld, x, y, z, 1 / 16, 0, 1 / 16, 15 / 16, 14 / 16, 15 / 16, f, layer, WHITE, light[i], 0, true); continue; }
             // Bark on lying logs runs along the log.
             const barkRot = axis === 1 ? (f >= 2 ? 1 : 0) : axis === 2 ? (f < 2 ? 1 : 0) : 0;
@@ -384,8 +405,46 @@ export function meshSubchunk(input: MeshInput): SubMesh {
             emitBox(bld, blocks, light, x, y, z, [0, 0, 0], [1, 2 / 16, 1], TILE_LAYERS[id * 6], i);
             break;
           case 'carpet':
-            emitBox(bld, blocks, light, x, y, z, [0, 0, 0], [1, 1 / 16, 1], TILE_LAYERS[id * 6], i);
+            emitBox(bld, blocks, light, x, y, z, [0, 0, 0], [1, 1 / 16, 1], metaLayer(id, m), i);
             break;
+          case 'painting': {
+            // A canvas hung flat on the wall, facing out.
+            const q = WALL_QUADS[m & 3](1 / 32);
+            const s = skyAt(i), bl = blkAt(i);
+            q.forEach((c, k) => bld.vert(x + c[0], y + c[1], z + c[2], WALL_UV[k][0], WALL_UV[k][1], metaLayer(id, m), 0, s, bl, 0.95, WHITE));
+            bld.quad(false, true);
+            break;
+          }
+          case 'banner': {
+            const layer = metaLayer(id, m);
+            const s = skyAt(i), bl = blkAt(i);
+            const rod = tileIndex('log_side');
+            if (m & 64) {
+              // Standing: a pole with the cloth hanging from a crossbar, turned to face its direction.
+              const f = m & 3, alongX = f === 0 || f === 2;
+              emitBox(bld, blocks, light, x, y, z, [7 / 16, 0, 7 / 16], [9 / 16, 1, 9 / 16], rod, i);
+              if (alongX) emitBox(bld, blocks, light, x, y, z, [1 / 16, 14 / 16, 7 / 16], [15 / 16, 15 / 16, 9 / 16], rod, i);
+              else emitBox(bld, blocks, light, x, y, z, [7 / 16, 14 / 16, 1 / 16], [9 / 16, 15 / 16, 15 / 16], rod, i);
+              const zc = f === 0 ? 6 / 16 : 10 / 16, xc = f === 3 ? 6 / 16 : 10 / 16;
+              const pts: [number, number, number][] = alongX
+                ? [[2 / 16, 0.3, zc], [14 / 16, 0.3, zc], [14 / 16, 14 / 16, zc], [2 / 16, 14 / 16, zc]]
+                : [[xc, 0.3, 2 / 16], [xc, 0.3, 14 / 16], [xc, 14 / 16, 14 / 16], [xc, 14 / 16, 2 / 16]];
+              const uvs = [[0, 0.7], [1, 0.7], [1, 0], [0, 0]];
+              pts.forEach((c, k) => bld.vert(x + c[0], y + c[1], z + c[2], uvs[k][0], uvs[k][1], layer, 1, s, bl, 0.9, WHITE));
+              bld.quad(false, true);
+            } else {
+              // On a wall: a rod along the top with the cloth hanging below it.
+              const q = WALL_QUADS[m & 3](1 / 16);
+              q.forEach((c, k) => bld.vert(x + c[0], y + c[1] * 0.94, z + c[2], WALL_UV[k][0], WALL_UV[k][1], layer, 1, s, bl, 0.9, WHITE));
+              bld.quad(false, true);
+              const f = m & 3, t = 2 / 16;
+              if (f === 0) emitBox(bld, blocks, light, x, y, z, [0, 15 / 16, 0], [1, 1, t], rod, i);
+              else if (f === 2) emitBox(bld, blocks, light, x, y, z, [0, 15 / 16, 1 - t], [1, 1, 1], rod, i);
+              else if (f === 3) emitBox(bld, blocks, light, x, y, z, [0, 15 / 16, 0], [t, 1, 1], rod, i);
+              else emitBox(bld, blocks, light, x, y, z, [1 - t, 15 / 16, 0], [1, 1, 1], rod, i);
+            }
+            break;
+          }
           case 'cake': {
             const bites = Math.min(6, m & 7);
             const x0 = 1 / 16 + bites * 2 / 16;

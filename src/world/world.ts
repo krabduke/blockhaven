@@ -6,7 +6,7 @@ import { B, BLOCKS, EMIT, LIGHT_OPACITY, SOLID, isLeaves, isLog } from '../block
 import { SMELTING } from '../crafting';
 import { BREW_TICKS, brewFuel, brewResult } from '../brewing';
 import { Inventory, type Slot } from '../inventory';
-import { itemDef, type ItemStack } from '../items';
+import { coloredItem, itemDef, type ItemStack } from '../items';
 import { mulberry32 } from '../noise';
 import { loadChunk, saveChunk } from '../storage';
 import { CH, CS, Chunk, SUBS, VOLUME, chunkKey, idx } from './chunk';
@@ -479,7 +479,9 @@ export class World implements ChunkSource {
     this.onEvent('break', x, y, z, id);
     if (drop) {
       const d = BLOCKS[id];
-      const res = d.drop ? d.drop(this.rand()) : null;
+      let res = d.drop ? d.drop(this.rand()) : null;
+      // Coloured blocks drop the item of their colour.
+      if (res && (id === B.carpet || id === B.banner) && res[0] === id) res = [coloredItem(id, (meta >> (d.metaShift ?? 0)) & 15), 1];
       if (res) this.onDrop(x + 0.5, y + 0.5, z + 0.5, { id: res[0], count: res[1] });
       if (id === B.wheat) {
         if (meta >= 7) this.onDrop(x + 0.5, y + 0.5, z + 0.5, { id: 274, count: 1 });

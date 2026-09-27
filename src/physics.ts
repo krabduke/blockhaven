@@ -128,6 +128,10 @@ export function selectionBox(id: number, meta: number): Box | null {
     case 'sign': return (meta & 4) ? { min: [0, 4 / 16, 0], max: [1, 12 / 16, 1] } : { min: [0.25, 0, 0.25], max: [0.75, 1, 0.75] };
     case 'fire': return { min: [0, 0, 0], max: [1, 1 / 16, 1] };
     case 'portal': return null;
+    case 'banner':
+      if (meta & 64) return { min: [0.3, 0, 0.3], max: [0.7, 1, 0.7] };
+    // falls through: wall banners are picked like a ladder
+    case 'painting':
     case 'vine':
     case 'ladder': {
       const f = meta & 3, t = 2 / 16;

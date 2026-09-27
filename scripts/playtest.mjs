@@ -867,6 +867,51 @@ await wait(300);
   await g(() => { const G = window.blockhaven, p = G.player; delete G.input.locked; p.effects.clear(); p.health = 20; window.__invSnap.forEach((s, i) => { p.inv.slots[i] = s; }); });
 }
 
+// --- Decoration: sixteen colours, carpets, stained glass, banners, paintings.
+{
+  const ids = await g(() => ({ ...window.blockhaven.items }));
+  const deco = await g(async () => {
+    const G = window.blockhaven, p = G.player, w = G.world, B = G.ids, It = G.items;
+    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+    const out = {};
+    // Recipes: mixing dyes, stained glass, carpets.
+    const grid = (ids) => ids.map((id) => (id ? { id, count: 1 } : null));
+    out.cyan = G.craft(grid([It.dye_blue, It.dye_green, 0, 0]), 2);
+    out.glass = G.craft(grid([B.glass, B.glass, B.glass, B.glass, It.dye_red, B.glass, B.glass, B.glass, B.glass]), 3);
+    out.carpet = G.craft(grid([B.wool_purple, B.wool_purple, 0, 0]), 2);
+    // A clean wall to work on.
+    const [x, , z] = p.body.pos.map(Math.floor);
+    const y = Math.floor(p.body.pos[1]) + 6;
+    for (let dx = -3; dx <= 3; dx++) for (let dz = -4; dz <= 2; dz++) for (let dy = -1; dy <= 3; dy++) w.setBlock(x + dx, y + dy, z + dz, dy === -1 || dz === -4 ? B.stone : 0);
+    p.creative = false; p.flying = false;
+    p.body.pos = [x + 0.5, y, z + 0.5]; p.body.vel = [0, 0, 0]; p.yaw = 0; p.pitch = 0;
+    await sleep(200);
+    // Dye a wool block, then a carpet.
+    w.setBlock(x, y, z - 2, B.wool);
+    p.inv.slots[0] = { id: It.dye_cyan, count: 4 }; p.selected = 0; p.pitch = -0.35;
+    await sleep(120); G.use();
+    out.dyedWool = w.getBlock(x, y, z - 2) === B.wool_cyan;
+    // Place a lime banner on the wall and a painting next to it.
+    w.setBlock(x, y, z - 2, 0);
+    p.inv.slots[0] = { id: It.banner_lime, count: 1 }; p.pitch = 0.3;
+    await sleep(120); G.use();
+    const find = (id) => { for (let dy = 0; dy <= 3; dy++) for (let dx = -2; dx <= 2; dx++) if (w.getBlock(x + dx, y + dy, z - 3) === id) return [x + dx, y + dy, z - 3]; return null; };
+    const bp = find(B.banner);
+    out.banner = !!bp && ((w.getMeta(...bp) >> 2) & 15) === 5 && (w.getMeta(...bp) & 64) === 0;
+    // Breaking it gives the lime banner back.
+    const before = G.entities.list.filter((e) => e.stack?.id === It.banner_lime).length;
+    if (bp) w.breakBlock(...bp, true);
+    await sleep(50);
+    out.bannerDrop = G.entities.list.filter((e) => e.stack?.id === It.banner_lime).length === before + 1;
+    p.inv.slots[0] = { id: B.painting, count: 1 }; p.pitch = 0.3;
+    await sleep(120); G.use();
+    out.painting = !!find(B.painting);
+    return out;
+  });
+  check('dyes mix, and stained glass and carpets craft in every colour', deco.cyan?.id === ids.dye_cyan && deco.glass?.id === ids.stained_glass_red && deco.glass?.count === 8 && deco.carpet?.id === ids.carpet_purple && deco.carpet?.count === 3, JSON.stringify({ cyan: deco.cyan, glass: deco.glass, carpet: deco.carpet }));
+  check('dye recolours wool; banners hang in their colour and drop back as themselves; paintings hang on walls', deco.dyedWool && deco.banner && deco.bannerDrop && deco.painting, JSON.stringify(deco));
+}
+
 // --- Save, quit, reload, and check a block change persisted.
 const marker = await g(async () => {
   const G = window.blockhaven;

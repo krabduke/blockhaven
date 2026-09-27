@@ -19,6 +19,7 @@ for (const b of BLOCKS) {
   if (b.id === 0 || b.key.startsWith('unknown_')) continue;
   b.tiles.forEach(add);
   if (b.icon) add(b.icon);
+  b.metaTiles?.forEach(add);
 }
 for (let i = 0; i <= 7; i++) add('wheat_' + i);
 for (let i = 0; i <= 3; i++) add('carrots_' + i);

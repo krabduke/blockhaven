@@ -2,7 +2,8 @@
 // lighting, mining and world generation all read from it.
 
 export type RenderShape = 'none' | 'cube' | 'cross' | 'liquid' | 'torch' | 'door' | 'bed' | 'cactus' | 'ladder' | 'slabBottom' | 'stairs' | 'fence' | 'gate' | 'table'
-  | 'pane' | 'trapdoor' | 'lantern' | 'wire' | 'button' | 'plate' | 'sign' | 'flat' | 'vine' | 'cake' | 'carpet' | 'portal' | 'fire' | 'layer';
+  | 'pane' | 'trapdoor' | 'lantern' | 'wire' | 'button' | 'plate' | 'sign' | 'flat' | 'vine' | 'cake' | 'carpet' | 'portal' | 'fire' | 'layer'
+  | 'banner' | 'painting';
 export type Layer = 'opaque' | 'cutout' | 'translucent';
 export type Tool = 'pickaxe' | 'axe' | 'shovel' | 'sword' | null;
 export type SoundKind = 'stone' | 'wood' | 'gravel' | 'grass' | 'sand' | 'glass' | 'wool' | 'snow' | 'none';
@@ -40,13 +41,34 @@ export interface BlockDef {
   waterlogged: boolean;
   /** Tile used for the item icon when it differs from a cube render. */
   icon?: string;
+  /** Blocks whose look comes from their metadata (colours, artworks): one tile per value. */
+  metaTiles?: string[];
+  /** Which bits of the metadata pick from metaTiles: (meta >> metaShift) & 15. */
+  metaShift?: number;
 }
 
 const defs: BlockDef[] = [];
+
+/** The sixteen dye colours, in the order used for block metadata. */
+export const DYE_COLORS = ['white', 'orange', 'magenta', 'light_blue', 'yellow', 'lime', 'pink', 'gray', 'light_gray', 'cyan', 'purple', 'blue', 'brown', 'green', 'red', 'black'] as const;
+export type DyeColor = (typeof DYE_COLORS)[number];
+export const COLOR_NAMES: Record<DyeColor, string> = {
+  white: 'White', orange: 'Orange', magenta: 'Magenta', light_blue: 'Light Blue', yellow: 'Yellow', lime: 'Lime', pink: 'Pink', gray: 'Gray',
+  light_gray: 'Light Gray', cyan: 'Cyan', purple: 'Purple', blue: 'Blue', brown: 'Brown', green: 'Green', red: 'Red', black: 'Black',
+};
+export const COLOR_HEX: Record<DyeColor, string> = {
+  white: '#e9e9e4', orange: '#e8781f', magenta: '#b848b0', light_blue: '#6aa8e0', yellow: '#e8c830', lime: '#7ac83a', pink: '#e890a8', gray: '#4a4a50',
+  light_gray: '#9a9a98', cyan: '#2a8a90', purple: '#7a3ab0', blue: '#3a4ab0', brown: '#6a4428', green: '#4a8a2a', red: '#b8302a', black: '#262228',
+};
+/** Wool block key for each colour (white wool is plain 'wool'). */
+export const WOOL_KEY: Record<DyeColor, string> = Object.fromEntries(DYE_COLORS.map((c) => [c, c === 'white' ? 'wool' : 'wool_' + c])) as Record<DyeColor, string>;
+const WOOL_TILE = WOOL_KEY;
 export const B: Record<string, number> = {};
 
 interface Opts {
   tiles?: string | { top?: string; bottom?: string; side?: string; front?: string };
+  metaTiles?: string[];
+  metaShift?: number;
   shape?: RenderShape;
   layer?: Layer;
   solid?: boolean;
@@ -102,6 +124,8 @@ function def(id: number, key: string, name: string, o: Opts = {}): void {
     flammable: o.flammable ?? (o.sound === 'wood' || o.sound === 'wool' || o.sound === 'grass'),
     slow: o.slow ?? 1,
     waterlogged: o.waterlogged ?? false,
+    metaTiles: o.metaTiles,
+    metaShift: o.metaShift,
   };
   defs[id] = d;
   B[key] = id;
@@ -214,7 +238,7 @@ def(97, 'sign', 'Sign', { shape: 'sign', layer: 'cutout', solid: false, opaque: 
 def(98, 'lily_pad', 'Lily Pad', { shape: 'flat', layer: 'cutout', solid: true, opaque: false, hardness: 0, tiles: 'lily_pad', sound: 'grass', needsSupport: true });
 def(99, 'vine', 'Vines', { shape: 'vine', layer: 'cutout', solid: false, opaque: false, hardness: 0.2, tiles: 'vine', sound: 'grass', climbable: true, replaceable: true, drop: 'none' });
 def(100, 'cake', 'Cake', { shape: 'cake', layer: 'cutout', opaque: false, hardness: 0.5, tiles: { top: 'cake_top', side: 'cake_side', bottom: 'cake_bottom' }, sound: 'wool', drop: 'none', icon: 'cake_item', needsSupport: true });
-def(101, 'carpet', 'White Carpet', { shape: 'carpet', layer: 'cutout', opaque: false, hardness: 0.1, tiles: 'wool', sound: 'wool', needsSupport: true });
+def(101, 'carpet', 'White Carpet', { shape: 'carpet', layer: 'cutout', opaque: false, hardness: 0.1, tiles: 'wool', sound: 'wool', needsSupport: true, metaTiles: DYE_COLORS.map((c) => WOOL_TILE[c]) });
 def(102, 'red_mushroom', 'Red Mushroom', { ...plant, tiles: 'red_mushroom' });
 def(103, 'brown_mushroom', 'Brown Mushroom', { ...plant, tiles: 'brown_mushroom', emit: 1 });
 def(104, 'cobweb', 'Cobweb', { shape: 'cross', layer: 'cutout', solid: false, opaque: false, hardness: 4, tool: 'sword', tiles: 'cobweb', drop: () => [261, 1], slow: 0.25, sound: 'wool' });
@@ -274,6 +298,15 @@ def(156, 'geode_shell', 'Geode Shell', rock({ hardness: 2.5 }));
 def(157, 'mud_bricks', 'Mud Bricks', rock({ hardness: 1.5 }));
 def(158, 'polished_limestone', 'Polished Limestone', rock({ hardness: 1.2 }));
 def(159, 'deepstone_bricks', 'Deepstone Bricks', rock({ hardness: 3.5 }));
+// The rest of the sixteen wool colours.
+([['magenta', 161], ['light_blue', 162], ['lime', 163], ['pink', 164], ['gray', 165], ['light_gray', 166], ['cyan', 167], ['purple', 168], ['brown', 169]] as const).forEach(([c, id]) => {
+  def(id, 'wool_' + c, COLOR_NAMES[c] + ' Wool', { hardness: 0.8, sound: 'wool' });
+});
+def(170, 'stained_glass', 'White Stained Glass', { layer: 'translucent', opaque: false, lightOpacity: 0, hardness: 0.3, sound: 'glass', drop: 'none', tiles: 'stained_glass_white', metaTiles: DYE_COLORS.map((c) => 'stained_glass_' + c) });
+// Banners hang on walls (meta: facing | colour << 2) or stand on the ground (+64).
+def(171, 'banner', 'White Banner', { shape: 'banner', layer: 'cutout', solid: false, opaque: false, hardness: 1, tool: 'axe', sound: 'wool', tiles: 'banner_white', icon: 'banner_white', metaTiles: DYE_COLORS.map((c) => 'banner_' + c), metaShift: 2 });
+// Paintings hang on walls (meta: facing | artwork << 2).
+def(172, 'painting', 'Painting', { shape: 'painting', layer: 'cutout', solid: false, opaque: false, hardness: 0.2, sound: 'wood', tiles: 'painting_0', icon: 'painting_item', metaTiles: Array.from({ length: 16 }, (_, i) => 'painting_' + i), metaShift: 2 });
 def(160, 'brewing_stand', 'Brewing Stand', { shape: 'table', opaque: false, lightOpacity: 0, emit: 3, tiles: { top: 'brewing_top', side: 'brewing_side', bottom: 'cobblestone' }, hardness: 0.5, tool: 'pickaxe', harvestTier: 0, icon: 'brewing_item' });
 def(115, 'bell', 'Village Bell', { shape: 'lantern', layer: 'cutout', opaque: false, hardness: 5, tool: 'pickaxe', tiles: 'bell', icon: 'bell_item', sound: 'stone' });
 

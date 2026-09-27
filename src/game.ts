@@ -7,6 +7,7 @@ import { EntityManager, MOBS, TntEntity } from './entities/entities';
 import { createAvatar } from './entities/avatar';
 import type { MobModel } from './entities/models';
 import { I, itemDef } from './items';
+import { craft } from './crafting';
 import { hashString } from './noise';
 import { raycast, stepBody, updateContacts } from './physics';
 import { EYE_HEIGHT, Player, SNEAK_EYE_HEIGHT } from './player';
@@ -676,6 +677,8 @@ export class Game {
   /** Item ids by name. */
   get items(): Record<string, number> { return I; }
   readonly storage = { exportWorld, importWorld, deleteWorld };
+  /** The crafting grid matcher (for scripts and tests). */
+  readonly craft = craft;
   get target() { return this.actions.target; }
   get mouse() { return this.input.mouse; }
   get keys() { return this.input.keys; }

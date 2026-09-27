@@ -1,8 +1,8 @@
 // Crafting recipes. Shaped recipes are matched after trimming empty rows and
 // columns, and also mirrored, so a 2x2 grid can make anything that fits in it.
 
-import { B } from './blocks';
-import { ARMOR_MATERIALS, ARMOR_PIECES, I, MATERIALS, type ItemStack } from './items';
+import { B, DYE_COLORS, WOOL_KEY } from './blocks';
+import { ARMOR_MATERIALS, ARMOR_PIECES, I, MATERIALS, coloredItem, type ItemStack } from './items';
 import type { Slot } from './inventory';
 
 interface Shaped { pattern: string[]; key: Record<string, number | number[]>; result: [number, number] }
@@ -13,6 +13,7 @@ const shapeless: Shapeless[] = [];
 
 const LOGS = [B.log, B.birch_log, B.spruce_log, B.sunwood_log, B.jungle_log, B.blossom_log];
 const PLANKS = B.planks;
+const WOOL_ANY = DYE_COLORS.map((c) => B[WOOL_KEY[c]]);
 
 function r(pattern: string[], key: Record<string, number | number[]>, result: number, count = 1) {
   shaped.push({ pattern, key, result: [result, count] });
@@ -28,7 +29,7 @@ r(['CCC', 'C C', 'CCC'], { C: B.cobblestone }, B.furnace);
 r(['PPP', 'P P', 'PPP'], { P: PLANKS }, B.chest);
 r(['C', 'S'], { C: I.coal, S: I.stick }, B.torch, 4);
 r(['PP', 'PP', 'PP'], { P: PLANKS }, B.door, 3);
-r(['WWW', 'PPP'], { W: B.wool, P: PLANKS }, B.bed);
+r(['WWW', 'PPP'], { W: WOOL_ANY, P: PLANKS }, B.bed);
 r(['S S', 'SSS', 'S S'], { S: I.stick }, B.ladder, 3);
 r(['PPP', 'BBB', 'PPP'], { P: PLANKS, B: I.paper }, B.bookshelf);
 r(['SSS'], { S: B.sugar_cane }, I.paper, 3);
@@ -77,9 +78,26 @@ s([B.dandelion], I.dye_yellow, 2);
 s([B.blue_flower], I.dye_blue, 2);
 s([I.coal, I.bone_meal], I.dye_black, 2);
 s([I.dye_red, I.dye_yellow], I.dye_orange, 2);
-const WOOL_DYES: [number, number][] = [[I.dye_red, B.wool_red], [I.dye_yellow, B.wool_yellow], [I.dye_green, B.wool_green], [I.dye_blue, B.wool_blue], [I.dye_black, B.wool_black], [I.dye_orange, B.wool_orange]];
-for (const [dye, wool] of WOOL_DYES) s([B.wool, dye], wool);
-r(['WW'], { W: B.wool }, B.carpet, 3);
+// Mixing dyes.
+s([I.bone_meal], I.dye_white, 1);
+s([I.dye_red, I.dye_white], I.dye_pink, 2);
+s([I.dye_blue, I.dye_white], I.dye_light_blue, 2);
+s([I.dye_green, I.dye_white], I.dye_lime, 2);
+s([I.dye_black, I.dye_white], I.dye_gray, 2);
+s([I.dye_gray, I.dye_white], I.dye_light_gray, 2);
+s([I.dye_blue, I.dye_green], I.dye_cyan, 2);
+s([I.dye_blue, I.dye_red], I.dye_purple, 2);
+s([I.dye_purple, I.dye_pink], I.dye_magenta, 2);
+s([B.mud], I.dye_brown, 1);
+// Wool, carpets, stained glass and banners in every colour.
+DYE_COLORS.forEach((c, i) => {
+  const dye = I['dye_' + c], wool = B[WOOL_KEY[c]];
+  if (c !== 'white') s([B.wool, dye], wool);
+  r(['WW'], { W: wool }, coloredItem(B.carpet, i), 3);
+  r(['GGG', 'GDG', 'GGG'], { G: B.glass, D: dye }, coloredItem(B.stained_glass, i), 8);
+  r(['WWW', 'WWW', ' S '], { W: wool, S: I.stick }, coloredItem(B.banner, i));
+});
+r(['SSS', 'SWS', 'SSS'], { S: I.stick, W: WOOL_ANY }, B.painting);
 r(['GGG', 'GGG'], { G: B.glass }, B.glass_pane, 16);
 r(['III', 'III'], { I: I.iron_ingot }, B.iron_bars, 16);
 r(['PPP', 'PPP'], { P: PLANKS }, B.trapdoor, 2);

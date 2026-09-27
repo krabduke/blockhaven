@@ -55,7 +55,7 @@ All taken in-game at render distance 16 with the default Fancy graphics.
 - Day and night on a 20-minute cycle, with sun, moon, stars, drifting clouds, and rain, snow and thunderstorms
 
 **Blocks and building**
-- 159 blocks, including stairs, slabs, fences, fence gates, doors, trapdoors, ladders, glass and glass panes, iron bars, lanterns, signs you can write on, carpets, six colours of wool, slate, marble, terracotta, hay bales, cake, bookshelves, TNT and lamps
+- 172 blocks, including stairs, slabs, fences, fence gates, doors, trapdoors, ladders, glass and glass panes, iron bars, lanterns, signs you can write on, wool, carpets, stained glass and banners in all sixteen dye colours (mix dyes: red and white make pink, blue and green make cyan), sixteen original paintings to hang, slate, marble, terracotta, hay bales, cake, bookshelves, TNT and lamps
 - Power: buttons, pressure plates and levers send power along spark dust wire to light lamps, open doors, trapdoors and gates, and set off TNT
 - Fire that spreads through wood, wool and leaves and burns out on its own, and puts itself out in the rain
 - Smooth lighting with ambient occlusion; sunlight and torchlight both flood-fill through the world
