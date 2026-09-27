@@ -32,7 +32,7 @@ const PAD_DEAD = 0.18;
 
 export class Input {
   readonly keys = new Set<string>();
-  mouse = [false, false, false];
+  readonly mouse = [false, false, false];
   private lastSpace = 0;
   private lastW = 0;
   /** Set once the mouse has been captured this session (the resume hint only makes sense after that). */
@@ -109,7 +109,7 @@ export class Input {
       if (!this.locked && g.mode === 'playing' && !g.containers.open && !g.menus.current && !g.chat.isOpen && g.player.alive && !this.padActive) {
         g.menus.show('pause');
       }
-      if (!this.locked) { this.mouse = [false, false, false]; this.keys.clear(); }
+      if (!this.locked) { this.mouse.fill(false); this.keys.clear(); }
     });
     document.addEventListener('mousemove', (e) => {
       if (!this.locked) return;
@@ -138,7 +138,7 @@ export class Input {
     }, { passive: true });
     document.addEventListener('keydown', (e) => this.keyDown(e));
     document.addEventListener('keyup', (e) => this.keys.delete(e.code));
-    window.addEventListener('blur', () => { this.keys.clear(); this.mouse = [false, false, false]; });
+    window.addEventListener('blur', () => { this.keys.clear(); this.mouse.fill(false); });
     window.addEventListener('gamepadconnected', () => g.toast('Controller connected. Left stick moves, right stick looks, triggers mine and place.', 5));
   }
 

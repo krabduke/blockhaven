@@ -169,8 +169,11 @@ const feats = await g(async ({ x, y, z }) => {
   const e = p.eye(), m = target.body.pos;
   p.yaw = Math.atan2(-(m[0] - e[0]), -(m[2] - e[2]));
   p.pitch = Math.atan2(m[1] + 0.4 - e[1], Math.hypot(m[0] - e[0], m[2] - e[2])) + 0.03;
+  // Hold right click (re-asserted like a held button, so a focus change can't cancel the draw).
   G.mouse[2] = true; G.use();
+  const hold = setInterval(() => { G.mouse[2] = true; }, 50);
   await sleep(1300);
+  clearInterval(hold);
   G.mouse[2] = false; G.releaseBow();
   await sleep(1500);
   out.bowArrowsLeft = p.inv.count(284);

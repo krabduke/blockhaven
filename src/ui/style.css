@@ -67,7 +67,11 @@ label.lbl { display: block; font-size: 16px; color: var(--bone-dim); margin-bott
   position: fixed; inset: 0; display: none;
   align-items: center; justify-content: center;
   padding: 16px; z-index: 20;
+  /* A panel taller than the window scrolls instead of being cut off. */
+  overflow-y: auto;
 }
+.screen > * { flex-shrink: 0; }
+.screen > .panel, .screen > .title-menu { margin-block: auto; }
 .screen.show { display: flex; }
 .screen.dim { background: rgba(10, 7, 5, 0.55); }
 
