@@ -37,6 +37,7 @@ All taken in-game at render distance 16 with the default Fancy graphics.
 | ![Snowy mountain peaks with icy tops](docs/screenshots/mountains.png) | ![A snowy spruce forest by a frozen lake](docs/screenshots/snowy-taiga.png) |
 | ![Boars, woolbacks, hens and a fox in a meadow](docs/screenshots/animals.png) | ![A torch-lit cave with glowmoss, dripstone and lava](docs/screenshots/cave.png) |
 | ![Monsters closing in on a torch-lit clearing at night](docs/screenshots/night-raid.png) | ![A glowstone-lit cavern in the Emberdeep](docs/screenshots/emberdeep.png) |
+| ![A line-up of monsters: frostling, zombie, brambler, witch, skeleton, blastcap, mirewalker and shellcrawler](docs/screenshots/creatures.png) | ![Villagers of different trades beside a stonewarden](docs/screenshots/villagers.png) |
 | ![The crafting table screen](docs/screenshots/crafting.png) | ![The enchanting table screen](docs/screenshots/enchanting.png) |
 
 ## Features
@@ -78,18 +79,21 @@ All taken in-game at render distance 16 with the default Fancy graphics.
 - Blocks crack apart into shards as you mine them
 
 **Creatures (all original designs)**
-- **Boar**, **Hen** and **Woolback** (a curly-horned ram): follow you when you hold their food, can be bred into babies, and drop food, leather, feathers and wool. Shear a Woolback for its wool; it grows back as it grazes. Hens lay eggs
-- **Zombie**: a pallid, bandaged shambler that lurches at you in the dark and burns in daylight
-- **Skeleton**: a hooded bone archer that keeps its distance and shoots arrows
-- **Witch**: a spectacled potion-brewer in a patchwork robe who lobs splash potions and drinks a healing brew when hurt; most common in swamps
-- **Blastcap**: a spotted mushroom creature that sneaks up, hisses, swells and bursts
-- **Mirewalker**: a hunched bog-dweller draped in moss that comes out at night and burns in sunlight
-- **Shellcrawler**: a six-legged cave crawler under a ridged shell, calm in daylight unless provoked
-- **Brambler**: a walking thorn-bud on root legs that keeps its distance and spits barbs
-- **Burrowfox**, **Bogfrog** (swamps), **Streamfish** (water) and **cave moths**
-- **Dune Scuttler**: a fast desert scorpion-thing with a curled stinger. **Frostling**: a crystal-horned ice imp in snowy places that throws snowballs
-- **Villagers**: farmers, shepherds, fishers, butchers, clerics, smiths and librarians, each with their own trades. **Stonewarden**: a mossy guardian that fights monsters near its village
-- **Emberwisp**: a floating soot-black lantern skull that lobs fireballs. **Cinderbrute**: a hulking basalt ape with glowing seams that shrugs off fire
+
+Every creature is built from hand-placed boxes with procedurally painted fur, wool, scales, bark and cloth, and animated by a small pose engine: walk cycles scaled to speed, breathing, eased turning that leans into corners, idle glances, blinking, landing squash, and behaviour poses for grazing, pecking, aiming, spitting, slamming and swelling. Each one also varies a little in size.
+
+- **Boar**: a stocky wild boar with a bristly spine, tusks and a flat pink snout that roots at the grass. **Hen**: a speckled hen with an arched tail, slate-blue crest and wattle that pecks and bobs as she walks and flaps when startled. **Woolback**: a curly-horned ram in a thick fleece; shear it and its thin body shows until the wool grows back from grazing. All three follow you when you hold their food, breed into babies, and wag their tails when fed. Hens lay eggs
+- **Zombie**: a pallid, bandaged shambler that limps, lolls its head, reaches for you and snaps its slack jaw; burns in daylight
+- **Skeleton**: a bone archer in a hooded wine-red cloak that streams behind it as it runs; draws its recurve bow and shoots arrows from a distance
+- **Witch**: a hedge-witch in a plum dress and mossy shawl, with brass spectacles, long grey hair and a tall crooked hat with a feather. She lobs splash potions, cackles after a throw and drinks a healing brew when hurt; most common in swamps
+- **Blastcap**: a spotted mushroom creature that waddles up, hisses, trembles, swells and bursts
+- **Mirewalker**: a hunched bog-dweller draped in hanging moss, with long pendulum arms and glowing mushrooms on its shoulder; comes out at night and burns in sunlight
+- **Shellcrawler**: a long-legged cave crawler under a ridged teal shell, walking on jointed legs in a tripod gait; calm in daylight unless provoked
+- **Brambler**: a walking thorn-rose on root feet whose crimson petals flare open when it spits barbs
+- **Burrowfox**: a slender russet fox with black socks, tall ears and a huge brush tail that tilts its head at you. **Bogfrog** (swamps): a mottled frog that stretches out mid-leap and puffs its throat. **Streamfish** (water): a speckled trout with a pink band. **Cave moths**: big fuzzy moths with glowing cyan eyespots
+- **Dune Scuttler**: a fast desert scorpion-thing with snapping pincers and a stinger that strikes. **Frostling**: a small ice imp with a crown of ice shards and an icicle beard that throws snowballs in snowy places
+- **Villagers**: farmers, shepherds, fishers, butchers, clerics, smiths and librarians, each with their own clothes, hats, beards and tools (a straw hat, a crook, a pipe, a bandana, a hood, goggles, a book and quill) and their own trades. They wave when you come close, scratch their heads and look around. **Stonewarden**: a mossy stone guardian with a glowing amber heart and a sapling on its head that fights monsters near its village
+- **Emberwisp**: a floating soot-black lantern skull with a flame crown that lobs fireballs. **Cinderbrute**: a hulking basalt ape with glowing seams and spines that knuckle-walks, slams and shrugs off fire
 
 **Game modes**
 - Survival, and Creative (fly, instant breaking, and every block and item in a searchable palette)

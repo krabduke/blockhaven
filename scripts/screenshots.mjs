@@ -23,7 +23,10 @@ page.on('pageerror', (e) => errors.push('pageerror: ' + e.message));
 
 const wait = (ms) => page.waitForTimeout(ms);
 const game = (fn, arg) => page.evaluate(fn, arg);
+// ONLY=name1,name2 saves just those shots (the scenes still play in order).
+const only = process.env.ONLY?.split(',');
 const shot = async (name) => {
+  if (only && !only.includes(name)) { console.log('skipped', name); return; }
   await game(() => window.blockhaven.menus.show(null));
   await wait(500);
   await page.screenshot({ path: `${out}/${name}.png` });
@@ -93,7 +96,7 @@ const visit = async ([x, z]) => {
 await page.goto(url);
 await wait(14000);
 // The title shot keeps the menu (shot() would hide it).
-await page.screenshot({ path: `${out}/title.png` }); console.log('saved title');
+if (!only || only.includes('title')) { await page.screenshot({ path: `${out}/title.png` }); console.log('saved title'); }
 
 // A creative world with a fixed seed, render distance 16.
 await game(() => {
@@ -177,6 +180,40 @@ if (plains) {
   await shot('animals');
 }
 
+// Line-ups: the monsters by day (tamed for the photo), then villagers of every trade.
+const lineup = async (name, kinds, dist, height) => {
+  await visit([plains[0], plains[2]]);
+  await game(([x, z, kinds, dist, height]) => {
+    const g = window.blockhaven, w = g.world;
+    for (const e of g.entities.list) if (e.spec) e.dead = true;
+    const y = w.groundY(x, z) - 1;
+    for (let dx = -12; dx <= 12; dx++) for (let dz = -16; dz <= 12; dz++) {
+      for (let dy = 1; dy <= 8; dy++) w.setBlock(x + dx, y + dy, z + dz, 0);
+      w.setBlock(x + dx, y, z + dz, 2);
+      if ((dx * 7 + dz * 13) % 7 === 0 && Math.abs(dz + 3) > 2) w.setBlock(x + dx, y + 1, z + dz, 28);
+    }
+    const gap = 2.3;
+    kinds.forEach((k, i) => {
+      const [kind, prof] = k.split(':');
+      const off = i - (kinds.length - 1) / 2;
+      const m = g.entities.spawnMob(kind, x + 0.5 + off * gap, y + 1, z - 3 + 0.5 + Math.abs(off) * 0.5, prof);
+      m.spec = { ...m.spec, hostile: false, ranged: false, burnsInDay: false, exploder: false };
+      m.yaw = Math.PI - off * 0.12; m.wanderTimer = 99999; m.target = null;
+    });
+    g.player.flying = true;
+    g.player.body.pos = [x + 0.5, y + 1 + height, z - 3 + dist];
+    g.player.yaw = 0; g.player.pitch = -0.16;
+  }, [plains[0], plains[2], kinds, dist, height]);
+  await setTime(4200);
+  await settle(8000);
+  await wait(1500);
+  await shot(name);
+};
+if (plains) {
+  await lineup('creatures', ['frostling', 'zombie', 'brambler', 'witch', 'skeleton', 'blastcap', 'mirewalker', 'shellcrawler'], 11.5, 0.6);
+  await lineup('villagers', ['villager:farmer', 'villager:fisher', 'villager:librarian', 'stonewarden', 'villager:cleric', 'villager:smith', 'villager:butcher'], 10, 0.5);
+}
+
 // Gameplay shots keep the HUD: a torch-lit cave with ore, crafting and enchanting screens, a night raid.
 await hud(true);
 await visit([0, 0]);
@@ -227,7 +264,7 @@ await game(() => {
 });
 await wait(800);
 await page.mouse.move(5, 5);
-await page.screenshot({ path: `${out}/crafting.png` }); console.log('saved crafting');
+if (!only || only.includes('crafting')) { await page.screenshot({ path: `${out}/crafting.png` }); console.log('saved crafting'); }
 await game(() => window.blockhaven.containers.close());
 await game(() => { const g = window.blockhaven; g.player.addXp(160); g.player.inv.slots[1] = { id: 320, count: 1 }; g.containers.show('enchant', { bookshelves: 12 }); });
 await wait(500);
@@ -236,7 +273,7 @@ await wait(500);
   await slots[29].click(); await wait(100); await slots[0].click(); await wait(400);
 }
 await page.mouse.move(5, 5);
-await page.screenshot({ path: `${out}/enchanting.png` }); console.log('saved enchanting');
+if (!only || only.includes('enchanting')) { await page.screenshot({ path: `${out}/enchanting.png` }); console.log('saved enchanting'); }
 await game(() => window.blockhaven.containers.close());
 
 // Night raid: a torch-lit clearing on the plains with monsters closing in.
@@ -250,16 +287,19 @@ if (plains) {
       w.setBlock(x + dx, y, z + dz, 2);
       if ((dx * 7 + dz * 13) % 6 === 0) w.setBlock(x + dx, y + 1, z + dz, 28);
     }
+    for (const e of g.entities.list) if (e.spec) e.dead = true;
     for (const [dx, dz] of [[-3, -2], [3, -5], [-5, -10], [4, -12]]) { w.setBlock(x + dx, y + 1, z + dz, 63); w.setBlock(x + dx, y + 2, z + dz, 93); }
     p.creative = true; p.flying = false;
     p.body.pos = [x + 0.5, y + 1, z + 6.5]; p.yaw = 0; p.pitch = -0.08;
     p.inv.slots[0] = { id: 323, count: 1 }; p.selected = 0;
-    for (const [k, dx, dz] of [['mirewalker', -2, -4], ['brambler', 3, -8], ['shellcrawler', 0, -1], ['mirewalker', 5, -3]]) {
+    for (const [k, dx, dz] of [['zombie', -2, -4], ['skeleton', 3, -8], ['shellcrawler', 0, -1], ['witch', 5, -4], ['blastcap', -6, -5], ['mirewalker', -1, -12]]) {
       const m = g.entities.spawnMob(k, x + dx + 0.5, y + 1, z + dz + 0.5);
       m.wanderTimer = 4000; m.yaw = Math.PI; m.target = null;
     }
   }, [plains[0], plains[2]]);
   await setTime(15500);
+  // They were spawned in daylight; put out any that caught fire before night fell.
+  await game(() => { for (const e of window.blockhaven.entities.list) if (e.spec) e.burning = 0; });
   await settle(8000);
   await shot('night-raid');
 }

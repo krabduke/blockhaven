@@ -9,6 +9,7 @@ import type { Renderer } from '../render/renderer';
 import { tileIndex } from '../tiles';
 import type { World } from '../world/world';
 import { createModel, type MobModel } from './models';
+import { animateMob, newAnimState } from './animate';
 import { tradesFor, type TradeOffer } from '../trading';
 
 export interface PlayerLike {
@@ -68,7 +69,7 @@ export const MOBS: Record<string, MobSpec> = {
   bogfrog: { kind: 'bogfrog', width: 0.5, height: 0.5, health: 6, speed: 0.6, hostile: false, hops: true, habitat: 'swamp', food: [I.seeds], pitch: 250, xp: 1, drops: () => [] },
   dunescuttler: { kind: 'dunescuttler', width: 0.8, height: 0.5, health: 10, speed: 1.1, hostile: true, attack: 2, habitat: 'desert', pitch: 800, xp: 5, drops: (r) => [{ id: I.string, count: Math.floor(r() * 2) }, { id: I.bone, count: Math.floor(r() * 2) }] },
   frostling: { kind: 'frostling', width: 0.5, height: 1.4, health: 14, speed: 0.75, hostile: true, ranged: true, projectile: 'snowball', habitat: 'cold', pitch: 1100, xp: 5, drops: (r) => [{ id: I.snowball, count: 1 + Math.floor(r() * 4) }, ...(r() < 0.2 ? [{ id: B.ice, count: 1 }] : [])] },
-  cavemoth: { kind: 'cavemoth', width: 0.4, height: 0.4, health: 4, speed: 0.4, hostile: false, flying: true, habitat: 'cave', pitch: 1400, xp: 0, drops: () => [] },
+  cavemoth: { kind: 'cavemoth', width: 0.6, height: 0.5, health: 4, speed: 0.4, hostile: false, flying: true, habitat: 'cave', pitch: 1400, xp: 0, drops: () => [] },
   streamfish: { kind: 'streamfish', width: 0.4, height: 0.3, health: 3, speed: 0.5, hostile: false, aquatic: true, habitat: 'water', pitch: 1200, xp: 1, drops: () => [{ id: I.raw_fish, count: 1 }] },
   zombie: { kind: 'zombie', width: 0.6, height: 1.95, health: 20, speed: 0.7, hostile: true, attack: 3, burnsInDay: true, pitch: 140, xp: 5, drops: (r) => [{ id: I.rotten_flesh, count: Math.floor(r() * 3) }, ...(r() < 0.03 ? [{ id: I.iron_ingot, count: 1 }] : r() < 0.04 ? [{ id: I.carrot, count: 1 }] : [])] },
   skeleton: { kind: 'skeleton', width: 0.6, height: 1.95, health: 20, speed: 0.7, hostile: true, ranged: true, projectile: 'arrow', shotDelay: 34, burnsInDay: true, pitch: 480, xp: 5, drops: (r) => [{ id: I.bone, count: Math.floor(r() * 3) }, { id: I.arrow, count: Math.floor(r() * 3) }] },
@@ -245,6 +246,12 @@ export class Mob extends Entity {
   /** Blastcap fuse, 0..30. */
   fuse = 0;
   healCooldown = 0;
+  /** Grazing or pecking at the ground (peaceful animals). */
+  grazeTicks = 0;
+  anim = newAnimState();
+  /** Individuals differ a little in size. */
+  readonly sizeJitter = 0.93 + Math.random() * 0.14;
+  private lastFrame = performance.now();
   model: MobModel;
   constructor(readonly spec: MobSpec, x: number, y: number, z: number, profession?: string) {
     const body = new Body(x, y, z, spec.width, spec.height);
@@ -280,7 +287,7 @@ export class Mob extends Entity {
     }
     const s = m.spatialFor(this.body.pos);
     sfx.mobHurt(this.spec.pitch * (this.baby ? 1.5 : 1), s);
-    if (!this.spec.hostile) this.panic = 60;
+    if (!this.spec.hostile) { this.panic = 60; this.grazeTicks = 0; }
     if (this.health <= 0) {
       this.deathTime = 1;
       if (!this.baby) {
@@ -428,7 +435,14 @@ export class Mob extends Entity {
       forward = pd > 2.2 ? 1 : 0;
       this.headYaw = 0;
     } else {
-      if (--this.wanderTimer <= 0) {
+      // Animals stop now and then to graze or peck at the ground.
+      const grazer = this.spec.kind === 'boar' || this.spec.kind === 'woolback' || this.spec.kind === 'hen' || this.spec.kind === 'burrowfox';
+      if (grazer && this.grazeTicks === 0 && Math.random() < 0.006) { this.grazeTicks = 30 + Math.floor(Math.random() * 60); this.target = null; }
+      if (this.grazeTicks > 0) {
+        this.grazeTicks--;
+        if (this.spec.kind === 'woolback' && this.sheared && this.grazeTicks === 1 && w.getBlock(Math.floor(b.pos[0]), Math.floor(b.pos[1] - 0.5), Math.floor(b.pos[2])) === B.grass) this.sheared = false;
+      }
+      if (this.grazeTicks === 0 && --this.wanderTimer <= 0) {
         this.wanderTimer = 60 + Math.floor(Math.random() * 120);
         this.target = Math.random() < 0.6 ? null : [b.pos[0] + (Math.random() - 0.5) * 16, 0, b.pos[2] + (Math.random() - 0.5) * 16];
       }
@@ -561,60 +575,44 @@ export class Mob extends Entity {
 
   render(alpha: number, m: EntityManager): void {
     super.render(alpha, m);
+    const dt = Math.min(0.1, Math.max(0.001, (performance.now() - this.lastFrame) / 1000));
+    this.lastFrame = performance.now();
+    const size = (this.baby ? 0.55 : 1) * (this.spec.trader ? 1 + (this.sizeJitter - 1) * 0.5 : this.sizeJitter);
+    this.object.scale.setScalar(size);
     const parts = this.model.parts;
-    this.object.rotation.y = this.yaw;
-    this.object.scale.setScalar(this.baby ? 0.55 : 1);
     if (this.baby && parts.head) parts.head.scale.setScalar(1.35);
-    const swing = Math.sin(this.walkAnim) * 0.7;
-    const crawler = this.spec.kind === 'shellcrawler' || this.spec.kind === 'dunescuttler';
-    for (const [name, o] of Object.entries(parts)) {
-      const base = (o.userData.baseRot as number[] | undefined) ?? [0, 0, 0];
-      if (name.startsWith('leg')) {
-        const phase = /FL|BR|L$|L0|R1|L2/.test(name) ? 1 : -1;
-        if (crawler) o.rotation.y = base[1] + swing * 0.4 * phase;
-        else o.rotation.x = base[0] + swing * phase * (this.spec.kind === 'cinderbrute' ? 0.5 : 1);
-      }
-      if (name === 'armL' || name === 'armR') {
-        const left = name === 'armL';
-        let a = Math.sin(this.walkAnim) * 0.35 * (left ? 1 : -1);
-        const k = this.spec.kind;
-        if (k === 'skeleton' && this.aiming) a = -1.45 + (left ? 0.1 : 0);         // bow up, drawing
-        else if (k === 'witch' && !left && this.attackCooldown > (this.spec.shotDelay ?? 40) - 10) a = -2.2; // throwing arm
-        else if (k === 'frostling' && !left && this.attackCooldown > 15) a = -2.0;
-        else if (k === 'brambler' && this.attackCooldown > 30) a = -1.9;
-        else if (!this.spec.ranged && this.attackCooldown > 14) a -= 1.2;          // melee swipe
-        else if (k === 'zombie' && this.aiming) a -= 0.55;                          // reaching lurch
-        o.rotation.x = base[0] + a;
-      }
-      const flap = this.spec.flying ? Math.sin(this.age * (this.spec.kind === 'cavemoth' ? 1.4 : 0.3)) * 0.8 : Math.sin(this.age) * 0.8;
-      if (name === 'wingL') o.rotation.z = base[2] + (this.body.onGround && !this.spec.flying ? 0 : flap);
-      if (name === 'wingR') o.rotation.z = base[2] - (this.body.onGround && !this.spec.flying ? 0 : flap);
-      if (name === 'tail' && this.spec.kind === 'streamfish') o.rotation.y = Math.sin(this.walkAnim) * 0.6;
-      if (name === 'tail' && this.spec.kind === 'dunescuttler') o.rotation.x = base[0] + Math.sin(this.age * 0.15) * 0.12;
-      if (name.startsWith('flame')) o.scale.y = 0.8 + Math.sin(this.age * 0.5 + name.length) * 0.25;
-      if (name === 'core') o.rotation.y = this.age * 0.05;
+    const p = m.player.body.pos, b = this.body.pos;
+    animateMob(this, parts, dt, [p[0] - b[0], p[1] + m.player.eyeHeight - (b[1] + this.body.height * 0.85), p[2] - b[2]]);
+    this.object.rotation.y = this.anim.yaw;
+    // Recoil when hurt; fall over when dying.
+    parts.body.rotation.x = this.hurtTime > 0 ? -Math.sin((this.hurtTime / 10) * Math.PI) * 0.25 : 0;
+    if (this.deathTime > 0) this.object.rotation.z = Math.min(Math.PI / 2, (this.deathTime / 10) * (Math.PI / 2));
+    else this.object.rotation.z = 0;
+    // Ground the shadow: find the floor below and fade it with height.
+    const sh = this.model.shadow;
+    const w = m.world, fx = Math.floor(b[0]), fz = Math.floor(b[2]);
+    let drop = -1;
+    for (let k = 0; k < 6; k++) { if (SOLID[w.getBlock(fx, Math.floor(b[1] - 0.01) - k, fz)]) { drop = (b[1] - (Math.floor(b[1] - 0.01) - k + 1)); break; } }
+    sh.visible = drop >= 0 && this.deathTime === 0 && !this.spec.aquatic;
+    if (sh.visible) {
+      sh.position.y = -drop / size + 0.03;
+      (sh.material as THREE.MeshBasicMaterial).opacity = Math.max(0, 1 - drop / 5);
     }
     if (this.fuse > 0) {
       // Swell and flash white before bursting.
       const t = this.fuse / 30;
       this.object.scale.multiplyScalar(1 + t * 0.35 + Math.sin(this.age * 1.3) * 0.03 * t);
-      if (Math.floor(this.age / 3) % 2 === 0) this.object.traverse((o) => {
-        const mat = (o as THREE.Mesh).material;
-        if (!mat) return;
-        for (const mm of Array.isArray(mat) ? mat : [mat]) (mm as THREE.MeshBasicMaterial).color.lerp(new THREE.Color(1, 1, 1), 0.5 + t * 0.4);
-      });
+      if (Math.floor(this.age / 3) % 2 === 0) this.tint(new THREE.Color(1, 1, 1), 0.5 + t * 0.4);
     }
-    if (parts.torso && this.spec.kind === 'woolback') parts.torso.scale.set(this.sheared ? 0.78 : 1, this.sheared ? 0.8 : 1, this.sheared ? 0.92 : 1);
-    if (parts.head) parts.head.rotation.y = Math.max(-1, Math.min(1, this.headYaw));
-    if (this.deathTime > 0) this.object.rotation.z = Math.min(Math.PI / 2, this.deathTime / 10 * Math.PI / 2);
-    else this.object.rotation.z = 0;
-    if (this.burning > 0) {
-      this.object.traverse((o) => {
-        const mat = (o as THREE.Mesh).material;
-        if (!mat) return;
-        for (const mm of Array.isArray(mat) ? mat : [mat]) (mm as THREE.MeshBasicMaterial).color.multiply(new THREE.Color(1.4, 0.8, 0.4));
-      });
-    }
+    if (this.burning > 0) this.tint(new THREE.Color(1.4, 0.8, 0.4), 0.5);
+  }
+
+  private tint(c: THREE.Color, amt: number): void {
+    this.object.traverse((o) => {
+      const mat = (o as THREE.Mesh).material;
+      if (!mat || o.userData.isShadow) return;
+      for (const mm of Array.isArray(mat) ? mat : [mat]) (mm as THREE.MeshBasicMaterial).color.lerp(c, amt);
+    });
   }
 }
 
