@@ -1496,10 +1496,15 @@ export class Game {
     const forward = Math.max(-1, Math.min(1, (k('KeyW') ? 1 : 0) - (k('KeyS') ? 1 : 0) + (t?.moveY ?? 0)));
     const strafe = Math.max(-1, Math.min(1, (k('KeyD') ? 1 : 0) - (k('KeyA') ? 1 : 0) + (t?.moveX ?? 0)));
     p.sneaking = k('ShiftLeft') || k('ShiftRight') || !!t?.sneak;
-    if (k('ControlLeft') && forward > 0) p.sprinting = true;
+    // Ctrl sprints; R does too, for keyboards where Ctrl+Space is taken by the system
+    // (on macOS it switches input source).
+    if ((k('ControlLeft') || k('ControlRight') || k('KeyR')) && forward > 0) p.sprinting = true;
     // On a touch screen, pushing the stick all the way forward sprints.
     if (t && t.moveY > 0.9) p.sprinting = true;
-    if (forward <= 0 || p.sneaking || (p.food <= 6 && !p.creative) || p.body.collidedH) p.sprinting = false;
+    // Bumping a wall ends a sprint on foot; in flight only when it actually stops you, so grazing
+    // a cliff face on the way up doesn't make the view pulse.
+    const blocked = p.body.collidedH && (!p.flying || Math.hypot(p.body.vel[0], p.body.vel[2]) < 0.1);
+    if (forward <= 0 || (p.sneaking && !p.flying) || (p.food <= 6 && !p.creative) || blocked) p.sprinting = false;
     if (!p.creative) p.flying = false;
     updateContacts(w, p.body, p.eyeHeight);
     const wasOnGround = p.body.onGround;

@@ -124,7 +124,7 @@ Phones start with lighter graphics (render distance 6, no sun shadows or bloom);
 | W A S D | Move |
 | Space | Jump (double-tap to fly in Creative) |
 | Shift | Sneak (you won't walk off edges) |
-| Ctrl, or double-tap W | Sprint |
+| Ctrl or R, or double-tap W | Sprint (in flight it also speeds up climbing and descending) |
 | Left click | Mine or attack |
 | Right click | Place, use, eat, open, draw a bow, cast a rod |
 | Middle click | Pick the block you're looking at |

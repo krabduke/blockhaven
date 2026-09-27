@@ -376,10 +376,18 @@ export function stepBody(w: BlockReader, body: Body, input: MoveInput, flying: b
   const prevY = body.pos[1];
 
   if (flying) {
-    accelVec((input.sprint ? 0.1 : 0.05) * speedMul);
-    body.vel[1] = ((input.jump ? 0.375 : 0) - (input.sneak ? 0.375 : 0)) * Math.max(1, Math.sqrt(speedMul));
+    // Horizontal: top speed 0.55 blocks/tick (1.1 sprinting), reached in about half a second,
+    // with a short glide when you let go.
+    const drag = 0.8;
+    accelVec((input.sprint ? 0.22 : 0.11) * speedMul);
+    // Vertical: eases toward the target climb rate on the same timescale instead of snapping,
+    // and climbs faster while sprinting so a sprinting climb keeps a sensible angle.
+    const climb = (input.jump ? 1 : 0) - (input.sneak ? 1 : 0);
+    const vTarget = climb * 0.375 * (input.sprint ? 1.8 : 1) * Math.max(1, Math.sqrt(speedMul));
+    body.vel[1] += (vTarget - body.vel[1]) * 0.45;
     moveBody(w, body, body.vel[0], body.vel[1], body.vel[2], 0, false);
-    body.vel[0] *= 0.91; body.vel[2] *= 0.91; body.vel[1] *= 0.6;
+    body.vel[0] *= drag; body.vel[2] *= drag;
+    if (Math.abs(body.vel[1]) < 0.003) body.vel[1] = 0;
     body.fallDistance = 0;
     return;
   }
