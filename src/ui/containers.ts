@@ -107,6 +107,8 @@ export class ContainerScreen {
     this.craftGrid = new Array(this.craftW * this.craftW).fill(null);
     this.open = true;
     this.openedAt = performance.now();
+    // An inventory needs the mouse pointer; however it was opened, release the captured mouse.
+    document.exitPointerLock?.();
     this.build();
     this.root.classList.add('show');
   }

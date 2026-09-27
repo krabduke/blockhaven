@@ -106,6 +106,7 @@ export class Menus {
   }
 
   show(id: string | null): void {
+    if (id) document.exitPointerLock?.();
     for (const [k, s] of this.screens) s.classList.toggle('show', k === id);
     this.current = id;
     if (id === 'worlds') this.refreshWorlds();

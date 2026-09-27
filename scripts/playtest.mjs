@@ -22,6 +22,11 @@ const g = (fn, arg) => page.evaluate(fn, arg);
 const results = [];
 const check = (name, ok, detail = '') => { results.push({ name, ok, detail }); console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${detail ? '  — ' + detail : ''}`); };
 
+// Headless Chromium grants pointer lock on some platforms (Linux) and not others (macOS). The
+// checks drive input through the game directly, so make it consistent: no real pointer lock.
+await page.addInitScript(() => {
+  HTMLCanvasElement.prototype.requestPointerLock = function () { return Promise.reject(new Error('pointer lock disabled in playtest')); };
+});
 await page.goto(url);
 await wait(4000);
 await g(() => window.blockhaven.createWorld('Playtest', 'playtest-seed', 'survival'));
@@ -177,6 +182,7 @@ const feats = await g(async ({ x, y, z }) => {
   G.mouse[2] = false; G.releaseBow();
   await sleep(1500);
   out.bowArrowsLeft = p.inv.count(284);
+  out.diag = { menu: G.menus.current, mode: G.mode, locked: !!document.pointerLockElement, focus: document.hasFocus(), alive: p.alive, ticks: w.tickCount };
   out.boarHealth = target.health;
   target.dead = true;
   // Shearing.
@@ -212,7 +218,7 @@ const feats = await g(async ({ x, y, z }) => {
   G.runCommand('/weather clear');
   return out;
 }, setup);
-check('bow shoots an arrow that hurts a mob', feats.bowArrowsLeft === 7 && feats.boarHealth < 10, JSON.stringify({ arrows: feats.bowArrowsLeft, hp: feats.boarHealth }));
+check('bow shoots an arrow that hurts a mob', feats.bowArrowsLeft === 7 && feats.boarHealth < 10, JSON.stringify({ arrows: feats.bowArrowsLeft, hp: feats.boarHealth, ...feats.diag }));
 check('shears shear a woolback', feats.sheared);
 check('feeding two boars makes a baby', feats.babies >= 1, `babies: ${feats.babies}`);
 check('bone meal grows wheat', feats.wheatStage >= 7, `stage ${feats.wheatStage}`);
