@@ -723,7 +723,7 @@ const railTile = (rail: RGB, rail2: RGB, tie: RGB, curve: boolean, glow?: RGB) =
   if (!curve) {
     for (let y = 1; y < S; y += 4) p.rect(1, y, 14, 2, tie, 0.08);                 // sleepers
     for (const x of [3, 11]) { p.rect(x, 0, 2, S, rail, 0.04); p.rect(x, 0, 1, S, rail2); }
-    if (glow) for (let y = 0; y < S; y += 2) p.set(7, y, glow), p.set(8, y + 1, glow);
+    if (glow) for (let y = 0; y < S; y += 2) { p.set(7, y, glow); p.set(8, y + 1, glow); }
   } else {
     // A quarter turn from the south edge to the east edge.
     for (let k = 0; k < 5; k++) { const a = (k / 4) * Math.PI / 2; p.rect(Math.round(16 - Math.cos(a) * 10) - 1, Math.round(16 - Math.sin(a) * 10) - 1, 3, 3, tie, 0.08); }

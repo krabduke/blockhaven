@@ -946,7 +946,7 @@ await wait(300);
   check('rails join into straights and corners; a minecart rides the track around a corner with you in it', cart.placed && cart.shapes.straight === 1 && cart.shapes.corner >= 6 && cart.shapes.down === 0 && cart.riding && cart.turned && cart.seated && cart.off, JSON.stringify(cart));
 
   const boat = await g(async () => {
-    const G = window.blockhaven, p = G.player, w = G.world, B = G.ids, It = G.items;
+    const G = window.blockhaven, p = G.player, w = G.world, B = G.ids;
     const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     const [x, , z] = p.body.pos.map(Math.floor);
     const y = Math.floor(p.body.pos[1]) + 10;
