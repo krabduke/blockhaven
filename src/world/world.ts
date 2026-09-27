@@ -38,7 +38,9 @@ function fillLoot(inv: Inventory, rand: () => number): void {
     let pick = rand() * total, k = 0;
     while (pick > table[k][3]) { pick -= table[k][3]; k++; }
     const [id, lo, hi] = table[k];
-    const slot = Math.floor(rand() * 27);
+    // Scatter stacks through the chest; if the slot is taken, use the next free one (none are lost).
+    let slot = Math.floor(rand() * 27);
+    for (let t = 0; t < 27 && inv.slots[slot]; t++) slot = (slot + 1) % 27;
     if (!inv.slots[slot]) inv.slots[slot] = { id, count: lo + Math.floor(rand() * (hi - lo + 1)) };
   }
 }
