@@ -40,6 +40,12 @@ export class Player {
   lastDamageSource = '';
   /** New worlds: snap to the real surface once the spawn chunk has loaded. */
   needsSurface = false;
+  /** Just came through a gate: find or build one on arrival. */
+  portalArrival = false;
+  /** Ticks before a gate can be used again (must step out first). */
+  portalCooldown = 0;
+  portalTime = 0;
+  regenTicks = 0;
   onDeath: (source: string) => void = () => {};
   onHurt: () => void = () => {};
 

@@ -3,14 +3,15 @@
 
 import { computeChunkLight } from './light';
 import { meshSubchunk, type LayerMesh } from './mesher';
+import { EmberGen } from './embergen';
 import { WorldGen } from './worldgen';
 
 export type WorkerRequest =
-  | { type: 'init'; seed: number }
+  | { type: 'init'; seed: number; dimension: 'overworld' | 'ember' }
   | { type: 'gen'; id: number; cx: number; cz: number; saved?: { blocks: Uint8Array; meta: Uint8Array } }
   | { type: 'mesh'; id: number; blocks: Uint8Array; meta: Uint8Array; light: Uint8Array; biomes: Uint8Array };
 
-let gen: WorldGen | null = null;
+let gen: WorldGen | EmberGen | null = null;
 const ctx = self as unknown as DedicatedWorkerGlobalScope;
 
 function buffers(m: LayerMesh | null): ArrayBuffer[] {
@@ -21,11 +22,11 @@ function buffers(m: LayerMesh | null): ArrayBuffer[] {
 ctx.onmessage = (e: MessageEvent<WorkerRequest>) => {
   const msg = e.data;
   if (msg.type === 'init') {
-    gen = new WorldGen(msg.seed);
+    gen = msg.dimension === 'ember' ? new EmberGen(msg.seed) : new WorldGen(msg.seed);
     return;
   }
   if (msg.type === 'gen') {
-    let blocks: Uint8Array, meta: Uint8Array, biomes: Uint8Array;
+    let blocks: Uint8Array, meta: Uint8Array;
     const g = gen!.generate(msg.cx, msg.cz);
     if (msg.saved) {
       blocks = msg.saved.blocks;
@@ -34,9 +35,9 @@ ctx.onmessage = (e: MessageEvent<WorkerRequest>) => {
       blocks = g.blocks;
       meta = g.meta;
     }
-    biomes = g.biomes;
+    const biomes = g.biomes;
     const light = computeChunkLight(blocks);
-    ctx.postMessage({ type: 'gen', id: msg.id, cx: msg.cx, cz: msg.cz, blocks, meta, biomes, light }, [blocks.buffer, meta.buffer, biomes.buffer, light.buffer] as ArrayBuffer[]);
+    ctx.postMessage({ type: 'gen', id: msg.id, cx: msg.cx, cz: msg.cz, blocks, meta, biomes, light, spawns: msg.saved ? [] : g.spawns }, [blocks.buffer, meta.buffer, biomes.buffer, light.buffer] as ArrayBuffer[]);
     return;
   }
   if (msg.type === 'mesh') {

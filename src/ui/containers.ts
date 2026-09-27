@@ -6,11 +6,12 @@ import { SMELTING, craft } from '../crafting';
 import type { Inventory, Slot } from '../inventory';
 import { ENCHANT_NAMES, creativeItems, itemDef, maxDurability, maxStack, type ItemStack } from '../items';
 import { offers, roman } from '../enchanting';
+import { PROFESSION_NAMES, type TradeOffer } from '../trading';
 import type { Player } from '../player';
 import type { FurnaceBE } from '../world/world';
 import { slotHTML } from './hud';
 
-export type ContainerKind = 'player' | 'crafting' | 'furnace' | 'chest' | 'creative' | 'enchant';
+export type ContainerKind = 'player' | 'crafting' | 'furnace' | 'chest' | 'creative' | 'enchant' | 'trade';
 
 interface SlotRef {
   get(): Slot;
@@ -80,8 +81,12 @@ export class ContainerScreen {
     this.root.addEventListener('contextmenu', (e) => e.preventDefault());
   }
 
-  show(kind: ContainerKind, opts: { furnace?: FurnaceBE; chest?: Inventory; bookshelves?: number } = {}): void {
+  private villager: { offers: TradeOffer[]; profession: string } | null = null;
+  onTraded: () => void = () => {};
+
+  show(kind: ContainerKind, opts: { furnace?: FurnaceBE; chest?: Inventory; bookshelves?: number; villager?: { offers: TradeOffer[]; profession: string } } = {}): void {
     this.kind = kind;
+    this.villager = opts.villager ?? null;
     this.bookshelves = opts.bookshelves ?? 0;
     this.furnace = opts.furnace ?? null;
     this.chest = opts.chest ?? null;
@@ -213,6 +218,17 @@ export class ContainerScreen {
       });
       top.appendChild(col);
     }
+    if (this.kind === 'trade' && this.villager) {
+      const t = document.createElement('div');
+      const h = document.createElement('h3');
+      h.textContent = `${PROFESSION_NAMES[this.villager.profession] ?? 'Villager'}: trades`;
+      t.appendChild(h);
+      const list = document.createElement('div');
+      list.className = 'enchant-opts trade-list';
+      t.appendChild(list);
+      top.appendChild(t);
+      this.optsEl = list;
+    }
     if (this.kind === 'enchant') {
       const ref: SlotRef = { get: () => this.enchantSlot, set: (s) => { this.enchantSlot = s; this.renderOffers(); }, role: 'normal', group: 'container' };
       top.appendChild(this.slot(ref, true));
@@ -257,6 +273,7 @@ export class ContainerScreen {
     }
     panel.appendChild(top);
     if (this.kind === 'enchant') this.renderOffers();
+    if (this.kind === 'trade') this.renderTrades();
     const label = document.createElement('h3');
     label.textContent = 'Inventory';
     panel.appendChild(label);
@@ -264,6 +281,51 @@ export class ContainerScreen {
     panel.appendChild(Object.assign(document.createElement('div'), { className: 'gap' }));
     panel.appendChild(this.grid(9, Array.from({ length: 9 }, (_, i) => this.invRef(inv, i, 'hotbar'))));
     this.render();
+  }
+
+  private invKey(): string {
+    return this.player.inv.slots.map((s) => (s ? s.id + ':' + s.count : '-')).join(',');
+  }
+
+  private renderTrades(): void {
+    const el = this.optsEl, v = this.villager;
+    if (!el || !v) return;
+    el.innerHTML = '';
+    const inv = this.player.inv;
+    const icon = (s: ItemStack) => `<span class="trade-item">${slotHTML(s.id, s.count, undefined, !!s.ench?.length)}</span>`;
+    v.offers.forEach((o) => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'btn trade-opt';
+      const affordable = o.give.every((g) => inv.count(g.id) >= g.count);
+      const soldOut = o.uses >= o.maxUses;
+      b.disabled = !affordable || soldOut;
+      b.innerHTML = `${o.give.map(icon).join('')}<span class="arrow">⇨</span>${icon(o.get)}${soldOut ? '<span class="lv">Sold out</span>' : ''}`;
+      b.title = `${o.give.map((g) => `${g.count} ${itemDef(g.id)?.name}`).join(' + ')} for ${o.get.count} ${itemDef(o.get.id)?.name}`;
+      b.addEventListener('click', () => {
+        if (!o.give.every((g) => inv.count(g.id) >= g.count) || o.uses >= o.maxUses) return;
+        for (const g of o.give) {
+          let left = g.count;
+          for (let i = 0; i < inv.size && left > 0; i++) {
+            const s = inv.slots[i];
+            if (!s || s.id !== g.id) continue;
+            const n = Math.min(left, s.count);
+            s.count -= n; left -= n;
+            if (s.count <= 0) inv.slots[i] = null;
+          }
+        }
+        const got = { ...o.get, ench: o.get.ench ? o.get.ench.map((e) => ({ ...e })) : undefined };
+        const rest = inv.add(got);
+        if (rest) this.onDrop(rest);
+        o.uses++;
+        this.player.addXp(1 + Math.floor(Math.random() * 3));
+        sfx.pop();
+        this.onTraded();
+        this.render();
+        this.renderTrades();
+      });
+      el.appendChild(b);
+    });
   }
 
   private renderOffers(): void {
@@ -304,6 +366,7 @@ export class ContainerScreen {
   }
 
   render(): void {
+    if (this.kind === 'trade' && this.optsEl && this.optsEl.dataset.inv !== this.invKey()) { this.optsEl.dataset.inv = this.invKey(); this.renderTrades(); }
     for (const r of this.refs) {
       const s = r.get();
       const html = s ? slotHTML(s.id, r.role === 'palette' ? 1 : s.count, s.damage, !!s.ench?.length) : '';

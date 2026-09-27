@@ -25,6 +25,12 @@ function withFace(base: Paint, front: (g: CanvasRenderingContext2D, w: number, h
   };
 }
 
+function shade(hexColor: string, f: number): string {
+  const n = parseInt(hexColor.slice(1), 16);
+  const c = [(n >> 16) & 255, (n >> 8) & 255, n & 255].map((v) => Math.round(v * f));
+  return `rgb(${c[0]},${c[1]},${c[2]})`;
+}
+
 const matCache = new Map<string, THREE.MeshBasicMaterial[]>();
 
 function boxMaterials(key: string, paint: Paint, px: [number, number, number]): THREE.MeshBasicMaterial[] {
@@ -97,8 +103,149 @@ const eyes = (color: string, pupil: string, y: number, spread: number) => (g: Ca
   g.fillRect(cx - spread, y + 1, 1, 1); g.fillRect(cx + spread - 1, y + 1, 1, 1);
 };
 
+const ROBES: Record<string, [string, string]> = {
+  farmer: ['#8a6a2a', '#d8b848'], shepherd: ['#e8e2d4', '#8a7a5a'], fisher: ['#3a6a8a', '#d8c888'], butcher: ['#b8b0a8', '#9a2a2a'],
+  cleric: ['#6a3a8a', '#e8c848'], smith: ['#3a3a3a', '#8a5a2a'], librarian: ['#2a4a7a', '#e8e0c8'],
+};
+
 export function createModel(kind: string): MobModel {
+  if (kind.startsWith('villager')) {
+    const prof = kind.split(':')[1] ?? 'farmer';
+    const [robe, trim] = ROBES[prof] ?? ROBES.farmer;
+    const face = withFace(speckle('#c89a78', '#b8886a'), (g, w) => {
+      g.fillStyle = '#2a1e14'; g.fillRect(2, 3, 1, 1); g.fillRect(w - 3, 3, 1, 1);
+      g.fillStyle = '#9a6a52'; g.fillRect(Math.floor(w / 2) - 1, 5, 2, 1);
+    });
+    const robeP: Paint = (g, w, h, f, rand) => {
+      speckle(robe, shade(robe, 0.8))(g, w, h, f, rand);
+      g.fillStyle = trim; g.fillRect(0, 0, w, 1); g.fillRect(0, h - 1, w, 1);
+    };
+    return build(kind, [
+      { name: 'torso', size: [8, 14, 5], pivot: [0, 17, 0], offset: [0, 0, 0], paint: robeP },
+      { name: 'head', size: [7, 7, 7], pivot: [0, 24, 0], offset: [0, 3.5, 0], paint: face },
+      { name: 'hat', size: [11, 1, 11], pivot: [0, 31, 0], offset: [0, 0, 0], paint: speckle(trim, shade(trim, 0.8)), parent: 'head' },
+      { name: 'hatTop', size: [6, 2, 6], pivot: [0, 32, 0], offset: [0, 0.5, 0], paint: speckle(trim, shade(trim, 0.8)), parent: 'head' },
+      { name: 'armL', size: [3, 11, 3], pivot: [-5.5, 22, 0], offset: [0, -5, 0], paint: robeP },
+      { name: 'armR', size: [3, 11, 3], pivot: [5.5, 22, 0], offset: [0, -5, 0], paint: robeP },
+      { name: 'legL', size: [3, 10, 3], pivot: [-2, 10, 0], offset: [0, -5, 0], paint: speckle('#4a3a2a', '#3a2a1e') },
+      { name: 'legR', size: [3, 10, 3], pivot: [2, 10, 0], offset: [0, -5, 0], paint: speckle('#4a3a2a', '#3a2a1e') },
+    ]);
+  }
   switch (kind) {
+    case 'stonewarden': {
+      const stone = speckle('#7a7a74', '#5a5a56', '#9a9a92', 0.4);
+      const mossy: Paint = (g, w, h, f, rand) => { stone(g, w, h, f, rand); g.fillStyle = '#4f7a2e'; for (let i = 0; i < (w * h) / 6; i++) g.fillRect(Math.floor(rand() * w), Math.floor(rand() * Math.max(1, h / 3)), 1, 1); };
+      const face = withFace(mossy, (g, w) => { g.fillStyle = '#1e1e1c'; g.fillRect(2, 3, w - 4, 3); g.fillStyle = '#ffd060'; g.fillRect(Math.floor(w / 2) - 1, 4, 2, 1); });
+      return build(kind, [
+        { name: 'torso', size: [14, 14, 8], pivot: [0, 26, 0], offset: [0, 0, 0], paint: mossy },
+        { name: 'head', size: [8, 8, 8], pivot: [0, 33, -1], offset: [0, 4, 0], paint: face },
+        { name: 'crown', size: [10, 2, 10], pivot: [0, 41, -1], offset: [0, 0, 0], paint: speckle('#4f7a2e', '#3a5e20'), parent: 'head' },
+        { name: 'armL', size: [5, 22, 5], pivot: [-9.5, 32, 0], offset: [0, -10, 0], paint: stone },
+        { name: 'armR', size: [5, 22, 5], pivot: [9.5, 32, 0], offset: [0, -10, 0], paint: stone },
+        { name: 'legL', size: [5, 19, 5], pivot: [-3.5, 19, 0], offset: [0, -9.5, 0], paint: stone },
+        { name: 'legR', size: [5, 19, 5], pivot: [3.5, 19, 0], offset: [0, -9.5, 0], paint: stone },
+      ]);
+    }
+    case 'emberwisp': {
+      const shell = speckle('#3a2a2a', '#2a1c1c', '#5a3a30', 0.3);
+      const core: Paint = (g, w, h) => { g.fillStyle = '#ff9a2a'; g.fillRect(0, 0, w, h); g.fillStyle = '#fff0a0'; g.fillRect(1, 1, Math.max(1, w - 2), Math.max(1, h - 2)); };
+      const face = withFace(shell, (g, w) => { g.fillStyle = '#ffb030'; g.fillRect(2, 3, 2, 2); g.fillRect(w - 4, 3, 2, 2); g.fillStyle = '#ff6a1a'; g.fillRect(3, 7, w - 6, 1); });
+      return build(kind, [
+        { name: 'torso', size: [10, 10, 10], pivot: [0, 14, 0], offset: [0, 0, 0], paint: face },
+        { name: 'core', size: [6, 6, 6], pivot: [0, 8, 0], offset: [0, -1, 0], paint: core },
+        { name: 'wingL', size: [1, 6, 9], pivot: [-6, 16, 0], offset: [-1, 0, 0], paint: speckle('#6a2a1a', '#4a1a10') },
+        { name: 'wingR', size: [1, 6, 9], pivot: [6, 16, 0], offset: [1, 0, 0], paint: speckle('#6a2a1a', '#4a1a10') },
+        { name: 'spark', size: [2, 5, 2], pivot: [0, 20, 0], offset: [0, 2, 0], paint: core },
+      ]);
+    }
+    case 'cinderbrute': {
+      const basalt: Paint = (g, w, h, f, rand) => {
+        speckle('#2e2a2c', '#1e1a1c', '#3e383a', 0.35)(g, w, h, f, rand);
+        g.fillStyle = '#ff7a1a';
+        let x = Math.floor(rand() * w);
+        for (let y = 0; y < h; y++) { if (rand() < 0.7) g.fillRect(x, y, 1, 1); x = Math.max(0, Math.min(w - 1, x + (rand() < 0.5 ? -1 : 1))); }
+      };
+      const face = withFace(basalt, (g, w) => { g.fillStyle = '#ffd060'; g.fillRect(1, 2, 2, 1); g.fillRect(w - 3, 2, 2, 1); });
+      return build(kind, [
+        { name: 'torso', size: [14, 12, 9], pivot: [0, 17, 0], offset: [0, 0, 0], paint: basalt },
+        { name: 'head', size: [7, 5, 6], pivot: [0, 22, -2], offset: [0, 2.5, -1], paint: face },
+        { name: 'armL', size: [5, 15, 5], pivot: [-9.5, 21, 0], offset: [0, -6, 0], paint: basalt },
+        { name: 'armR', size: [5, 15, 5], pivot: [9.5, 21, 0], offset: [0, -6, 0], paint: basalt },
+        { name: 'legL', size: [5, 11, 5], pivot: [-4, 11, 0], offset: [0, -5.5, 0], paint: basalt },
+        { name: 'legR', size: [5, 11, 5], pivot: [4, 11, 0], offset: [0, -5.5, 0], paint: basalt },
+      ]);
+    }
+    case 'burrowfox': {
+      const fur = speckle('#c8682a', '#a8521e', '#e0843a', 0.3);
+      const face = withFace(fur, (g, w) => { g.fillStyle = '#f0e8dc'; g.fillRect(1, 4, w - 2, 2); g.fillStyle = '#1a1210'; g.fillRect(1, 2, 1, 1); g.fillRect(w - 2, 2, 1, 1); g.fillRect(Math.floor(w / 2), 5, 1, 1); });
+      return build(kind, [
+        { name: 'torso', size: [6, 6, 11], pivot: [0, 7, 0], offset: [0, 0, 0], paint: fur },
+        { name: 'head', size: [7, 6, 5], pivot: [0, 9, -6], offset: [0, 1, -2], paint: face },
+        { name: 'earL', size: [2, 3, 1], pivot: [-2, 13, -7], offset: [0, 0.5, 0], paint: speckle('#3a2418', '#2a1810'), parent: 'head' },
+        { name: 'earR', size: [2, 3, 1], pivot: [2, 13, -7], offset: [0, 0.5, 0], paint: speckle('#3a2418', '#2a1810'), parent: 'head' },
+        { name: 'tail', size: [4, 4, 9], pivot: [0, 8, 5], offset: [0, 0, 4], paint: withFace(fur, () => {}) },
+        { name: 'tip', size: [4, 4, 3], pivot: [0, 8, 14], offset: [0, 0, 1], paint: speckle('#f0e8dc', '#d8d0c4'), parent: 'tail' },
+        { name: 'legFL', size: [2, 4, 2], pivot: [-2, 4, -4], offset: [0, -2, 0], paint: speckle('#2a1a12', '#1a100a') },
+        { name: 'legFR', size: [2, 4, 2], pivot: [2, 4, -4], offset: [0, -2, 0], paint: speckle('#2a1a12', '#1a100a') },
+        { name: 'legBL', size: [2, 4, 2], pivot: [-2, 4, 4], offset: [0, -2, 0], paint: speckle('#2a1a12', '#1a100a') },
+        { name: 'legBR', size: [2, 4, 2], pivot: [2, 4, 4], offset: [0, -2, 0], paint: speckle('#2a1a12', '#1a100a') },
+      ]);
+    }
+    case 'bogfrog': {
+      const skin = speckle('#4a7a2a', '#3a5e1e', '#6a9a3a', 0.35);
+      return build(kind, [
+        { name: 'torso', size: [7, 4, 8], pivot: [0, 3, 0], offset: [0, 0, 0], paint: skin },
+        { name: 'head', size: [7, 3, 4], pivot: [0, 5, -3], offset: [0, 1, -1], paint: withFace(skin, (g, w) => { g.fillStyle = '#d8784a'; g.fillRect(0, 2, w, 1); }) },
+        { name: 'eyeL', size: [2, 2, 2], pivot: [-2.5, 8, -3], offset: [0, 0, 0], paint: withFace(speckle('#e8e0a0', '#d8d090'), (g) => { g.fillStyle = '#101010'; g.fillRect(0, 0, 1, 1); }), parent: 'head' },
+        { name: 'eyeR', size: [2, 2, 2], pivot: [2.5, 8, -3], offset: [0, 0, 0], paint: withFace(speckle('#e8e0a0', '#d8d090'), (g) => { g.fillStyle = '#101010'; g.fillRect(1, 0, 1, 1); }), parent: 'head' },
+        { name: 'legBL', size: [3, 2, 4], pivot: [-4, 1, 3], offset: [0, 0, 0], paint: skin },
+        { name: 'legBR', size: [3, 2, 4], pivot: [4, 1, 3], offset: [0, 0, 0], paint: skin },
+      ]);
+    }
+    case 'dunescuttler': {
+      const chitin = speckle('#c8a868', '#a88848', '#e0c888', 0.35);
+      const legs: PartSpec[] = [];
+      for (let i = 0; i < 3; i++) {
+        legs.push({ name: 'legL' + i, size: [7, 1.5, 1.5], pivot: [-3, 3, -2 + i * 2.5], offset: [-3.5, -0.5, 0], paint: chitin });
+        legs.push({ name: 'legR' + i, size: [7, 1.5, 1.5], pivot: [3, 3, -2 + i * 2.5], offset: [3.5, -0.5, 0], paint: chitin });
+      }
+      return build(kind, [
+        { name: 'torso', size: [6, 3, 9], pivot: [0, 4, 0], offset: [0, 0, 0], paint: chitin },
+        { name: 'head', size: [5, 3, 3], pivot: [0, 4, -5], offset: [0, 0, -1], paint: withFace(chitin, (g) => { g.fillStyle = '#1a1208'; g.fillRect(1, 1, 1, 1); g.fillRect(3, 1, 1, 1); }) },
+        { name: 'tail', size: [2, 2, 7], pivot: [0, 5, 4], offset: [0, 2, 3], paint: chitin },
+        { name: 'sting', size: [2, 4, 2], pivot: [0, 10, 9], offset: [0, 0, -1], paint: speckle('#6a2a1a', '#4a1a10'), parent: 'tail' },
+        ...legs,
+      ]);
+    }
+    case 'frostling': {
+      const ice = speckle('#b8d8f0', '#98bcd8', '#e0f0ff', 0.35);
+      const face = withFace(ice, (g, w) => { g.fillStyle = '#1a3a6a'; g.fillRect(1, 3, 2, 1); g.fillRect(w - 3, 3, 2, 1); });
+      return build(kind, [
+        { name: 'torso', size: [6, 8, 4], pivot: [0, 12, 0], offset: [0, 0, 0], paint: ice },
+        { name: 'head', size: [6, 6, 6], pivot: [0, 16, 0], offset: [0, 3, 0], paint: face },
+        { name: 'hornL', size: [1, 4, 1], pivot: [-2, 22, 0], offset: [0, 1.5, 0], paint: speckle('#ffffff', '#d8e8f8'), parent: 'head' },
+        { name: 'hornR', size: [1, 4, 1], pivot: [2, 22, 0], offset: [0, 1.5, 0], paint: speckle('#ffffff', '#d8e8f8'), parent: 'head' },
+        { name: 'armL', size: [2, 8, 2], pivot: [-4, 15, 0], offset: [0, -4, 0], paint: ice },
+        { name: 'armR', size: [2, 8, 2], pivot: [4, 15, 0], offset: [0, -4, 0], paint: ice },
+        { name: 'legL', size: [2, 8, 2], pivot: [-1.5, 8, 0], offset: [0, -4, 0], paint: ice },
+        { name: 'legR', size: [2, 8, 2], pivot: [1.5, 8, 0], offset: [0, -4, 0], paint: ice },
+      ]);
+    }
+    case 'cavemoth': {
+      const dust = speckle('#8a7a6a', '#6a5a4a', '#a89888', 0.4);
+      return build(kind, [
+        { name: 'torso', size: [2, 2, 5], pivot: [0, 4, 0], offset: [0, 0, 0], paint: speckle('#4a3a2a', '#3a2a1e') },
+        { name: 'wingL', size: [6, 0.5, 5], pivot: [-1, 5, 0], offset: [-3, 0, 0], paint: dust },
+        { name: 'wingR', size: [6, 0.5, 5], pivot: [1, 5, 0], offset: [3, 0, 0], paint: dust },
+      ]);
+    }
+    case 'streamfish': {
+      const scales = speckle('#6a8ab0', '#4a6a90', '#9ab8d8', 0.35);
+      return build(kind, [
+        { name: 'torso', size: [2, 4, 7], pivot: [0, 2, 0], offset: [0, 0, 0], paint: withFace(scales, (g) => { g.fillStyle = '#101010'; g.fillRect(0, 1, 1, 1); }) },
+        { name: 'tail', size: [0.5, 4, 3], pivot: [0, 2, 3.5], offset: [0, 0, 1.5], paint: speckle('#e0a060', '#c08040') },
+      ]);
+    }
     case 'boar': {
       const hide = speckle('#6b5140', '#4f3a2c', '#86694f', 0.35);
       const face = withFace(hide, (g, w, h) => {

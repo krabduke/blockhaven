@@ -9,6 +9,7 @@ import type { Renderer } from '../render/renderer';
 import { tileIndex } from '../tiles';
 import type { World } from '../world/world';
 import { createModel, type MobModel } from './models';
+import { tradesFor, type TradeOffer } from '../trading';
 
 export interface PlayerLike {
   body: Body;
@@ -37,6 +38,16 @@ interface MobSpec {
   food?: number[];
   ranged?: boolean;
   xp: number;
+  projectile?: ProjectileKind;
+  flying?: boolean;
+  aquatic?: boolean;
+  fireImmune?: boolean;
+  /** Attacks hostile mobs instead of the player. */
+  guardian?: boolean;
+  trader?: boolean;
+  hops?: boolean;
+  /** Where it naturally spawns. */
+  habitat?: 'ember' | 'cave' | 'water' | 'desert' | 'cold' | 'forest' | 'swamp';
 }
 
 export const MOBS: Record<string, MobSpec> = {
@@ -45,7 +56,17 @@ export const MOBS: Record<string, MobSpec> = {
   woolback: { kind: 'woolback', width: 0.9, height: 1.3, health: 8, speed: 0.65, hostile: false, pitch: 320, xp: 2, food: [I.wheat_item], drops: (r) => [{ id: B.wool, count: 1 }, { id: I.raw_mutton, count: 1 + Math.floor(r() * 2) }] },
   mirewalker: { kind: 'mirewalker', width: 0.6, height: 1.95, health: 20, speed: 0.75, hostile: true, attack: 3, burnsInDay: true, pitch: 110, xp: 5, drops: (r) => [{ id: I.rotten_flesh, count: Math.floor(r() * 3) }, ...(r() < 0.1 ? [{ id: I.bone, count: 1 }] : []), ...(r() < 0.03 ? [{ id: I.carrot, count: 1 }] : [])] },
   shellcrawler: { kind: 'shellcrawler', width: 1.3, height: 0.8, health: 16, speed: 0.9, hostile: true, attack: 2, pitch: 420, xp: 5, drops: (r) => [{ id: I.string, count: Math.floor(r() * 3) }] },
-  brambler: { kind: 'brambler', width: 0.6, height: 1.9, health: 20, speed: 0.7, hostile: true, ranged: true, burnsInDay: true, pitch: 260, xp: 5, drops: (r) => [{ id: I.arrow, count: Math.floor(r() * 3) }, { id: I.bone, count: Math.floor(r() * 3) }, { id: I.gunpowder, count: Math.floor(r() * 2) }] },
+  villager: { kind: 'villager', width: 0.6, height: 1.95, health: 20, speed: 0.55, hostile: false, trader: true, pitch: 300, xp: 0, drops: () => [] },
+  stonewarden: { kind: 'stonewarden', width: 1.4, height: 2.7, health: 100, speed: 0.5, hostile: false, guardian: true, attack: 9, pitch: 70, xp: 0, drops: (r) => [{ id: I.iron_ingot, count: 3 + Math.floor(r() * 3) }] },
+  emberwisp: { kind: 'emberwisp', width: 0.9, height: 1.1, health: 12, speed: 0.6, hostile: true, ranged: true, projectile: 'fireball', flying: true, fireImmune: true, habitat: 'ember', pitch: 520, xp: 5, drops: (r) => [{ id: I.ember_core, count: r() < 0.5 ? 1 : 0 }, { id: I.gunpowder, count: Math.floor(r() * 2) }] },
+  cinderbrute: { kind: 'cinderbrute', width: 1.1, height: 1.7, health: 30, speed: 0.6, hostile: true, attack: 6, fireImmune: true, habitat: 'ember', pitch: 90, xp: 8, drops: (r) => [{ id: I.cinder_brick, count: Math.floor(r() * 4) }, { id: I.gold_ingot, count: r() < 0.25 ? 1 : 0 }, { id: I.emberquartz, count: Math.floor(r() * 3) }] },
+  burrowfox: { kind: 'burrowfox', width: 0.6, height: 0.7, health: 10, speed: 0.85, hostile: false, habitat: 'forest', food: [I.apple], pitch: 700, xp: 2, drops: (r) => [{ id: I.leather, count: Math.floor(r() * 2) }] },
+  bogfrog: { kind: 'bogfrog', width: 0.5, height: 0.5, health: 6, speed: 0.6, hostile: false, hops: true, habitat: 'swamp', food: [I.seeds], pitch: 250, xp: 1, drops: () => [] },
+  dunescuttler: { kind: 'dunescuttler', width: 0.8, height: 0.5, health: 10, speed: 1.1, hostile: true, attack: 2, habitat: 'desert', pitch: 800, xp: 5, drops: (r) => [{ id: I.string, count: Math.floor(r() * 2) }, { id: I.bone, count: Math.floor(r() * 2) }] },
+  frostling: { kind: 'frostling', width: 0.5, height: 1.4, health: 14, speed: 0.75, hostile: true, ranged: true, projectile: 'snowball', habitat: 'cold', pitch: 1100, xp: 5, drops: (r) => [{ id: I.snowball, count: 1 + Math.floor(r() * 4) }, ...(r() < 0.2 ? [{ id: B.ice, count: 1 }] : [])] },
+  cavemoth: { kind: 'cavemoth', width: 0.4, height: 0.4, health: 4, speed: 0.4, hostile: false, flying: true, habitat: 'cave', pitch: 1400, xp: 0, drops: () => [] },
+  streamfish: { kind: 'streamfish', width: 0.4, height: 0.3, health: 3, speed: 0.5, hostile: false, aquatic: true, habitat: 'water', pitch: 1200, xp: 1, drops: () => [{ id: I.raw_fish, count: 1 }] },
+  brambler: { kind: 'brambler', width: 0.6, height: 1.9, health: 20, speed: 0.7, hostile: true, ranged: true, projectile: 'thorn', burnsInDay: true, pitch: 260, xp: 5, drops: (r) => [{ id: I.arrow, count: Math.floor(r() * 3) }, { id: I.bone, count: Math.floor(r() * 3) }, { id: I.gunpowder, count: Math.floor(r() * 2) }] },
 };
 
 abstract class Entity {
@@ -205,13 +226,23 @@ export class Mob extends Entity {
   sheared = false;
   eggTimer = 6000 + Math.floor(Math.random() * 6000);
   hurtByPlayer = 0;
+  /** Guardians get angry at a player who hits them. */
+  angry = 0;
+  profession = 'farmer';
+  offers: TradeOffer[] = [];
+  hopTimer = 0;
+  flyTarget: [number, number, number] | null = null;
   model: MobModel;
-  constructor(readonly spec: MobSpec, x: number, y: number, z: number) {
+  constructor(readonly spec: MobSpec, x: number, y: number, z: number, profession?: string) {
     const body = new Body(x, y, z, spec.width, spec.height);
-    const model = createModel(spec.kind);
+    const model = createModel(spec.trader ? `villager:${profession ?? 'farmer'}` : spec.kind);
     super(body, model.root);
     this.model = model;
     this.health = spec.health;
+    if (spec.trader) {
+      this.profession = profession ?? 'farmer';
+      this.offers = tradesFor(this.profession, Math.random);
+    }
   }
 
   get baby(): boolean { return this.growing > 0; }
@@ -226,7 +257,7 @@ export class Mob extends Entity {
     if (this.hurtTime > 0 || this.deathTime > 0) return;
     this.health -= amount;
     this.hurtTime = 10;
-    if (byPlayer) this.hurtByPlayer = 100;
+    if (byPlayer) { this.hurtByPlayer = 100; if (this.spec.guardian) this.angry = 600; }
     if (from) {
       const dx = this.body.pos[0] - from[0], dz = this.body.pos[2] - from[2];
       const d = Math.hypot(dx, dz) || 1;
@@ -248,8 +279,10 @@ export class Mob extends Entity {
   }
 
   /** Right-click with an item. Returns true if the item was used. */
-  interact(m: EntityManager, stack: ItemStack | null): 'fed' | 'sheared' | null {
-    if (!stack || this.deathTime) return null;
+  interact(m: EntityManager, stack: ItemStack | null): 'fed' | 'sheared' | 'trade' | null {
+    if (this.deathTime) return null;
+    if (this.spec.trader && !this.baby) return 'trade';
+    if (!stack) return null;
     if (this.spec.kind === 'woolback' && stack.id === I.shears && !this.sheared && !this.baby) {
       this.sheared = true;
       const n = 1 + Math.floor(Math.random() * 3);
@@ -282,30 +315,49 @@ export class Mob extends Entity {
     }
     const w = m.world, b = this.body, p = m.player;
     updateContacts(w, b, this.body.height * 0.85);
+    if (this.angry > 0) this.angry--;
+    if (this.spec.flying) { this.flyTick(m); return; }
+    if (this.spec.aquatic) { this.swimTick(m); return; }
     let forward = 0;
     let jump = false;
-    const toPlayer = [p.body.pos[0] - b.pos[0], p.body.pos[1] - b.pos[1], p.body.pos[2] - b.pos[2]];
-    const pd = Math.hypot(toPlayer[0], toPlayer[1], toPlayer[2]);
-    const daylight = m.isDay();
+    const daylight = m.isDay() || w.dimension === 'ember';
     const face = (dx: number, dz: number) => { this.yaw = Math.atan2(-dx, -dz); };
+    const pd0 = dist(p.body.pos, b.pos);
+    // Pick a target: hostiles go for the player or villagers; guardians go for hostiles.
+    let target: { pos: number[]; hit: (dmg: number, knock: [number, number]) => void; eye: number } | null = null;
+    if (this.spec.hostile || (this.spec.guardian && this.angry > 0)) {
+      if (p.alive && !p.creative && pd0 < 16) target = { pos: p.body.pos, hit: (d, k) => p.damage(d, this.spec.kind, k), eye: 1.5 };
+    }
+    if (this.spec.hostile && this.spec.kind !== 'shellcrawler' && this.age % 10 === 0 || this.spec.guardian) {
+      const pool = m.mobs().filter((o) => o !== this && (this.spec.guardian ? o.spec.hostile : o.spec.trader));
+      let best: Mob | null = null, bd = target ? pd0 : 16;
+      for (const o of pool) { const d = dist(o.body.pos, b.pos); if (d < bd) { bd = d; best = o; } }
+      if (best) { const o = best; target = { pos: o.body.pos, hit: (d) => o.hurt(m, d, b.pos, 0.5), eye: o.body.height * 0.8 }; }
+    }
+    const toPlayer = target ? [target.pos[0] - b.pos[0], target.pos[1] - b.pos[1], target.pos[2] - b.pos[2]] : [p.body.pos[0] - b.pos[0], p.body.pos[1] - b.pos[1], p.body.pos[2] - b.pos[2]];
+    const pd = Math.hypot(toPlayer[0], toPlayer[1], toPlayer[2]);
 
-    const aggressive = this.spec.hostile && p.alive && !p.creative && pd < 16 && !(this.spec.kind === 'shellcrawler' && daylight && this.panic === 0 && this.hurtTime === 0 && this.health === this.spec.health);
-    const tempted = !this.spec.hostile && p.alive && pd < 10 && !!p.held && !!this.spec.food?.includes(p.held.id);
+    const aggressive = !!target && !(this.spec.kind === 'shellcrawler' && daylight && this.panic === 0 && this.hurtTime === 0 && this.health === this.spec.health);
+    const tempted = !this.spec.hostile && p.alive && pd0 < 10 && !!p.held && !!this.spec.food?.includes(p.held.id);
+    // Villagers run from nearby monsters.
+    if (this.spec.trader && this.age % 20 === 0 && m.mobs().some((o) => o.spec.hostile && dist(o.body.pos, b.pos) < 8)) this.panic = 40;
     if (aggressive && this.spec.ranged) {
       // Keep a distance and shoot thorns when there's a clear line of sight.
       face(toPlayer[0], toPlayer[2]);
-      const sees = m.lineOfSight([b.pos[0], b.pos[1] + 1.6, b.pos[2]], [p.body.pos[0], p.body.pos[1] + 1.5, p.body.pos[2]]);
+      const tp = target!.pos;
+      const sees = m.lineOfSight([b.pos[0], b.pos[1] + b.height * 0.8, b.pos[2]], [tp[0], tp[1] + target!.eye, tp[2]]);
       forward = pd > 10 || !sees ? 1 : pd < 5 ? -1 : 0;
       if (sees && pd < 14 && this.attackCooldown === 0) {
-        this.attackCooldown = 40;
-        m.shoot('thorn', this, [b.pos[0], b.pos[1] + 1.5, b.pos[2]], [toPlayer[0], toPlayer[1] + 0.2 + pd * 0.03, toPlayer[2]], 1.4, 0.15);
+        this.attackCooldown = this.spec.projectile === 'snowball' ? 25 : 40;
+        m.shoot(this.spec.projectile ?? 'thorn', this, [b.pos[0], b.pos[1] + b.height * 0.8, b.pos[2]], [toPlayer[0], toPlayer[1] + target!.eye - b.height * 0.8 + pd * 0.03, toPlayer[2]], this.spec.projectile === 'snowball' ? 1.3 : 1.4, 0.12);
       }
     } else if (aggressive) {
       face(toPlayer[0], toPlayer[2]);
       forward = pd > 0.9 ? 1 : 0;
-      if (pd < 1.3 + this.spec.width / 2 && Math.abs(toPlayer[1]) < 1.5 && this.attackCooldown === 0) {
-        this.attackCooldown = 20;
-        p.damage(this.spec.attack ?? 2, this.spec.kind, [toPlayer[0] / (pd || 1), toPlayer[2] / (pd || 1)]);
+      if (pd < 1.3 + this.spec.width / 2 && Math.abs(toPlayer[1]) < 1.8 && this.attackCooldown === 0) {
+        this.attackCooldown = this.spec.guardian ? 30 : 20;
+        target!.hit(this.spec.attack ?? 2, [toPlayer[0] / (pd || 1), toPlayer[2] / (pd || 1)]);
+        if (this.spec.guardian) sfx.explode({ gain: 0.2, pan: 0 });
       }
     } else if (this.panic > 0) {
       this.panic--;
@@ -364,17 +416,24 @@ export class Mob extends Entity {
     }
     if (b.collidedH && forward > 0) jump = true;
     if (b.inWater) jump = true;
+    if (this.spec.hops) {
+      if (!b.onGround) forward = 1;
+      else if (--this.hopTimer <= 0 && (forward > 0 || Math.random() < 0.02)) { this.hopTimer = 20 + Math.floor(Math.random() * 30); jump = true; forward = 1; }
+      else forward = 0;
+    }
     const speed = this.spec.speed * (forward > 1 ? 1.25 : 1) * (forward > 0 && forward < 1 ? 0.8 : 1) * (this.baby ? 1.2 : 1);
     stepBody(w, b, { forward: forward > 0 ? 1 : forward < 0 ? -1 : 0, strafe: 0, jump, sneak: false, sprint: false, yaw: this.yaw }, false, speed);
     if (b.onGround && b.fallDistance > 3) this.hurt(m, Math.ceil(b.fallDistance - 3), null);
     if (b.onGround) b.fallDistance = 0;
-    if (b.inLava) { this.hurt(m, 4, null, 0); this.burning = 160; }
+    if (b.inLava && !this.spec.fireImmune) { this.hurt(m, 4, null, 0); this.burning = 160; }
+    if (b.inFire && !this.spec.fireImmune) this.burning = Math.max(this.burning, 80);
     // Burning in daylight (rain and water put it out).
     const raining = m.world.weather !== 'clear';
     if (this.spec.burnsInDay && daylight && !b.inWater && !raining) {
       const sky = w.getSky(Math.floor(b.pos[0]), Math.floor(b.pos[1] + 1.6), Math.floor(b.pos[2]));
       if (sky >= 15) this.burning = 60;
     }
+    if (this.spec.fireImmune) this.burning = 0;
     if (this.burning > 0) {
       this.burning--;
       if (b.inWater || (raining && w.getSky(Math.floor(b.pos[0]), Math.floor(b.pos[1] + 1), Math.floor(b.pos[2])) >= 15)) this.burning = 0;
@@ -394,8 +453,67 @@ export class Mob extends Entity {
     const sp = Math.hypot(b.vel[0], b.vel[2]);
     this.walkAnim += sp * 3.5;
     // Despawn far hostiles.
-    if (this.spec.hostile && (pd > 96 || (pd > 40 && Math.random() < 1 / 800))) this.dead = true;
+    if ((this.spec.hostile || this.spec.habitat === 'cave' || this.spec.habitat === 'water') && (pd0 > 96 || (pd0 > 40 && Math.random() < 1 / 800))) this.dead = true;
     if (b.pos[1] < -20) this.dead = true;
+  }
+
+  /** Floating movement for Emberwisps and moths. */
+  private flyTick(m: EntityManager): void {
+    const b = this.body, p = m.player, w = m.world;
+    const pd = dist(p.body.pos, b.pos);
+    const hostile = this.spec.hostile && p.alive && !p.creative && pd < 32;
+    if (!this.flyTarget || dist(this.flyTarget, b.pos) < 1.5 || this.age % 100 === 0) {
+      const r = this.spec.hostile ? 10 : 4;
+      const base = hostile ? [p.body.pos[0], p.body.pos[1] + 5, p.body.pos[2]] : b.pos;
+      this.flyTarget = [base[0] + (Math.random() - 0.5) * r * 2, base[1] + (Math.random() - 0.5) * r, base[2] + (Math.random() - 0.5) * r * 2];
+    }
+    const t = this.flyTarget;
+    const d = dist(t, b.pos) || 1;
+    const acc = this.spec.speed * 0.02;
+    b.vel[0] += (t[0] - b.pos[0]) / d * acc; b.vel[1] += (t[1] - b.pos[1]) / d * acc; b.vel[2] += (t[2] - b.pos[2]) / d * acc;
+    if (this.spec.kind === 'cavemoth') { b.vel[0] += (Math.random() - 0.5) * 0.03; b.vel[1] += (Math.random() - 0.5) * 0.03; b.vel[2] += (Math.random() - 0.5) * 0.03; }
+    moveBody(w, b, b.vel[0], b.vel[1], b.vel[2], 0, false);
+    b.vel[0] *= 0.9; b.vel[1] *= 0.9; b.vel[2] *= 0.9;
+    if (b.collidedH) this.flyTarget = null;
+    this.yaw = Math.atan2(-b.vel[0], -b.vel[2]);
+    if (hostile) {
+      const to = [p.body.pos[0] - b.pos[0], p.body.pos[1] + 1.4 - b.pos[1], p.body.pos[2] - b.pos[2]];
+      this.yaw = Math.atan2(-to[0], -to[2]);
+      if (this.attackCooldown === 0 && pd < 24 && m.lineOfSight([b.pos[0], b.pos[1] + 0.5, b.pos[2]], [p.body.pos[0], p.body.pos[1] + 1.5, p.body.pos[2]])) {
+        this.attackCooldown = 60 + Math.floor(Math.random() * 40);
+        m.shoot('fireball', this, [b.pos[0], b.pos[1] + 0.5, b.pos[2]], to, 0.9, 0.05, 5);
+      }
+    }
+    this.walkAnim += 0.3;
+    if (b.inLava && !this.spec.fireImmune) this.hurt(m, 4, null, 0);
+    if (this.spec.hostile && (pd > 96 || (pd > 48 && Math.random() < 1 / 600))) this.dead = true;
+    if (this.spec.habitat === 'cave' && pd > 64) this.dead = true;
+  }
+
+  /** Swimming movement for fish; they flop and suffocate out of water. */
+  private swimTick(m: EntityManager): void {
+    const b = this.body, w = m.world;
+    if (!b.inWater) {
+      b.vel[1] -= 0.08;
+      if (b.onGround && Math.random() < 0.1) { b.vel[1] = 0.3; b.vel[0] = (Math.random() - 0.5) * 0.2; b.vel[2] = (Math.random() - 0.5) * 0.2; }
+      moveBody(w, b, b.vel[0], b.vel[1], b.vel[2], 0, false);
+      b.vel[0] *= 0.8; b.vel[2] *= 0.8;
+      if (this.age % 20 === 0) this.hurt(m, 1, null, 0);
+      return;
+    }
+    if (!this.flyTarget || dist(this.flyTarget, b.pos) < 1 || this.age % 80 === 0 || this.panic > 0) {
+      this.flyTarget = [b.pos[0] + (Math.random() - 0.5) * 10, b.pos[1] + (Math.random() - 0.5) * 3, b.pos[2] + (Math.random() - 0.5) * 10];
+    }
+    const t = this.flyTarget, d = dist(t, b.pos) || 1;
+    const acc = this.spec.speed * (this.panic > 0 ? 0.05 : 0.02);
+    if (this.panic > 0) this.panic--;
+    b.vel[0] += (t[0] - b.pos[0]) / d * acc; b.vel[1] += (t[1] - b.pos[1]) / d * acc; b.vel[2] += (t[2] - b.pos[2]) / d * acc;
+    moveBody(w, b, b.vel[0], b.vel[1], b.vel[2], 0, false);
+    b.vel[0] *= 0.85; b.vel[1] *= 0.85; b.vel[2] *= 0.85;
+    if (b.collidedH) this.flyTarget = null;
+    this.yaw = Math.atan2(-b.vel[0], -b.vel[2]);
+    this.walkAnim += 0.5;
+    if (dist(m.player.body.pos, b.pos) > 64) this.dead = true;
   }
 
   render(alpha: number, m: EntityManager): void {
@@ -415,8 +533,11 @@ export class Mob extends Entity {
         const raise = this.spec.ranged ? (this.attackCooldown > 30 ? -2.2 : -1.2) : -1.4;
         o.rotation.x = raise + Math.sin(this.walkAnim) * 0.2 * (name === 'armL' ? 1 : -1) - (!this.spec.ranged && this.attackCooldown > 14 ? 0.6 : 0);
       }
-      if (name === 'wingL') o.rotation.z = this.body.onGround ? 0 : Math.sin(this.age) * 0.8;
-      if (name === 'wingR') o.rotation.z = this.body.onGround ? 0 : -Math.sin(this.age) * 0.8;
+      const flap = this.spec.flying ? Math.sin(this.age * (this.spec.kind === 'cavemoth' ? 1.4 : 0.3)) * 0.8 : Math.sin(this.age) * 0.8;
+      if (name === 'wingL') o.rotation.z = this.body.onGround && !this.spec.flying ? 0 : flap;
+      if (name === 'wingR') o.rotation.z = this.body.onGround && !this.spec.flying ? 0 : -flap;
+      if (name === 'tail' && this.spec.kind === 'streamfish') o.rotation.y = Math.sin(this.walkAnim) * 0.6;
+      if (name === 'core') o.rotation.y = this.age * 0.05;
     }
     if (parts.torso && this.spec.kind === 'woolback') parts.torso.scale.set(this.sheared ? 0.78 : 1, this.sheared ? 0.8 : 1, this.sheared ? 0.92 : 1);
     if (parts.head) parts.head.rotation.y = Math.max(-1, Math.min(1, this.headYaw));
@@ -433,7 +554,7 @@ export class Mob extends Entity {
 }
 
 // ---------- Projectiles, XP orbs, fishing bobber ----------
-export type ProjectileKind = 'arrow' | 'thorn' | 'snowball' | 'egg';
+export type ProjectileKind = 'arrow' | 'thorn' | 'snowball' | 'egg' | 'fireball';
 
 export class Projectile extends Entity {
   stuck = 0;
@@ -450,10 +571,10 @@ export class Projectile extends Entity {
       tip.position.z = -0.32;
       g.add(shaft, tip);
     } else {
-      const t = new THREE.CanvasTexture(renderer.atlas.canvases[tileIndex(kind)]);
+      const t = new THREE.CanvasTexture(renderer.atlas.canvases[tileIndex(kind === 'fireball' ? 'fire_charge' : kind)]);
       t.magFilter = THREE.NearestFilter; t.minFilter = THREE.NearestFilter; t.colorSpace = THREE.NoColorSpace;
       const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: t, alphaTest: 0.5 }));
-      s.scale.setScalar(0.3);
+      s.scale.setScalar(kind === 'fireball' ? 0.7 : 0.3);
       g.add(s);
     }
     return g;
@@ -507,7 +628,11 @@ export class Projectile extends Entity {
     const hit = raycast(m.world, b.pos, dir, speed);
     if (hit) {
       b.pos = [...hit.point] as [number, number, number];
-      if (this.kind === 'arrow' || this.kind === 'thorn') {
+      if (this.kind === 'fireball') {
+        b.pos = [hit.point[0] - dir[0] * 0.3, hit.point[1] - dir[1] * 0.3, hit.point[2] - dir[2] * 0.3];
+        this.dead = true;
+        this.impact(m);
+      } else if (this.kind === 'arrow' || this.kind === 'thorn') {
         this.stuck = 1;
         sfx.dig('wood');
         if (this.kind === 'thorn') this.dead = true;
@@ -521,11 +646,13 @@ export class Projectile extends Entity {
     const inWater = m.world.getBlock(Math.floor(b.pos[0]), Math.floor(b.pos[1]), Math.floor(b.pos[2])) === B.water;
     const drag = inWater ? 0.6 : 0.99;
     b.vel[0] *= drag; b.vel[1] *= drag; b.vel[2] *= drag;
-    b.vel[1] -= this.kind === 'arrow' || this.kind === 'thorn' ? 0.05 : 0.03;
+    if (this.kind === 'fireball') { if (this.age % 2 === 0) m.flame(b.pos[0], b.pos[1], b.pos[2]); }
+    else b.vel[1] -= this.kind === 'arrow' || this.kind === 'thorn' ? 0.05 : 0.03;
     if (this.age > 400 || b.pos[1] < -20) this.dead = true;
   }
   private impact(m: EntityManager): void {
     const b = this.body;
+    if (this.kind === 'fireball') { m.explode(b.pos[0], b.pos[1], b.pos[2], 1.2, true); return; }
     if (this.kind === 'snowball') for (let i = 0; i < 6; i++) m.particles.add(new THREE.Vector3(...b.pos), new THREE.Vector3((Math.random() - 0.5) * 0.1, Math.random() * 0.1, (Math.random() - 0.5) * 0.1), new THREE.Color(0.95, 0.97, 1), 12, 0.07);
     if (this.kind === 'egg') {
       for (let i = 0; i < 6; i++) m.particles.add(new THREE.Vector3(...b.pos), new THREE.Vector3((Math.random() - 0.5) * 0.1, Math.random() * 0.1, (Math.random() - 0.5) * 0.1), new THREE.Color(0.9, 0.85, 0.7), 12, 0.07);
@@ -717,8 +844,8 @@ export class EntityManager {
     return e;
   }
 
-  spawnMob(kind: string, x: number, y: number, z: number): Mob {
-    return this.add(new Mob(MOBS[kind], x, y, z));
+  spawnMob(kind: string, x: number, y: number, z: number, profession?: string): Mob {
+    return this.add(new Mob(MOBS[kind], x, y, z, profession));
   }
 
   dropXp(x: number, y: number, z: number, amount: number): void {
@@ -760,8 +887,8 @@ export class EntityManager {
       let t = this.spawnerTimers.get(key) ?? 20 + Math.floor(Math.random() * 200);
       if (--t > 0) { this.spawnerTimers.set(key, t); continue; }
       this.spawnerTimers.set(key, 200 + Math.floor(Math.random() * 600));
-      const kinds = ['mirewalker', 'shellcrawler', 'brambler'];
-      const kind = kinds[(x * 31 + z * 17 + y) % 3 < 0 ? 0 : (x * 31 + z * 17 + y) % 3];
+      const kinds = this.world.dimension === 'ember' ? ['emberwisp', 'cinderbrute'] : ['mirewalker', 'shellcrawler', 'brambler'];
+      const kind = kinds[Math.abs(x * 31 + z * 17 + y) % kinds.length];
       const nearby = this.mobs().filter((m) => m.spec.kind === kind && Math.hypot(m.body.pos[0] - x, m.body.pos[1] - y, m.body.pos[2] - z) < 9).length;
       if (nearby >= 6) continue;
       const n = 1 + Math.floor(Math.random() * 4);
@@ -769,7 +896,7 @@ export class EntityManager {
         const sx = x + Math.floor(Math.random() * 9) - 4, sy = y + Math.floor(Math.random() * 3) - 1, sz = z + Math.floor(Math.random() * 9) - 4;
         if (this.world.getBlock(sx, sy, sz) !== 0 || this.world.getBlock(sx, sy + 1, sz) !== 0 || !SOLID[this.world.getBlock(sx, sy - 1, sz)]) continue;
         if (this.world.getBlockLight(sx, sy, sz) > 7) continue;
-        this.spawnMob(kind, sx + 0.5, sy, sz + 0.5);
+        this.spawnMob(kind, sx + 0.5, sy + (kind === 'emberwisp' ? 2 : 0), sz + 0.5);
         this.puff(sx + 0.5, sy + 0.5, sz + 0.5);
       }
     }
@@ -811,6 +938,7 @@ export class EntityManager {
     this.particles.tick(this.world);
     this.spawnTick();
     this.tickSpawners();
+    this.tickPlates();
   }
 
   render(alpha: number): void {
@@ -840,33 +968,76 @@ export class EntityManager {
     return best;
   }
 
+  private biomeAt(x: number, z: number): number {
+    const c = this.world.getChunk(x >> 4, z >> 4);
+    return c ? c.biomes[(x & 15) + (z & 15) * 16] : 1;
+  }
+
   private spawnTick(): void {
     if (this.world.tickCount % 20 !== 0) return;
+    const w = this.world;
     const p = this.player.body.pos;
     const mobs = this.mobs();
-    const hostile = mobs.filter((m) => m.spec.hostile).length;
-    const passive = mobs.length - hostile;
+    const count = (f: (m: Mob) => boolean) => mobs.filter(f).length;
+    const hostile = count((m) => m.spec.hostile);
     const tryPos = (minD: number, maxD: number): [number, number, number] | null => {
       const a = Math.random() * Math.PI * 2, d = minD + Math.random() * (maxD - minD);
       const x = Math.floor(p[0] + Math.cos(a) * d), z = Math.floor(p[2] + Math.sin(a) * d);
-      if (!this.world.isLoaded(x, z)) return null;
+      if (!w.isLoaded(x, z)) return null;
       return [x, 0, z];
     };
-    // Passive animals on grass in daylight-lit areas.
-    if (passive < 10 && Math.random() < 0.3) {
+    const open = (x: number, y: number, z: number, h = 2) => { for (let k = 0; k < h; k++) if (w.getBlock(x, y + k, z) !== 0) return false; return true; };
+
+    if (w.dimension === 'ember') {
+      if (hostile >= 12) return;
+      for (let tries = 0; tries < 4; tries++) {
+        const pos = tryPos(18, 44);
+        if (!pos) continue;
+        const y0 = Math.max(34, Math.floor(p[1]) - 16 + Math.floor(Math.random() * 32));
+        for (let y = y0; y > y0 - 16 && y > 32; y--) {
+          const ground = w.getBlock(pos[0], y - 1, pos[2]);
+          if (!SOLID[ground] || !open(pos[0], y, pos[2], 3) || w.getBlockLight(pos[0], y, pos[2]) > 11) continue;
+          if (Math.random() < 0.35) this.spawnMob('emberwisp', pos[0] + 0.5, y + 3, pos[2] + 0.5);
+          else this.spawnMob('cinderbrute', pos[0] + 0.5, y, pos[2] + 0.5);
+          break;
+        }
+      }
+      return;
+    }
+
+    // Passive animals on grass in lit areas, picked by biome.
+    if (count((m) => !m.spec.hostile && !m.spec.trader && !m.spec.guardian && !m.spec.habitat) < 10 && Math.random() < 0.3) {
       const pos = tryPos(20, 48);
       if (pos) {
-        const y = this.world.surfaceY(pos[0], pos[2]);
-        if (this.world.getBlock(pos[0], y - 1, pos[2]) === B.grass && this.world.getSky(pos[0], y, pos[2]) >= 9) {
-          const kinds = ['boar', 'hen', 'woolback'];
+        const y = w.surfaceY(pos[0], pos[2]);
+        const biome = this.biomeAt(pos[0], pos[2]);
+        if (w.getBlock(pos[0], y - 1, pos[2]) === B.grass && w.getSky(pos[0], y, pos[2]) >= 9) {
+          const kinds = biome === 8 ? ['bogfrog', 'bogfrog', 'hen'] : biome === 2 || biome === 4 || biome === 7 ? ['burrowfox', 'boar', 'woolback'] : ['boar', 'hen', 'woolback'];
           const kind = kinds[Math.floor(Math.random() * kinds.length)];
-          const n = 2 + Math.floor(Math.random() * 3);
+          const n = kind === 'burrowfox' ? 1 + Math.floor(Math.random() * 2) : 2 + Math.floor(Math.random() * 3);
           for (let i = 0; i < n; i++) {
             const sx = pos[0] + Math.floor(Math.random() * 5) - 2, sz = pos[2] + Math.floor(Math.random() * 5) - 2;
-            const sy = this.world.surfaceY(sx, sz);
-            if (this.world.getBlock(sx, sy - 1, sz) === B.grass) this.spawnMob(kind, sx + 0.5, sy, sz + 0.5);
+            const sy = w.surfaceY(sx, sz);
+            if (w.getBlock(sx, sy - 1, sz) === B.grass) this.spawnMob(kind, sx + 0.5, sy, sz + 0.5);
           }
         }
+      }
+    }
+    // Fish in water, moths in caves.
+    if (count((m) => m.spec.habitat === 'water') < 6 && Math.random() < 0.3) {
+      const pos = tryPos(12, 36);
+      if (pos) {
+        const y = w.surfaceY(pos[0], pos[2]) - 2;
+        if (w.getBlock(pos[0], y, pos[2]) === B.water && w.getBlock(pos[0], y + 1, pos[2]) === B.water) {
+          for (let i = 0; i < 3; i++) this.spawnMob('streamfish', pos[0] + 0.5 + Math.random(), y + 0.2, pos[2] + 0.5 + Math.random());
+        }
+      }
+    }
+    if (count((m) => m.spec.habitat === 'cave') < 4 && Math.random() < 0.2 && p[1] < 60) {
+      const pos = tryPos(10, 28);
+      if (pos) {
+        const y = Math.floor(p[1]) + Math.floor(Math.random() * 16) - 8;
+        if (y > 4 && open(pos[0], y, pos[2], 2) && w.getSky(pos[0], y, pos[2]) === 0 && w.getBlockLight(pos[0], y, pos[2]) < 4) this.spawnMob('cavemoth', pos[0] + 0.5, y, pos[2] + 0.5);
       }
     }
     // Hostiles in the dark (surface at night, caves any time).
@@ -876,20 +1047,39 @@ export class EntityManager {
         if (!pos) continue;
         const y0 = Math.max(4, Math.floor(p[1]) - 20 + Math.floor(Math.random() * 40));
         for (let y = y0; y > y0 - 12 && y > 1; y--) {
-          const ground = this.world.getBlock(pos[0], y - 1, pos[2]);
+          const ground = w.getBlock(pos[0], y - 1, pos[2]);
           if (!SOLID[ground] || BLOCKS[ground].shape !== 'cube' || ground === B.bedrock || ground === B.glass || isLeafy(ground)) continue;
-          if (this.world.getBlock(pos[0], y, pos[2]) !== 0 || this.world.getBlock(pos[0], y + 1, pos[2]) !== 0) continue;
-          const bl = this.world.getBlockLight(pos[0], y, pos[2]);
-          const sky = this.world.getSky(pos[0], y, pos[2]) * (this.isDay() ? 1 : 0.25);
+          if (!open(pos[0], y, pos[2])) continue;
+          const bl = w.getBlockLight(pos[0], y, pos[2]);
+          const sky = w.getSky(pos[0], y, pos[2]) * (this.isDay() ? 1 : 0.25);
           if (bl > 0 || sky > 7) break;
+          const biome = this.biomeAt(pos[0], pos[2]);
+          const surface = w.getSky(pos[0], y, pos[2]) > 10;
           const r = Math.random();
-          const kind = r < 0.45 ? 'mirewalker' : r < 0.7 ? 'shellcrawler' : 'brambler';
-          if (kind === 'shellcrawler' && (this.world.getBlock(pos[0] + 1, y, pos[2]) !== 0 || this.world.getBlock(pos[0], y, pos[2] + 1) !== 0)) break;
+          let kind = r < 0.45 ? 'mirewalker' : r < 0.7 ? 'shellcrawler' : 'brambler';
+          if (surface && biome === 3 && Math.random() < 0.5) kind = 'dunescuttler';
+          if (surface && (biome === 4 || biome === 5) && Math.random() < 0.5) kind = 'frostling';
+          if (kind === 'shellcrawler' && (w.getBlock(pos[0] + 1, y, pos[2]) !== 0 || w.getBlock(pos[0], y, pos[2] + 1) !== 0)) break;
           this.spawnMob(kind, pos[0] + 0.5, y, pos[2] + 0.5);
           break;
         }
       }
     }
+  }
+
+  private pressed = new Set<string>();
+  /** Pressure plates react to anything standing on them. */
+  private tickPlates(): void {
+    const now = new Set<string>();
+    const bodies = [this.player.alive ? this.player.body : null, ...this.list.filter((e) => !e.dead).map((e) => e.body)];
+    for (const b of bodies) {
+      if (!b) continue;
+      const x = Math.floor(b.pos[0]), y = Math.floor(b.pos[1] + 0.01), z = Math.floor(b.pos[2]);
+      if (this.world.getBlock(x, y, z) === B.pressure_plate) now.add(`${x},${y},${z}`);
+    }
+    for (const k of now) if (!this.pressed.has(k)) { const [x, y, z] = k.split(',').map(Number); this.world.setPlate(x, y, z, true); sfx.click(); }
+    for (const k of this.pressed) if (!now.has(k)) { const [x, y, z] = k.split(',').map(Number); this.world.setPlate(x, y, z, false); }
+    this.pressed = now;
   }
 
   // ---------- Effects ----------
@@ -911,13 +1101,15 @@ export class EntityManager {
 
   blockBreakParticles(x: number, y: number, z: number, id: number, count = 24): void {
     const cols = this.colorsFor(id);
-    const l = this.lightAt(x + 0.5, y + 0.5, z + 0.5);
+    // The block itself is still solid here, so sample the brightest open neighbour.
+    let l = 0.08;
+    for (const [dx, dy, dz] of [[0, 1, 0], [1, 0, 0], [-1, 0, 0], [0, 0, 1], [0, 0, -1], [0, -1, 0]]) l = Math.max(l, this.lightAt(x + 0.5 + dx, y + 0.5 + dy, z + 0.5 + dz));
     for (let i = 0; i < count; i++) {
       const col = cols[i % cols.length].clone().multiplyScalar(l);
       this.particles.add(
         new THREE.Vector3(x + Math.random(), y + Math.random(), z + Math.random()),
         new THREE.Vector3((Math.random() - 0.5) * 0.15, Math.random() * 0.2, (Math.random() - 0.5) * 0.15),
-        col, 15 + Math.floor(Math.random() * 15), 0.08 + Math.random() * 0.05);
+        col, 15 + Math.floor(Math.random() * 15), 0.05 + Math.random() * 0.04);
     }
   }
 
@@ -925,7 +1117,7 @@ export class EntityManager {
     const cols = this.colorsFor(id);
     const l = this.lightAt(x + 0.5 + normal[0], y + 0.5 + normal[1], z + 0.5 + normal[2]);
     const p = new THREE.Vector3(x + 0.5 + normal[0] * 0.52 + (Math.random() - 0.5) * (1 - Math.abs(normal[0])), y + 0.5 + normal[1] * 0.52 + (Math.random() - 0.5) * (1 - Math.abs(normal[1])), z + 0.5 + normal[2] * 0.52 + (Math.random() - 0.5) * (1 - Math.abs(normal[2])));
-    this.particles.add(p, new THREE.Vector3(normal[0] * 0.05 + (Math.random() - 0.5) * 0.05, 0.08, normal[2] * 0.05 + (Math.random() - 0.5) * 0.05), cols[Math.floor(Math.random() * cols.length)].clone().multiplyScalar(l), 12, 0.07);
+    this.particles.add(p, new THREE.Vector3(normal[0] * 0.05 + (Math.random() - 0.5) * 0.05, 0.08, normal[2] * 0.05 + (Math.random() - 0.5) * 0.05), cols[Math.floor(Math.random() * cols.length)].clone().multiplyScalar(l), 12, 0.045);
   }
 
   puff(x: number, y: number, z: number): void {
@@ -938,7 +1130,7 @@ export class EntityManager {
     this.particles.add(new THREE.Vector3(x + (Math.random() - 0.5) * 0.6, y, z + (Math.random() - 0.5) * 0.6), new THREE.Vector3(0, 0.05, 0), new THREE.Color(1, 0.6 + Math.random() * 0.3, 0.1), 10, 0.1, -0.002);
   }
 
-  explode(x: number, y: number, z: number, power: number): void {
+  explode(x: number, y: number, z: number, power: number, fire = false): void {
     const w = this.world;
     sfx.explode(this.spatialFor([x, y, z]));
     const destroyed = new Set<string>();
@@ -961,6 +1153,12 @@ export class EntityManager {
         }
         px += dx * 0.3; py += dy * 0.3; pz += dz * 0.3;
         strength -= 0.225;
+      }
+    }
+    if (fire) {
+      for (let k = 0; k < 12; k++) {
+        const fx = Math.floor(x + (Math.random() - 0.5) * power * 3), fy = Math.floor(y + (Math.random() - 0.5) * power * 2), fz = Math.floor(z + (Math.random() - 0.5) * power * 3);
+        if (w.getBlock(fx, fy, fz) === 0 && SOLID[w.getBlock(fx, fy - 1, fz)]) w.setBlock(fx, fy, fz, B.fire);
       }
     }
     for (const key of destroyed) {
@@ -1004,17 +1202,18 @@ export class EntityManager {
   }
 
   serialize(): unknown[] {
-    return this.list.filter((e) => e instanceof Mob && e.deathTime === 0 && !(e as Mob).spec.hostile).map((e) => {
+    return this.list.filter((e) => e instanceof Mob && e.deathTime === 0 && !(e as Mob).spec.hostile && !(e as Mob).spec.flying && !(e as Mob).spec.aquatic).map((e) => {
       const m = e as Mob;
-      return { kind: m.spec.kind, pos: m.body.pos, health: m.health, growing: m.growing, sheared: m.sheared };
+      return { kind: m.spec.kind, pos: m.body.pos, health: m.health, growing: m.growing, sheared: m.sheared, profession: m.spec.trader ? m.profession : undefined, offers: m.spec.trader ? m.offers : undefined };
     });
   }
 
   load(data: unknown): void {
     if (!Array.isArray(data)) return;
-    for (const d of data as { kind: string; pos: [number, number, number]; health: number; growing?: number; sheared?: boolean }[]) {
+    for (const d of data as { kind: string; pos: [number, number, number]; health: number; growing?: number; sheared?: boolean; profession?: string; offers?: TradeOffer[] }[]) {
       if (!MOBS[d.kind]) continue;
-      const m = this.spawnMob(d.kind, d.pos[0], d.pos[1], d.pos[2]);
+      const m = this.spawnMob(d.kind, d.pos[0], d.pos[1], d.pos[2], d.profession);
+      if (d.offers) m.offers = d.offers;
       m.health = d.health;
       if (d.growing) { m.makeBaby(); m.growing = d.growing; }
       m.sheared = !!d.sheared;

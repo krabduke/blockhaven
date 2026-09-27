@@ -29,6 +29,8 @@ Worlds save automatically to your browser's storage (IndexedDB) every 30 seconds
 
 | | |
 |---|---|
+| ![A village seen from above: houses, farms, a well and paths](docs/screenshots/village.png) | ![A village well with a villager and the Stonewarden guardian](docs/screenshots/village-street.png) |
+| ![Inside the Emberdeep: cinderstone caverns with glowstone hanging from the ceiling](docs/screenshots/emberdeep-2.png) | ![A snowy taiga](docs/screenshots/snowy-taiga.png) |
 | ![A homestead with a fenced pen, wheat and animals](docs/screenshots/homestead.png) | ![The same homestead in the rain](docs/screenshots/rain.png) |
 | ![A torch-lit cave full of ore, with lava](docs/screenshots/cave.png) | ![A Mirewalker approaching at night](docs/screenshots/night-raid.png) |
 | ![Desert with cacti next to hills and mountains](docs/screenshots/desert.png) | ![Snowy mountain peaks](docs/screenshots/mountains.png) |
@@ -39,17 +41,20 @@ Worlds save automatically to your browser's storage (IndexedDB) every 30 seconds
 
 **World**
 - Endless, seeded terrain in 16×16×256 chunks, streamed around you by background workers
-- Biomes: plains, forest, birch forest, snowy taiga, desert, beach, ocean and mountains, each with its own grass and foliage tint
+- Biomes: plains, forest, birch forest, snowy taiga, desert, savanna, swamp, beach, ocean and mountains, each with its own grass and foliage tint
+- **Villages** of houses, farms, a smithy, a library, lamp posts and a well with a bell, joined by dirt paths. Villagers trade with you in amber, and a Stonewarden guards each village. Find the nearest one with `/locate village`
+- **The Emberdeep**, a second dimension beneath the world: cinderstone caverns over a lava sea, glowstone hanging from the ceiling, ashsand that slows you down, magma rock, emberquartz, eternal fires and ruined cinder keeps with loot. Build a 4×5 obsidian frame, light it with flint and steel, and stand in the gate. Distances there are one-eighth of the overworld's
 - Winding tunnel caves and large caverns, lava lakes deep down, and coal, iron, gold and diamond ore at their usual depths
 - Oak, birch and spruce trees, cacti, sugar cane, flowers, tall grass and pumpkins
 - Dungeons: mossy rooms with a monster cage that keeps spawning creatures, and chests of loot
 - Day and night on a 20-minute cycle, with sun, moon, stars, drifting clouds, and rain, snow and thunderstorms
 
 **Blocks and building**
-- 65+ blocks, including stairs, slabs, fences, fence gates, doors, ladders, glass, bookshelves, TNT and lamps
+- 115 blocks, including stairs, slabs, fences, fence gates, doors, trapdoors, ladders, glass and glass panes, iron bars, lanterns, signs you can write on, carpets, six colours of wool, slate, marble, terracotta, hay bales, cake, bookshelves, TNT and lamps
+- Power: buttons, pressure plates and levers send power along spark dust wire to light lamps, open doors, trapdoors and gates, and set off TNT
+- Fire that spreads through wood, wool and leaves and burns out on its own, and puts itself out in the rain
 - Smooth lighting with ambient occlusion; sunlight and torchlight both flood-fill through the world
 - Flowing water and lava (water plus lava makes obsidian or cobblestone), sand and gravel that fall, leaves that decay when their tree is cut down
-- Levers that switch on nearby lamps
 
 **Survival**
 - Health, hunger, saturation and air, with fall, drowning, lava, fire and starvation damage
@@ -63,11 +68,20 @@ Worlds save automatically to your browser's storage (IndexedDB) every 30 seconds
 - Farming: till with a hoe, then plant wheat and carrots, which grow in the light. Bone meal speeds up crops, saplings and grass
 - Achievements for the classic milestones
 
+**Graphics**
+- Sun shadows from a shadow map, directional sunlight on every face, a gradient sky with a sun glow and a warm band at dawn and dusk, water that reflects the sky and catches the sun, flickering torchlight and filmic colour grading. Switch between Fancy and Fast in Settings
+- Procedurally painted textures with bevelled stones, wood grain, bark ridges and layered foliage
+- Blocks crack apart into shards as you mine them
+
 **Creatures (all original designs)**
 - **Boar**, **Hen** and **Woolback** (a curly-horned ram): follow you when you hold their food, can be bred into babies, and drop food, leather, feathers and wool. Shear a Woolback for its wool; it grows back as it grazes. Hens lay eggs
 - **Mirewalker**: a mossy shambler that comes out at night and burns in sunlight
 - **Shellcrawler**: a six-legged cave dweller, calm in daylight unless provoked
 - **Brambler**: a thorn-covered creature that keeps its distance and shoots barbs at you
+- **Burrowfox**, **Bogfrog** (swamps), **Streamfish** (water) and **cave moths**
+- **Dune Scuttler**: a fast desert pest. **Frostling**: an icy imp in snowy places that throws snowballs
+- **Villagers**: farmers, shepherds, fishers, butchers, clerics, smiths and librarians, each with their own trades. **Stonewarden**: a mossy guardian that fights monsters near its village
+- **Emberwisp**: floats through the Emberdeep lobbing fireballs. **Cinderbrute**: a heavy basalt brute that shrugs off fire
 
 **Game modes**
 - Survival, and Creative (fly, instant breaking, and every block and item in a searchable palette)
@@ -97,7 +111,7 @@ In inventories: click to pick up or place a stack, right-click to split or place
 
 ## Commands
 
-`/gamemode survival|creative`, `/time set day|noon|sunset|night|midnight|<ticks>`, `/weather clear|rain|thunder`, `/give <item> [count]`, `/xp <amount>`, `/tp <x> <y> <z>`, `/spawn <boar|hen|woolback|mirewalker|shellcrawler|brambler>`, `/seed`, `/kill`, `/help`
+`/gamemode survival|creative`, `/time set day|noon|sunset|night|midnight|<ticks>`, `/weather clear|rain|thunder`, `/give <item> [count]`, `/xp <amount>`, `/tp <x> <y> <z>`, `/spawn <mob>`, `/locate village`, `/dimension overworld|ember`, `/seed`, `/kill`, `/help`
 
 Item names for `/give` are the lowercase names with underscores, for example `/give diamond_pickaxe` or `/give oak_stairs 64`.
 
@@ -109,6 +123,9 @@ TypeScript, [Vite](https://vite.dev) and [Three.js](https://threejs.org), with n
 |---|---|
 | Block and item registry | `src/blocks.ts`, `src/items.ts` |
 | Terrain, caves, ores, trees, dungeons | `src/world/worldgen.ts` |
+| Villages | `src/world/villages.ts` |
+| The Emberdeep | `src/world/embergen.ts` |
+| Trading | `src/trading.ts` |
 | Chunk meshing (face culling, smooth light, ambient occlusion) | `src/world/mesher.ts` |
 | Sky light and block light flood-fill | `src/world/light.ts` |
 | Chunk streaming, fluids, falling blocks, random ticks | `src/world/world.ts` |
@@ -128,13 +145,14 @@ npm test                          # unit tests: noise, world gen, lighting, phys
 npm run dev -- --port 5199        # then, in another terminal:
 node scripts/playtest.mjs         # plays the real game in headless Chromium and checks mining, placing,
                                   # water, torches, combat, bows, shearing, breeding, bone meal, armor,
-                                  # weather, dungeon loot, fishing, enchanting, crafting and save/load
+                                  # weather, dungeon loot, fishing, enchanting, power, fire, villages,
+                                  # trading, Ember Gates, the Emberdeep, crafting and save/load
 npm run screenshots               # regenerates docs/screenshots
 ```
 
 ## What's not in yet
 
-The Nether and the End, villages and villagers, redstone wiring (levers only switch adjacent lamps), minecarts and boats, signs, maps and multiplayer.
+An end dimension, redstone components beyond the basics (no repeaters, pistons or comparators yet), minecarts and boats, horses, maps and multiplayer.
 
 ## Licence
 

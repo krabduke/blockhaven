@@ -265,6 +265,154 @@ const enchRes = await g((lv) => {
 }, ench);
 check('enchanting table enchants a pickaxe and spends levels', !!enchRes.ench?.length && enchRes.spent > 0, JSON.stringify(enchRes));
 
+// --- Power: lever -> spark dust -> lamp, and a pressure plate opening a door.
+const power = await g(async ({ x, y, z }) => {
+  const G = window.blockhaven, w = G.world;
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  const bx = x + 30, by = y + 20, bz = z;
+  for (let dx = -2; dx <= 8; dx++) for (let dz = -2; dz <= 2; dz++) { w.setBlock(bx + dx, by - 1, bz + dz, 1); for (let dy = 0; dy <= 3; dy++) w.setBlock(bx + dx, by + dy, bz + dz, 0); }
+  w.setBlock(bx, by, bz, 59, 0);            // lever on the floor
+  for (let k = 1; k <= 5; k++) w.setBlock(bx + k, by, bz, 94, 0); // wire
+  w.setBlock(bx + 6, by, bz, 57);           // lamp
+  await sleep(200);
+  const before = w.getBlock(bx + 6, by, bz);
+  w.toggleLever(bx, by, bz);
+  await sleep(300);
+  const after = w.getBlock(bx + 6, by, bz);
+  const wirePower = w.getMeta(bx + 5, by, bz) & 15;
+  w.toggleLever(bx, by, bz);
+  await sleep(300);
+  const off = w.getBlock(bx + 6, by, bz);
+  // Plate next to a door.
+  w.setBlock(bx + 2, by, bz + 2, 96, 0);
+  w.setBlock(bx + 3, by + 1, bz + 2, 36, 8); w.setBlock(bx + 3, by, bz + 2, 36, 0);
+  w.setPlate(bx + 2, by, bz + 2, true);
+  await sleep(200);
+  const doorOpen = (w.getMeta(bx + 3, by, bz + 2) & 4) !== 0;
+  w.setPlate(bx + 2, by, bz + 2, false);
+  return { before, after, wirePower, off, doorOpen };
+}, setup);
+check('lever powers spark dust and lights a lamp', power.before === 57 && power.after === 58 && power.off === 57 && power.wirePower > 0, JSON.stringify(power));
+check('pressure plate opens a door', power.doorOpen);
+
+// --- Fire spreads to wood and burns it.
+const fire = await g(async ({ x, y, z }) => {
+  const G = window.blockhaven, w = G.world;
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  const bx = x - 30, by = y + 20, bz = z;
+  for (let dx = -1; dx <= 5; dx++) for (let dz = -1; dz <= 1; dz++) w.setBlock(bx + dx, by - 1, bz + dz, 1);
+  for (let dx = 1; dx <= 4; dx++) w.setBlock(bx + dx, by, bz, 5);
+  w.setBlock(bx, by, bz, 70, 0);
+  // Wait for game time, not wall time: headless rendering can run below 20 ticks/s.
+  const t0 = w.tickCount;
+  while (w.tickCount - t0 < 300) await sleep(500);
+  let planks = 0;
+  for (let dx = 1; dx <= 4; dx++) if (w.getBlock(bx + dx, by, bz) === 5) planks++;
+  return { planksLeft: planks };
+}, setup);
+check('fire spreads through and burns wooden planks', fire.planksLeft < 4, JSON.stringify(fire));
+
+// --- New creatures can be spawned and tick without errors.
+const zoo = await g(async ({ x, y, z }) => {
+  const G = window.blockhaven;
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  const kinds = ['burrowfox', 'bogfrog', 'dunescuttler', 'frostling', 'cavemoth', 'stonewarden', 'villager'];
+  const ms = kinds.map((k, i) => G.entities.spawnMob(k, x + 0.5 + i, y + 1, z + 3.5, 'smith'));
+  await sleep(2000);
+  return ms.map((m) => ({ k: m.spec.kind, alive: !m.dead, y: +m.body.pos[1].toFixed(1) }));
+}, setup);
+check('new creatures spawn and move without errors', zoo.every((m) => m.alive), JSON.stringify(zoo));
+
+// --- Villages: find one, go there, meet villagers, trade.
+const village = await g(async () => {
+  const G = window.blockhaven, p = G.player;
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  const log = [];
+  const orig = G.say.bind(G); G.say = (t) => { log.push(t); orig(t); };
+  G.runCommand('/locate village');
+  const m = /at (-?\d+), (-?\d+)/.exec(log.join(' '));
+  if (!m) return { found: false, log };
+  const vx = +m[1], vz = +m[2];
+  p.creative = true; p.flying = true;
+  p.body.pos = [vx + 0.5, 110, vz + 0.5];
+  for (let i = 0; i < 60; i++) { await sleep(1000); if (G.world.isLoaded(vx, vz) && G.world.getChunk(vx >> 4, vz >> 4)?.dirty.size === 0) break; }
+  await sleep(3000);
+  const villagers = G.entities.mobs().filter((mm) => mm.spec.trader);
+  const bell = (() => { for (let dy = -3; dy <= 8; dy++) for (let dx = -3; dx <= 3; dx++) for (let dz = -3; dz <= 3; dz++) { const gy = G.world.groundY(vx, vz); if (G.world.getBlock(vx + dx, gy + dy, vz + dz) === 115) return true; } return false; })();
+  let traded = false;
+  if (villagers.length) {
+    const v = villagers[0];
+    p.creative = false;
+    const give = v.offers[0].give;
+    p.inv.slots.fill(null);
+    give.forEach((gv, i) => { p.inv.slots[i] = { id: gv.id, count: gv.count }; });
+    G.containers.show('trade', { villager: v });
+    await sleep(300);
+    const btn = document.querySelector('#container .trade-opt:not([disabled])');
+    if (btn) { btn.click(); await sleep(200); }
+    traded = p.inv.count(v.offers[0].get.id) >= v.offers[0].get.count;
+    G.containers.close();
+  }
+  return { found: true, vx, vz, villagers: villagers.length, bell, traded };
+});
+check('villages exist and have villagers and a bell', village.found && village.villagers > 0 && village.bell, JSON.stringify(village));
+check('trading with a villager works', !!village.traded);
+
+// --- Ember Gate: build a frame, light it, travel, arrive through a gate.
+const ember = await g(async ({ x, y, z }) => {
+  const G = window.blockhaven, w = G.world, p = G.player;
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  p.creative = false; p.flying = false;
+  // Build next to wherever the player is now (the village test moved them far away).
+  const px = Math.floor(p.body.pos[0]), pz = Math.floor(p.body.pos[2]);
+  const bx = px + 4, bz = pz + 4, by = w.groundY(bx, bz) + 1;
+  void x; void y; void z;
+  for (let u = -1; u <= 2; u++) for (let v = -1; v <= 3; v++) w.setBlock(bx + u, by + v, bz, (u === -1 || u === 2 || v === -1 || v === 3) ? 31 : 0);
+  const lit = w.tryLightPortal(bx, by, bz);
+  const portalBlocks = [0, 1].reduce((n, u) => n + [0, 1, 2].filter((v) => w.getBlock(bx + u, by + v, bz) === 69).length, 0);
+  p.body.pos = [bx + 0.5, by, bz + 0.5];
+  p.portalCooldown = 0;
+  for (let i = 0; i < 90; i++) { await sleep(500); if (G.dimension === 'ember') break; }
+  for (let i = 0; i < 90; i++) { await sleep(1000); if (G.mode === 'playing') break; }
+  await sleep(2000);
+  const W = G.world;
+  const pos = p.body.pos.map((v) => Math.floor(v));
+  let lava = 0, cinder = 0;
+  for (let dx = -16; dx < 16; dx++) for (let dz = -16; dz < 16; dz++) for (let yy = 20; yy < 60; yy += 4) {
+    const b = W.getBlock(pos[0] + dx, yy, pos[2] + dz);
+    if (b === 13) lava++; if (b === 71) cinder++;
+  }
+  const standingInGate = W.getBlock(pos[0], pos[1], pos[2]) === 69;
+  return { lit, portalBlocks, dim: G.dimension, mode: G.mode, lava, cinder, standingInGate, ceiling: W.getBlock(pos[0], 127, pos[2]) };
+}, setup);
+check('flint-and-steel lights an obsidian frame into a 2x3 gate', ember.lit && ember.portalBlocks === 6, JSON.stringify({ lit: ember.lit, n: ember.portalBlocks }));
+check('standing in a gate takes you to the Emberdeep', ember.dim === 'ember' && ember.mode === 'playing', JSON.stringify({ dim: ember.dim, mode: ember.mode }));
+check('the Emberdeep has cinderstone, a lava sea and a bedrock ceiling', ember.cinder > 50 && ember.lava > 50 && ember.ceiling === 6, JSON.stringify(ember));
+check('you arrive standing in a gate', ember.standingInGate);
+
+// Emberwisp fireball hurts the player.
+const wisp = await g(async () => {
+  const G = window.blockhaven, p = G.player;
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  p.health = 20; p.invulnerable = 0; p.creative = false;
+  const [x, y, z] = p.body.pos;
+  const m = G.entities.spawnMob('emberwisp', x + 0.5, y + 4, z - 6);
+  await sleep(8000);
+  m.dead = true;
+  return p.health;
+});
+check('an Emberwisp shoots fireballs that hurt', wisp < 20, `health ${wisp}`);
+
+// Go back up.
+const back = await g(async () => {
+  const G = window.blockhaven;
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  G.runCommand('/dimension overworld');
+  for (let i = 0; i < 90; i++) { await sleep(1000); if (G.dimension === 'overworld' && G.mode === 'playing') break; }
+  return { dim: G.dimension, mode: G.mode };
+});
+check('you can return to the overworld', back.dim === 'overworld' && back.mode === 'playing', JSON.stringify(back));
+
 // --- Crafting through the inventory screen.
 const crafted = await g(async () => {
   const G = window.blockhaven, p = G.player;
@@ -290,12 +438,14 @@ const planks = await g(() => { const G = window.blockhaven; const n = G.player.i
 check('crafting a log into planks via the inventory screen', crafted && planks === 4, `planks: ${planks}`);
 
 // --- Save, quit, reload, and check a block change persisted.
-const marker = await g(async ({ x, y, z }) => {
+const marker = await g(async () => {
   const G = window.blockhaven;
-  G.world.setBlock(x + 3, y + 1, z + 3, 33 /* glowstone */);
+  const [px, , pz] = G.player.body.pos.map(Math.floor);
+  const m = [px + 3, G.world.groundY(px + 3, pz + 3), pz + 3];
+  G.world.setBlock(m[0], m[1], m[2], 33 /* glowstone */);
   await G.save();
-  return [x + 3, y + 1, z + 3];
-}, setup);
+  return m;
+});
 await g(() => window.blockhaven.quitToTitle());
 await wait(3000);
 const worldMeta = await g(async () => (await window.blockhaven.listWorlds()).find((w) => w.name === 'Playtest'));

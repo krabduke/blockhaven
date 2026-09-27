@@ -12,11 +12,17 @@ in vec4 aUV;
 in vec4 aLight;
 in vec4 aTint;
 uniform float uTime;
+uniform mat4 uShadowMatrix;
 out vec3 vUV;
 out vec2 vLight;
 out float vBright;
 out vec3 vTint;
 out float vFogDepth;
+out vec3 vWorld;
+out vec3 vNormal;
+out vec4 vShadow;
+flat out float vFlags;
+const vec3 NORMALS[7] = vec3[7](vec3(1,0,0), vec3(-1,0,0), vec3(0,1,0), vec3(0,-1,0), vec3(0,0,1), vec3(0,0,-1), vec3(0,0.8,0.6));
 void main() {
   vec3 p = aPos.xyz / 16.0;
   vec4 world = modelMatrix * vec4(p, 1.0);
@@ -24,6 +30,11 @@ void main() {
   if (flags == 1.0) {
     world.x += sin(uTime * 1.7 + world.x * 0.7 + world.z * 0.3) * 0.045;
     world.z += cos(uTime * 1.4 + world.z * 0.6 + world.y * 0.2) * 0.045;
+  }
+  vNormal = NORMALS[int(aLight.w)];
+  if (flags == 2.0 && vNormal.y > 0.5) {
+    // Gentle swell on water surfaces.
+    world.y += (sin(uTime * 1.3 + world.x * 0.9) + cos(uTime * 1.1 + world.z * 0.8)) * 0.018 - 0.03;
   }
   vec4 mv = viewMatrix * world;
   gl_Position = projectionMatrix * mv;
@@ -33,6 +44,9 @@ void main() {
   vBright = aLight.z / 255.0;
   vTint = aTint.rgb / 255.0;
   vFogDepth = length(mv.xyz);
+  vWorld = world.xyz;
+  vFlags = flags;
+  vShadow = uShadowMatrix * vec4(world.xyz + vNormal * 0.06, 1.0);
 }
 `;
 
@@ -40,34 +54,145 @@ const FRAG = /* glsl */ `
 precision highp float;
 precision highp sampler2DArray;
 uniform sampler2DArray uAtlas;
+uniform sampler2D uShadowMap;
+uniform float uShadowOn;
 uniform float uSun;
+uniform float uDay;
+uniform vec3 uSunDir;
 uniform vec3 uSkyLightColor;
+uniform vec3 uSunColor;
 uniform vec3 uFogColor;
+uniform vec3 uSkyTop;
 uniform float uFogNear;
 uniform float uFogFar;
 uniform float uAlphaTest;
 uniform float uOpacity;
 uniform float uGamma;
+uniform float uMinLight;
+uniform float uFancy;
+uniform float uTime;
+uniform vec3 uCamPos;
 in vec3 vUV;
 in vec2 vLight;
 in float vBright;
 in vec3 vTint;
 in float vFogDepth;
+in vec3 vWorld;
+in vec3 vNormal;
+in vec4 vShadow;
+flat in float vFlags;
 out vec4 outColor;
+
 float curve(float f) {
   f = clamp(f, 0.0, 1.0);
   return mix(f / (3.0 - 2.0 * f), f, uGamma);
 }
+
+float shadowAt(vec3 c) {
+  if (c.x < 0.0 || c.x > 1.0 || c.y < 0.0 || c.y > 1.0 || c.z > 1.0) return 1.0;
+  float lit = 0.0;
+  vec2 texel = vec2(1.0 / 2048.0);
+  for (int i = -1; i <= 1; i++) for (int j = -1; j <= 1; j++) {
+    float d = texture(uShadowMap, c.xy + vec2(float(i), float(j)) * texel).r;
+    lit += c.z - 0.0015 > d ? 0.0 : 1.0;
+  }
+  return lit / 9.0;
+}
+
+vec3 filmic(vec3 x) {
+  // Soft shoulder so bright sunlit faces don't clip, plus a touch of saturation.
+  vec3 y = x * (1.0 + x * 0.12) / (1.0 + x * 0.35);
+  float l = dot(y, vec3(0.299, 0.587, 0.114));
+  return mix(vec3(l), y, 1.12);
+}
+
 void main() {
   vec4 tex = texture(uAtlas, vUV);
   if (tex.a < uAlphaTest) discard;
-  float sky = curve(vLight.x * uSun);
+  float skyL = vLight.x;
+  float sky = curve(skyL * uSun);
   float blk = curve(vLight.y);
-  vec3 light = max(vec3(sky) * uSkyLightColor, vec3(blk) * vec3(1.0, 0.88, 0.7));
-  light = max(light, vec3(0.035));
+  vec3 skyCol = vec3(sky) * uSkyLightColor;
+  if (uFancy > 0.5) {
+    // Direct sunlight: brighter on faces turned to the sun, dimmer in shadow.
+    float ndl = max(dot(normalize(vNormal), uSunDir), 0.0);
+    float sh = uShadowOn > 0.5 ? shadowAt(vShadow.xyz / vShadow.w * 0.5 + 0.5) : 1.0;
+    float direct = ndl * sh * uDay * smoothstep(0.55, 0.95, skyL);
+    skyCol *= mix(0.72, 1.0, 1.0 - uDay) + direct * 0.45 * uSunColor + (1.0 - sh) * 0.0;
+    skyCol = mix(skyCol, skyCol * vec3(0.82, 0.88, 1.08), (1.0 - sh) * uDay * 0.6);
+  }
+  float flicker = 1.0 + (sin(uTime * 9.0 + vWorld.x * 3.1 + vWorld.z * 1.7) * 0.5 + sin(uTime * 13.0 + vWorld.y * 2.3) * 0.5) * 0.035 * uFancy;
+  vec3 blkCol = vec3(blk * flicker) * vec3(1.0, 0.86, 0.66);
+  vec3 light = max(skyCol, blkCol) + min(skyCol, blkCol) * 0.25;
+  light = max(light, vec3(uMinLight));
   vec3 col = tex.rgb * vTint * light * vBright;
+  float alpha = tex.a * uOpacity;
+  if (vFlags == 2.0 && uFancy > 0.5 && uOpacity < 0.99) {
+    // Water: fresnel sky reflection and a sun glint.
+    vec3 v = normalize(uCamPos - vWorld);
+    vec3 n = normalize(vec3(sin(uTime * 1.3 + vWorld.x * 2.1) * 0.04, 1.0, cos(uTime * 1.1 + vWorld.z * 1.9) * 0.04));
+    if (vNormal.y < 0.5) n = normalize(vNormal);
+    float fres = pow(1.0 - max(dot(v, n), 0.0), 3.0);
+    vec3 refl = mix(uFogColor, uSkyTop, 0.5) * max(uSun, 0.2) * (0.6 + 0.4 * skyL);
+    col = mix(col, refl, fres * 0.7 * skyL);
+    vec3 h = normalize(v + uSunDir);
+    float spec = pow(max(dot(n, h), 0.0), 120.0) * uDay * skyL;
+    col += uSunColor * spec * 1.6;
+    alpha = mix(alpha, 0.92, fres * 0.6);
+  }
+  if (uFancy > 0.5) col = filmic(col);
   float fog = smoothstep(uFogNear, uFogFar, vFogDepth);
-  outColor = vec4(mix(col, uFogColor, fog), tex.a * uOpacity);
+  outColor = vec4(mix(col, uFogColor, fog), alpha);
+}
+`;
+
+const SHADOW_VERT = /* glsl */ `
+in vec4 aPos;
+in vec4 aUV;
+uniform float uTime;
+void main() {
+  vec4 world = modelMatrix * vec4(aPos.xyz / 16.0, 1.0);
+  if (aUV.w == 1.0) {
+    world.x += sin(uTime * 1.7 + world.x * 0.7 + world.z * 0.3) * 0.045;
+    world.z += cos(uTime * 1.4 + world.z * 0.6 + world.y * 0.2) * 0.045;
+  }
+  gl_Position = projectionMatrix * viewMatrix * world;
+}
+`;
+const SHADOW_FRAG = /* glsl */ `
+precision highp float;
+out vec4 outColor;
+void main() { outColor = vec4(1.0); }
+`;
+
+const SKY_VERT = /* glsl */ `
+out vec3 vDir;
+void main() {
+  vDir = normalize(position);
+  vec4 p = projectionMatrix * mat4(mat3(viewMatrix)) * vec4(position, 1.0);
+  gl_Position = p.xyww;
+}
+`;
+const SKY_FRAG = /* glsl */ `
+precision highp float;
+uniform vec3 uSkyTop;
+uniform vec3 uHorizon;
+uniform vec3 uSunDir;
+uniform vec3 uSunColor;
+uniform float uDay;
+uniform float uDusk;
+in vec3 vDir;
+out vec4 outColor;
+void main() {
+  vec3 d = normalize(vDir);
+  float h = clamp(d.y, -1.0, 1.0);
+  vec3 col = mix(uHorizon, uSkyTop, smoothstep(-0.05, 0.55, h));
+  if (h < 0.0) col = mix(uHorizon, uHorizon * 0.7, smoothstep(0.0, -0.4, h));
+  float sd = max(dot(d, uSunDir), 0.0);
+  // Glow around the sun, and a warm band along the horizon at dawn and dusk.
+  col += uSunColor * (pow(sd, 8.0) * 0.35 + pow(sd, 64.0) * 0.6) * max(uDay, uDusk);
+  col = mix(col, vec3(1.0, 0.55, 0.3), uDusk * pow(1.0 - abs(h), 6.0) * pow(max(dot(normalize(vec3(d.x, 0.0, d.z)), normalize(vec3(uSunDir.x, 0.0, uSunDir.z))), 0.0), 2.0) * 0.6);
+  outColor = vec4(col, 1.0);
 }
 `;
 
@@ -109,6 +234,16 @@ export class Renderer {
   thunder = 0;
   flash = 0;
   private rainLines: THREE.LineSegments;
+  dimension: 'overworld' | 'ember' = 'overworld';
+  /** Fancy = sun shading, shadows, water reflections, colour grading. */
+  fancy = true;
+  shadows = true;
+  private shadowTarget: THREE.WebGLRenderTarget;
+  private shadowCam: THREE.OrthographicCamera;
+  private shadowMaterial!: THREE.ShaderMaterial;
+  private skyDome!: THREE.Mesh;
+  private skyUniforms!: Record<string, THREE.IUniform>;
+  private shadowFrame = 0;
   private rainDrops: { x: number; y: number; z: number; v: number; snow: boolean; on: boolean }[] = [];
   sky_state: SkyState = { sun: 1, skyColor: new THREE.Color(), fogColor: new THREE.Color() };
 
@@ -132,15 +267,29 @@ export class Renderer {
     tex.needsUpdate = true;
     this.atlasTexture = tex;
 
+    this.shadowTarget = new THREE.WebGLRenderTarget(2048, 2048, { depthBuffer: true });
+    this.shadowTarget.depthTexture = new THREE.DepthTexture(2048, 2048);
+    this.shadowTarget.depthTexture.type = THREE.UnsignedIntType;
+    this.shadowCam = new THREE.OrthographicCamera(-80, 80, 80, -80, 1, 500);
     this.uniforms = {
       uAtlas: { value: tex },
       uTime: { value: 0 },
       uSun: { value: 1 },
+      uDay: { value: 1 },
+      uSunDir: { value: new THREE.Vector3(0, 1, 0) },
+      uSunColor: { value: new THREE.Color(1, 0.95, 0.85) },
       uSkyLightColor: { value: new THREE.Color(1, 1, 1) },
       uFogColor: { value: new THREE.Color(0.6, 0.75, 0.9) },
+      uSkyTop: { value: new THREE.Color(0.35, 0.55, 0.9) },
       uFogNear: { value: 80 },
       uFogFar: { value: 120 },
       uGamma: { value: 0.5 },
+      uMinLight: { value: 0.035 },
+      uFancy: { value: 1 },
+      uCamPos: { value: new THREE.Vector3() },
+      uShadowMap: { value: this.shadowTarget.depthTexture },
+      uShadowOn: { value: 0 },
+      uShadowMatrix: { value: new THREE.Matrix4() },
     };
     const mk = (alphaTest: number, opacity: number, transparent: boolean) => new THREE.ShaderMaterial({
       glslVersion: THREE.GLSL3,
@@ -152,6 +301,15 @@ export class Renderer {
     });
     this.materials = { opaque: mk(0.0, 1, false), cutout: mk(0.5, 1, false), translucent: mk(0.02, 0.72, true) };
 
+    this.shadowMaterial = new THREE.ShaderMaterial({ glslVersion: THREE.GLSL3, vertexShader: SHADOW_VERT, fragmentShader: SHADOW_FRAG, uniforms: { uTime: this.uniforms.uTime }, side: THREE.DoubleSide });
+    this.skyUniforms = {
+      uSkyTop: this.uniforms.uSkyTop, uHorizon: { value: new THREE.Color() }, uSunDir: this.uniforms.uSunDir,
+      uSunColor: this.uniforms.uSunColor, uDay: this.uniforms.uDay, uDusk: { value: 0 },
+    };
+    this.skyDome = new THREE.Mesh(new THREE.SphereGeometry(900, 24, 16), new THREE.ShaderMaterial({ glslVersion: THREE.GLSL3, vertexShader: SKY_VERT, fragmentShader: SKY_FRAG, uniforms: this.skyUniforms, side: THREE.BackSide, depthWrite: false }));
+    this.skyDome.renderOrder = -20;
+    this.skyDome.frustumCulled = false;
+    this.scene.add(this.skyDome);
     this.sky = new THREE.Group();
     this.scene.add(this.sky);
     this.sun = this.makeCelestial(true);
@@ -322,6 +480,30 @@ export class Renderer {
 
   // ---------- Per-frame ----------
   updateSky(time: number, camPos: THREE.Vector3): void {
+    (this.uniforms.uCamPos.value as THREE.Vector3).copy(camPos);
+    this.uniforms.uFancy.value = this.fancy ? 1 : 0;
+    this.skyDome.position.copy(camPos);
+    if (this.dimension === 'ember') {
+      const fog = this.underwater ? new THREE.Color(0x1f3d7a) : new THREE.Color(0x5a1c10);
+      this.uniforms.uSun.value = 0;
+      this.uniforms.uDay.value = 0;
+      this.uniforms.uMinLight.value = 0.5;
+      (this.uniforms.uFogColor.value as THREE.Color).copy(fog);
+      (this.uniforms.uSkyTop.value as THREE.Color).set(0x2a0a06);
+      (this.skyUniforms.uHorizon.value as THREE.Color).copy(fog);
+      this.skyUniforms.uDusk.value = 0;
+      const far = this.renderDistance * 16;
+      this.uniforms.uFogNear.value = far * 0.3;
+      this.uniforms.uFogFar.value = far * 0.95;
+      this.gl.setClearColor(fog);
+      this.sky.visible = false;
+      this.clouds.visible = false;
+      this.sky_state = { sun: 0, skyColor: fog, fogColor: fog };
+      return;
+    }
+    this.sky.visible = true;
+    this.clouds.visible = true;
+    this.uniforms.uMinLight.value = 0.035;
     const theta = (time / 24000) * Math.PI * 2;
     const sy = Math.sin(theta);
     const sun = Math.min(1, Math.max(0.27, sy * 2.2 + 0.45)) * (1 - this.rain * 0.25 - this.thunder * 0.2) + this.flash * 0.6;
@@ -343,6 +525,15 @@ export class Renderer {
     this.uniforms.uFogNear.value = this.underwater ? 2 : far * (0.62 - this.rain * 0.3);
     this.uniforms.uFogFar.value = this.underwater ? 22 : far * (0.95 - this.rain * 0.2);
     this.gl.setClearColor(fogC.clone().lerp(skyC, 0.5));
+    // Sun direction and colour for shading; warmer and weaker near the horizon.
+    const sunDir = new THREE.Vector3(Math.cos(theta), Math.sin(theta), 0.25).normalize();
+    (this.uniforms.uSunDir.value as THREE.Vector3).copy(sunDir);
+    const dayAmt = Math.max(0, Math.min(1, sy * 3)) * (1 - this.rain * 0.8);
+    this.uniforms.uDay.value = dayAmt;
+    (this.uniforms.uSunColor.value as THREE.Color).setRGB(1, 0.78 + 0.2 * Math.min(1, sy * 2), 0.55 + 0.4 * Math.min(1, sy * 2));
+    (this.uniforms.uSkyTop.value as THREE.Color).copy(skyC).multiplyScalar(0.78).lerp(new THREE.Color(0x2a5ab8), 0.25 * Math.max(0, sy));
+    (this.skyUniforms.uHorizon.value as THREE.Color).copy(fogC);
+    this.skyUniforms.uDusk.value = twilight * (1 - this.rain);
 
     this.sky.position.copy(camPos);
     const d = 400;
@@ -406,11 +597,19 @@ export class Renderer {
     this.highlight.position.set(pos[0] + (min[0] + max[0]) / 2, pos[1] + (min[1] + max[1]) / 2, pos[2] + (min[2] + max[2]) / 2);
   }
 
+  private crackStage = -1;
+  private crackJolt = 0;
   setCrack(pos: [number, number, number] | null, progress: number): void {
-    if (!pos || progress <= 0) { this.crack.visible = false; return; }
+    if (!pos || progress <= 0) { this.crack.visible = false; this.crackStage = -1; return; }
     this.crack.visible = true;
-    this.crack.position.set(pos[0] + 0.5, pos[1] + 0.5, pos[2] + 0.5);
-    (this.crack.material as THREE.MeshBasicMaterial).map = this.crackTextures[Math.min(9, Math.floor(progress * 10))];
+    const stage = Math.min(9, Math.floor(progress * 10));
+    if (stage !== this.crackStage) { this.crackStage = stage; this.crackJolt = 1; }
+    // A small jolt each time a new fracture stage opens up.
+    const j = this.crackJolt * 0.02;
+    this.crack.position.set(pos[0] + 0.5 + (Math.random() - 0.5) * j, pos[1] + 0.5 + (Math.random() - 0.5) * j, pos[2] + 0.5 + (Math.random() - 0.5) * j);
+    this.crack.scale.setScalar(1 + this.crackJolt * 0.012);
+    this.crackJolt *= 0.8;
+    (this.crack.material as THREE.MeshBasicMaterial).map = this.crackTextures[stage];
   }
 
   // ---------- First-person hand ----------
@@ -476,6 +675,23 @@ export class Renderer {
     return m;
   }
 
+  /** A plane showing up to four lines of sign text. */
+  signText(lines: string[]): THREE.Mesh {
+    const cv = document.createElement('canvas');
+    cv.width = 256; cv.height = 112;
+    const g = cv.getContext('2d')!;
+    g.clearRect(0, 0, cv.width, cv.height);
+    g.fillStyle = '#231a10';
+    g.font = '600 24px "Pixelify Sans", monospace';
+    g.textAlign = 'center';
+    g.textBaseline = 'middle';
+    lines.slice(0, 4).forEach((l, i) => g.fillText(l.slice(0, 18), 128, 16 + i * 26));
+    const t = new THREE.CanvasTexture(cv);
+    t.colorSpace = THREE.NoColorSpace;
+    t.anisotropy = 4;
+    return new THREE.Mesh(new THREE.PlaneGeometry(0.9, 0.39), new THREE.MeshBasicMaterial({ map: t, transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2 }));
+  }
+
   /** A small textured cube for a block (held item / dropped item). */
   blockModel(id: number, size: number): THREE.Mesh {
     const def = BLOCKS[id];
@@ -494,6 +710,35 @@ export class Renderer {
     this.swing = 1;
   }
 
+  /** Render terrain depth from the sun into the shadow map (every other frame). */
+  private renderShadows(): void {
+    const on = this.fancy && this.shadows && this.dimension === 'overworld' && (this.uniforms.uDay.value as number) > 0.02 && !this.underwater;
+    this.uniforms.uShadowOn.value = on ? 1 : 0;
+    if (!on) return;
+    if (++this.shadowFrame % 2 !== 0) return;
+    const cam = this.camera.position;
+    const dir = this.uniforms.uSunDir.value as THREE.Vector3;
+    // Snap to whole texels so shadows don't shimmer as you move.
+    const texel = 160 / 2048;
+    const cx = Math.round(cam.x / texel) * texel, cy = Math.round(cam.y / texel) * texel, cz = Math.round(cam.z / texel) * texel;
+    this.shadowCam.position.set(cx + dir.x * 200, cy + dir.y * 200, cz + dir.z * 200);
+    this.shadowCam.up.set(0, 0, 1);
+    this.shadowCam.lookAt(cx, cy, cz);
+    this.shadowCam.updateMatrixWorld();
+    this.shadowCam.updateProjectionMatrix();
+    (this.uniforms.uShadowMatrix.value as THREE.Matrix4).multiplyMatrices(this.shadowCam.projectionMatrix, this.shadowCam.matrixWorldInverse);
+    // Draw only terrain, with a depth-only material.
+    const hidden: THREE.Object3D[] = [];
+    for (const c of this.scene.children) if (c !== this.terrain && c.visible) { c.visible = false; hidden.push(c); }
+    this.scene.overrideMaterial = this.shadowMaterial;
+    this.gl.setRenderTarget(this.shadowTarget);
+    this.gl.clear();
+    this.gl.render(this.scene, this.shadowCam);
+    this.gl.setRenderTarget(null);
+    this.scene.overrideMaterial = null;
+    for (const c of hidden) c.visible = true;
+  }
+
   renderFrame(dt: number, moving: boolean, handBrightness: number, showHand: boolean): void {
     this.uniforms.uTime.value += dt;
     if (moving) this.bob += dt * 9; else this.bob *= 0.9;
@@ -509,6 +754,7 @@ export class Renderer {
         m.color.copy(m.userData.base).multiplyScalar(handBrightness);
       }
     });
+    this.renderShadows();
     this.gl.clear();
     this.gl.render(this.scene, this.camera);
     if (showHand) {

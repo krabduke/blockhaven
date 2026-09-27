@@ -110,6 +110,66 @@ class Painter {
       }
     }
   }
+  /** Tileable value noise in [0,1] with `cells` lattice cells across the tile. */
+  field(cells: number, octaves = 2): Float32Array {
+    const out = new Float32Array(S * S);
+    let amp = 1, total = 0;
+    for (let o = 0; o < octaves; o++) {
+      const n = cells << o;
+      const lat = new Float32Array(n * n);
+      for (let i = 0; i < lat.length; i++) lat[i] = this.rand();
+      for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) {
+        const fx = (x / S) * n, fy = (y / S) * n;
+        const x0 = Math.floor(fx), y0 = Math.floor(fy), tx = fx - x0, ty = fy - y0;
+        const sx = tx * tx * (3 - 2 * tx), sy = ty * ty * (3 - 2 * ty);
+        const at = (a: number, b: number) => lat[((a % n) + n) % n + (((b % n) + n) % n) * n];
+        const v = (at(x0, y0) * (1 - sx) + at(x0 + 1, y0) * sx) * (1 - sy) + (at(x0, y0 + 1) * (1 - sx) + at(x0 + 1, y0 + 1) * sx) * sy;
+        out[x + y * S] += v * amp;
+      }
+      total += amp;
+      amp *= 0.5;
+    }
+    for (let i = 0; i < out.length; i++) out[i] /= total;
+    return out;
+  }
+  /** Paint through a colour ramp indexed by a field value (0..1), with a little dither. */
+  ramp(field: Float32Array, colors: RGB[], dither = 0.08): void {
+    for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) {
+      let t = field[x + y * S] + (this.rand() - 0.5) * dither;
+      t = Math.max(0, Math.min(0.999, t));
+      const f = t * (colors.length - 1), i = Math.floor(f), k = f - i;
+      const a = colors[i], b = colors[Math.min(colors.length - 1, i + 1)];
+      this.set(x, y, [a[0] + (b[0] - a[0]) * k, a[1] + (b[1] - a[1]) * k, a[2] + (b[2] - a[2]) * k]);
+    }
+  }
+  /** Stones with bevelled edges: lit top-left, shadowed bottom-right, dark mortar. */
+  bevelStones(colors: RGB[], gap: RGB, cells: number, jitterCells = 0.1): void {
+    const pts: [number, number, number][] = [];
+    for (let i = 0; i < cells; i++) pts.push([this.rand() * S, this.rand() * S, this.rand()]);
+    const id = new Int16Array(S * S), edge = new Uint8Array(S * S);
+    for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) {
+      let d1 = 1e9, d2 = 1e9, best = 0;
+      for (let i = 0; i < pts.length; i++) for (let oy = -S; oy <= S; oy += S) for (let ox = -S; ox <= S; ox += S) {
+        const d = (x + 0.5 - (pts[i][0] + ox)) ** 2 + (y + 0.5 - (pts[i][1] + oy)) ** 2;
+        if (d < d1) { d2 = d1; d1 = d; best = i; } else if (d < d2) d2 = d;
+      }
+      id[x + y * S] = best;
+      edge[x + y * S] = Math.sqrt(d2) - Math.sqrt(d1) < 1.0 ? 1 : 0;
+    }
+    const f = this.field(4, 2);
+    for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) {
+      const i = x + y * S;
+      if (edge[i]) { this.set(x, y, this.jit(gap, 0.06)); continue; }
+      const tone = Math.min(0.999, pts[id[i]][2] * 0.55 + f[i] * 0.45 + (this.rand() - 0.5) * jitterCells);
+      const c = colors[Math.floor(tone * colors.length)];
+      this.set(x, y, c);
+      // Bevel: neighbour to the top/left is an edge -> highlight; bottom/right -> shadow.
+      const up = y > 0 ? edge[i - S] : edge[i + S * (S - 1)], left = x > 0 ? edge[i - 1] : edge[i + S - 1];
+      const down = y < S - 1 ? edge[i + S] : edge[x], right = x < S - 1 ? edge[i + 1] : edge[i - x];
+      if (up || left) this.shade(x, y, 1.18);
+      else if (down || right) this.shade(x, y, 0.8);
+    }
+  }
   border(c: RGB, f = 1): void {
     for (let i = 0; i < S; i++) {
       this.set(i, 0, c); this.set(i, S - 1, c); this.set(0, i, c); this.set(S - 1, i, c);
@@ -142,16 +202,33 @@ const C = {
 const painters: Record<string, (p: Painter) => void> = {};
 const tile = (name: string, fn: (p: Painter) => void) => { painters[name] = fn; };
 
-tile('stone', (p) => { p.fill(C.stone, 0.05); p.blobs(C.stoneDark, 9, 5, 0.05); p.blobs(C.stoneLight, 6, 4, 0.04); });
-tile('cobblestone', (p) => p.stones(C.stone, C.stoneDark, 9));
-tile('mossy_cobblestone', (p) => { p.stones(C.stone, C.stoneDark, 9); p.blobs(hex('#5d8a3a'), 6, 7, 0.1); });
-tile('dirt', (p) => { p.fill(C.dirt, 0.06); p.blobs(C.dirtDark, 10, 4); p.speckle(C.dirtLight, 0.08); });
-tile('grass_top', (p) => { p.fill(C.grass, 0.1); p.speckle(hex('#a8ab9f'), 0.25, 0.06); p.speckle(hex('#e6e8e0'), 0.1, 0.03); });
+tile('stone', (p) => {
+  p.ramp(p.field(3, 3), [hex('#646468'), hex('#737377'), hex('#808084'), hex('#8c8c90'), hex('#9a9a9e')], 0.12);
+  // Faint strata and hairline cracks.
+  for (let i = 0; i < 3; i++) { let x = Math.floor(p.rand() * S); const y0 = Math.floor(p.rand() * S); for (let k = 0; k < 5; k++) { p.shade(x, (y0 + k) % S, 0.78); x = (x + (p.rand() < 0.5 ? 1 : 0)) % S; } }
+});
+tile('cobblestone', (p) => p.bevelStones([hex('#6a6a6e'), hex('#7a7a7e'), hex('#88888c'), hex('#96969a')], hex('#4e4e52'), 8));
+tile('mossy_cobblestone', (p) => {
+  p.bevelStones([hex('#6a6a6e'), hex('#7a7a7e'), hex('#88888c'), hex('#96969a')], hex('#3e3e42'), 8);
+  const f = p.field(3, 2);
+  for (let i = 0; i < S * S; i++) if (f[i] > 0.58) p.set(i % S, Math.floor(i / S), p.jit(f[i] > 0.7 ? hex('#6a9a3e') : hex('#4f7a2e'), 0.1));
+});
+tile('dirt', (p) => {
+  p.ramp(p.field(4, 2), [hex('#5e3e24'), hex('#74502f'), hex('#86603a'), hex('#946c44')], 0.2);
+  for (let i = 0; i < 6; i++) { const x = Math.floor(p.rand() * 15), y = Math.floor(p.rand() * 15); p.set(x, y, hex('#a88a6a')); p.set(x + 1, y + 1, hex('#5a3c24')); }
+});
+tile('grass_top', (p) => {
+  p.ramp(p.field(4, 2), [hex('#9ea396'), hex('#b4b8ab'), hex('#c8ccbf'), hex('#dcdfd4')], 0.25);
+  // Individual blades: short vertical strokes with a lit tip.
+  for (let i = 0; i < 22; i++) { const x = Math.floor(p.rand() * S), y = Math.floor(p.rand() * S); p.set(x, y, hex('#eceee6')); p.shade(x, (y + 1) % S, 0.8); }
+});
 tile('grass_side', (p) => {
   painters.dirt(p);
+  const greens = [hex('#4d7a2c'), hex('#5f8f36'), hex('#6fa045'), hex('#7db250')];
   for (let x = 0; x < S; x++) {
-    const d = 3 + Math.floor(p.rand() * 3) - (p.rand() < 0.3 ? 1 : 0);
-    for (let y = 0; y < d; y++) p.set(x, y, p.jit(y === d - 1 ? C.grassSideDark : C.grassSide, 0.08));
+    const d = 3 + Math.floor(p.rand() * 2) + (p.rand() < 0.35 ? 2 : 0);
+    for (let y = 0; y < d; y++) p.set(x, y, p.jit(greens[Math.min(3, Math.max(0, 3 - y + (p.rand() < 0.3 ? -1 : 0)))], 0.05));
+    p.shade(x, d, 0.72); // shadow under the overhang
   }
 });
 tile('snowy_grass_side', (p) => {
@@ -162,14 +239,25 @@ tile('snowy_grass_side', (p) => {
   }
 });
 tile('snow', (p) => { p.fill(C.snow, 0.02); p.speckle(hex('#dde6ee'), 0.12, 0.02); });
-tile('sand', (p) => { p.fill(C.sand, 0.04); p.speckle(C.sandDark, 0.2, 0.05); });
-tile('gravel', (p) => { p.stones(hex('#8b8580'), hex('#5c5652'), 16); p.speckle(hex('#a39a92'), 0.1); });
+tile('sand', (p) => {
+  const f = p.field(2, 3);
+  // Wind ripples: a sine across the field.
+  for (let i = 0; i < S * S; i++) f[i] = f[i] * 0.6 + (Math.sin((i % S) * 0.5 + Math.floor(i / S) * 1.1 + f[i] * 4) * 0.5 + 0.5) * 0.4;
+  p.ramp(f, [hex('#c8b882'), hex('#d4c592'), hex('#dfd2a0'), hex('#e9ddb0')], 0.15);
+});
+tile('gravel', (p) => p.bevelStones([hex('#6e6660'), hex('#827a72'), hex('#958c83'), hex('#a8a096'), hex('#7a6e62')], hex('#4a4440'), 18, 0.2));
 tile('clay', (p) => { p.fill(hex('#9ea3b0'), 0.04); p.speckle(hex('#8a8f9c'), 0.2); });
 tile('bedrock', (p) => { p.mottle([hex('#2b2b2b'), hex('#565656'), hex('#7b7b7b'), hex('#141414')], [3, 3, 1, 2]); });
 tile('log_side', (p) => {
+  // Vertical bark ridges with lit crests and dark furrows.
+  const f = p.field(4, 2);
   for (let x = 0; x < S; x++) {
-    const c = x % 4 === 0 || p.rand() < 0.15 ? C.barkDark : C.bark;
-    for (let y = 0; y < S; y++) p.set(x, y, p.jit(p.rand() < 0.1 ? C.barkDark : c, 0.07));
+    const phase = Math.sin(x * 1.3 + p.rand() * 0.8);
+    for (let y = 0; y < S; y++) {
+      const t = phase * 0.35 + f[x + y * S] * 0.5 + (p.rand() - 0.5) * 0.15;
+      const c = t > 0.45 ? hex('#7f603a') : t > 0.2 ? hex('#6b4f2d') : t > -0.1 ? hex('#584024') : hex('#3f2c18');
+      p.set(x, y, c);
+    }
   }
 });
 const rings = (p: Painter, bark: RGB, wood: RGB, dark: RGB) => {
@@ -179,7 +267,17 @@ const rings = (p: Painter, bark: RGB, wood: RGB, dark: RGB) => {
     p.set(x, y, p.jit(c, 0.05));
   }
 };
-tile('log_top', (p) => rings(p, C.bark, C.wood, C.woodDark));
+tile('log_top', (p) => {
+  // Growth rings, slightly off-centre and wobbly, inside a bark rim.
+  const cx = 7.5 + (p.rand() - 0.5), cy = 7.5 + (p.rand() - 0.5);
+  for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) {
+    const edge = Math.max(Math.abs(x - 7.5), Math.abs(y - 7.5));
+    if (edge > 6.5) { p.set(x, y, p.jit(C.bark, 0.06)); continue; }
+    const r = Math.hypot(x + 0.5 - cx - 0.5, y + 0.5 - cy - 0.5) + Math.sin(Math.atan2(y - cy, x - cx) * 3) * 0.3;
+    const ring = Math.floor(r * 0.9) % 2 === 0;
+    p.set(x, y, p.jit(ring ? hex('#a78448') : hex('#bf9a5a'), 0.04));
+  }
+});
 tile('birch_log_side', (p) => {
   p.fill(C.birch, 0.04);
   for (let i = 0; i < 7; i++) {
@@ -193,36 +291,65 @@ tile('spruce_log_side', (p) => {
 });
 tile('spruce_log_top', (p) => rings(p, C.spruceBark, C.spruceWood, hex('#6a4b2b')));
 tile('planks', (p) => {
+  const grain = p.field(2, 2);
   for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) {
     const board = y >> 2;
-    const seam = y % 4 === 3 || (x === ((board * 7 + 3) % S));
-    p.set(x, y, p.jit(seam ? C.plankDark : C.plank, seam ? 0.04 : 0.06));
+    const joint = (board * 7 + 3) % S;
+    const seam = y % 4 === 3 || x === joint;
+    // Wood grain runs along the board; each board has its own tone.
+    const g = Math.sin((x + board * 5) * 0.9 + grain[x + y * S] * 5) * 0.5 + 0.5;
+    const tone = [0.96, 1.04, 0.92, 1.0][board];
+    const base: RGB = g > 0.7 ? hex('#c49a5c') : g > 0.35 ? hex('#b08a50') : hex('#9c7744');
+    if (seam) p.set(x, y, p.jit(hex('#6e5230'), 0.04));
+    else {
+      p.set(x, y, p.jit([base[0] * tone, base[1] * tone, base[2] * tone], 0.03));
+      if (y % 4 === 0) p.shade(x, y, 1.1); // lit top edge of each board
+      if (y % 4 === 2) p.shade(x, y, 0.92);
+    }
   }
+  p.set(1, 1, hex('#5a4630')); p.set(14, 9, hex('#5a4630'));
 });
 const leaves = (p: Painter, base: RGB, holes: number) => {
-  p.fill(base, 0.14);
-  p.speckle(hex('#8e9288'), 0.2, 0.1);
-  for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) if (p.rand() < holes) p.clear(x, y);
+  // Clusters of leaves: lit upper-left edges, shaded interiors, gaps between clumps.
+  const f = p.field(4, 2);
+  const [r, g, b] = base;
+  p.ramp(f, [[r * 0.62, g * 0.62, b * 0.62], [r * 0.78, g * 0.78, b * 0.78], [r * 0.92, g * 0.92, b * 0.92], [r * 1.05, g * 1.05, b * 1.05]], 0.3);
+  for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) {
+    if (f[x + y * S] < 0.3 && p.rand() < holes * 3) p.clear(x, y);
+    else if (p.rand() < holes * 0.5) p.clear(x, y);
+  }
+  for (let i = 0; i < 14; i++) { const x = Math.floor(p.rand() * S), y = Math.floor(p.rand() * S); if (p.alpha(x, y)) p.set(x, y, [Math.min(255, r * 1.2), Math.min(255, g * 1.2), Math.min(255, b * 1.2)]); }
 };
 tile('leaves', (p) => leaves(p, hex('#c4c9bd'), 0.18));
 tile('spruce_leaves', (p) => leaves(p, hex('#a9b4ad'), 0.14));
 tile('birch_leaves', (p) => { p.fill(hex('#7fa35a'), 0.14); p.speckle(hex('#62853f'), 0.25); for (let i = 0; i < 40; i++) p.clear(Math.floor(p.rand() * S), Math.floor(p.rand() * S)); });
 tile('glass', (p) => {
   p.transparent();
-  const edge = hex('#c9e4ee');
-  for (let i = 0; i < S; i++) { p.set(i, 0, edge); p.set(i, S - 1, edge); p.set(0, i, edge); p.set(S - 1, i, edge); }
-  for (let i = 0; i < 4; i++) { p.set(3 + i, 5 - i, C.white, 200); p.set(10 + i, 12 - i, C.white, 160); }
+  const edge = hex('#d8eef6'), shadow = hex('#8fb4c4');
+  for (let i = 0; i < S; i++) { p.set(i, 0, edge); p.set(0, i, edge); p.set(i, S - 1, shadow); p.set(S - 1, i, shadow); }
+  // Streaks of reflected light.
+  for (let i = 0; i < 5; i++) { p.set(3 + i, 7 - i, C.white, 190); if (i < 3) p.set(4 + i, 7 - i, C.white, 110); }
+  for (let i = 0; i < 3; i++) p.set(10 + i, 13 - i, C.white, 150);
+  p.set(12, 3, C.white, 120);
 });
-tile('water', (p) => { p.fill(C.water, 0.06); for (let y = 0; y < S; y += 4) for (let x = 0; x < S; x++) if ((x + y) % 7 < 2) p.set(x, (y + (x >> 2)) % S, p.jit(hex('#5b8ee8'), 0.04)); });
+tile('water', (p) => {
+  const f = p.field(3, 2);
+  for (let i = 0; i < S * S; i++) f[i] = Math.abs(Math.sin(f[i] * 9));
+  p.ramp(f, [hex('#2a5cc0'), hex('#3468d0'), hex('#3f76e0'), hex('#5a8ff0'), hex('#7eaaf6')], 0.1);
+});
 tile('water_flow', (p) => { p.fill(C.water, 0.06); for (let y = 0; y < S; y += 3) for (let x = 0; x < S; x++) if ((x * 3 + y) % 5 === 0) p.set(x, y, hex('#6a9aee')); });
 tile('lava', (p) => { p.fill(C.lava, 0.08); p.blobs(C.lavaHot, 6, 8, 0.1); p.blobs(hex('#b8330f'), 5, 5); });
 const ore = (color: RGB, count: number) => (p: Painter) => {
   painters.stone(p);
+  const hi: RGB = [Math.min(255, color[0] * 1.35 + 30), Math.min(255, color[1] * 1.35 + 30), Math.min(255, color[2] * 1.35 + 30)];
+  const lo: RGB = [color[0] * 0.6, color[1] * 0.6, color[2] * 0.6];
   for (let i = 0; i < count; i++) {
-    const x = 1 + Math.floor(p.rand() * 13), y = 1 + Math.floor(p.rand() * 13);
-    p.set(x, y, p.jit(color, 0.08)); p.set(x + 1, y, p.jit(color, 0.08));
-    p.set(x, y + 1, p.jit(color, 0.12)); if (p.rand() < 0.5) p.set(x + 1, y + 1, p.jit(color, 0.15));
-    p.shade(x + 1, y + 2, 0.75);
+    const x = 1 + Math.floor(p.rand() * 12), y = 1 + Math.floor(p.rand() * 12);
+    // A small faceted nugget: highlight, body, shadow, and a dark socket below.
+    p.set(x, y, hi); p.set(x + 1, y, p.jit(color, 0.06));
+    p.set(x, y + 1, p.jit(color, 0.06)); p.set(x + 1, y + 1, lo);
+    if (p.rand() < 0.6) p.set(x + 2, y + 1, p.jit(color, 0.08));
+    p.shade(x, y + 2, 0.7); p.shade(x + 1, y + 2, 0.7);
   }
 };
 tile('coal_ore', ore(C.coal, 6));
@@ -318,18 +445,28 @@ tile('dead_bush', (p) => {
 });
 tile('obsidian', (p) => { p.fill(C.obsidian, 0.1); p.blobs(C.obsidianHi, 5, 5, 0.12); p.speckle(hex('#0c0812'), 0.1); });
 tile('bricks', (p) => {
+  const tones = [hex('#8e4132'), hex('#9c4a3a'), hex('#a85442'), hex('#93473a')];
   for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) {
     const row = y >> 2, off = row % 2 ? 4 : 0;
+    const col = Math.floor((x + off) / 8);
     const mortar = y % 4 === 3 || (x + off) % 8 === 7;
-    p.set(x, y, p.jit(mortar ? C.mortar : C.brick, mortar ? 0.03 : 0.1));
+    if (mortar) { p.set(x, y, p.jit(C.mortar, 0.04)); continue; }
+    p.set(x, y, p.jit(tones[(row * 3 + col) % 4], 0.07));
+    if (y % 4 === 0) p.shade(x, y, 1.14);
+    if (y % 4 === 2) p.shade(x, y, 0.88);
   }
 });
 tile('stone_bricks', (p) => {
+  const f = p.field(4, 2);
   for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) {
     const row = y >> 3, off = row % 2 ? 4 : 0;
     const gap = y % 8 === 7 || (x + off) % 8 === 7;
     const hi = y % 8 === 0 || (x + off) % 8 === 0;
-    p.set(x, y, p.jit(gap ? C.stoneDark : hi ? C.stoneLight : C.stone, 0.04));
+    const lo = y % 8 === 6 || (x + off) % 8 === 6;
+    const base: RGB = f[x + y * S] > 0.55 ? hex('#8a8a8e') : hex('#7c7c80');
+    p.set(x, y, gap ? p.jit(hex('#4a4a4e'), 0.04) : p.jit(base, 0.04));
+    if (!gap && hi) p.shade(x, y, 1.15);
+    if (!gap && lo) p.shade(x, y, 0.85);
   }
 });
 tile('glowstone', (p) => { p.stones(hex('#e8c060'), hex('#8c6a2f'), 10); p.speckle(hex('#fff2b0'), 0.12); });
@@ -429,19 +566,51 @@ tile('sugar_cane', (p) => {
   p.transparent();
   for (const x of [3, 8, 12]) for (let y = 0; y < S; y++) { p.set(x, y, p.jit(hex('#c8d4be'), 0.06)); p.set(x + 1, y, p.jit(hex('#aab8a0'), 0.06)); if (y % 5 === 0) { p.shade(x, y, 0.75); p.shade(x + 1, y, 0.75); } }
 });
+// Breaking: the block fractures into shards. Seams spread out from a few
+// impact points stage by stage, with lit chipped edges, and pieces start
+// crumbling away near the end. Each stage contains everything before it.
+const FRACTURE = (() => {
+  const rand = mulberry32(4242);
+  const pts: [number, number][] = [];
+  for (let i = 0; i < 9; i++) pts.push([rand() * S, rand() * S]);
+  const cell = new Int8Array(S * S);
+  const seam: { x: number; y: number; rank: number }[] = [];
+  for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) {
+    let d1 = 1e9, d2 = 1e9, best = 0;
+    pts.forEach(([px, py], i) => {
+      const d = (x + 0.5 - px) ** 2 + (y + 0.5 - py) ** 2;
+      if (d < d1) { d2 = d1; d1 = d; best = i; } else if (d < d2) d2 = d;
+    });
+    cell[x + y * S] = best;
+    if (Math.sqrt(d2) - Math.sqrt(d1) < 0.9) {
+      // Seams nearer the centre appear first.
+      seam.push({ x, y, rank: Math.hypot(x - 7.5, y - 7.5) + rand() * 3 });
+    }
+  }
+  seam.sort((a, b) => a.rank - b.rank);
+  const chips: [number, number][] = [];
+  for (const p of seam) if (rand() < 0.35) chips.push([p.x + (rand() < 0.5 ? 1 : -1), p.y]);
+  return { seam, chips, cell };
+})();
 for (let s = 0; s < 10; s++) {
   tile('destroy_' + s, (p) => {
     p.transparent();
-    const rand = mulberry32(99);
-    const cracks = 2 + s;
-    for (let c = 0; c < cracks; c++) {
-      let x = 8, y = 8;
-      const len = 3 + s;
-      const ang = rand() * Math.PI * 2;
-      for (let i = 0; i < len; i++) {
-        p.set(Math.round(x), Math.round(y), [0, 0, 0], 150);
-        x += Math.cos(ang) + (rand() - 0.5);
-        y += Math.sin(ang) + (rand() - 0.5);
+    const t = (s + 1) / 10;
+    const shown = FRACTURE.seam.slice(0, Math.ceil(FRACTURE.seam.length * Math.min(1, t * 1.15)));
+    for (const q of shown) {
+      p.set(q.x, q.y, [18, 14, 10], 190);
+      // A lit edge on one side of each seam makes it read as a split, not a drawn line.
+      if (q.x + 1 < S && q.y + 1 < S) p.set(q.x + 1, q.y + 1, [255, 250, 235], 45);
+    }
+    // Late stages: fragments crumble out along the seams.
+    if (s >= 5) {
+      const n = Math.floor(FRACTURE.chips.length * ((s - 4) / 5));
+      for (const [x, y] of FRACTURE.chips.slice(0, n)) if (x >= 0 && x < S) p.set(x, y, [8, 6, 4], 220);
+    }
+    // Whole shards darken slightly as they loosen.
+    if (s >= 7) {
+      for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) {
+        if (p.alpha(x, y) === 0 && FRACTURE.cell[x + y * S] % 3 === s % 3) p.set(x, y, [0, 0, 0], 45);
       }
     }
   });
@@ -563,6 +732,120 @@ tile('cooked_fish', fish(hex('#b07a3a'), hex('#e0b070')));
 tile('carrot', (p) => { p.transparent(); for (let i = 0; i < 9; i++) { p.set(4 + i, 12 - i, hex('#e8782a')); p.set(5 + i, 12 - i, hex('#c85a1a')); if (i < 7) p.set(4 + i, 13 - i, hex('#d8681f')); } p.sprite(['g.g', '.gg', 'gg.'], { g: hex('#4f9a2e') }, 0.05, 12, 1); });
 tile('gunpowder', (p) => { p.transparent(); for (let i = 0; i < 40; i++) p.set(4 + Math.floor(p.rand() * 8), 6 + Math.floor(p.rand() * 7), p.rand() < 0.5 ? hex('#5a5a5a') : hex('#3a3a3a')); });
 tile('glow_dust', (p) => { p.transparent(); for (let i = 0; i < 34; i++) p.set(4 + Math.floor(p.rand() * 8), 6 + Math.floor(p.rand() * 7), p.rand() < 0.5 ? hex('#f8d870') : hex('#d8a040')); });
+
+// ---------- Batch 3: Emberdeep, villages, building blocks ----------
+tile('portal', (p) => {
+  for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) {
+    const v = Math.sin((x + y) * 0.7) * 0.5 + Math.sin((x - y) * 0.45 + 2) * 0.5;
+    const c: RGB = v > 0.3 ? hex('#d88aff') : v > -0.2 ? hex('#8a3ad8') : hex('#4a1a8a');
+    p.set(x, y, p.jit(c, 0.08), 200);
+  }
+});
+tile('fire', (p) => {
+  p.transparent();
+  for (let x = 0; x < S; x++) {
+    const h = 6 + Math.floor(p.rand() * 9);
+    for (let y = S - 1; y >= S - h; y--) {
+      const t = (S - 1 - y) / h;
+      const c = t < 0.35 ? hex('#fff0a0') : t < 0.7 ? hex('#ffa030') : hex('#d8401a');
+      if (p.rand() < 0.9 - t * 0.3) p.set(x, y, p.jit(c, 0.08));
+    }
+  }
+});
+tile('cinderstone', (p) => { p.fill(hex('#6a2a28'), 0.1); p.blobs(hex('#4a1a1a'), 10, 5); p.speckle(hex('#8a3a32'), 0.12); });
+tile('ashsand', (p) => { p.fill(hex('#4a3a30'), 0.08); for (let i = 0; i < 5; i++) { const x = 2 + Math.floor(p.rand() * 11), y = 2 + Math.floor(p.rand() * 11); p.rect(x, y, 2, 1, hex('#2a2018')); p.set(x, y + 1, hex('#2a2018')); } });
+tile('emberquartz_ore', (p) => { painters.cinderstone(p); for (let i = 0; i < 6; i++) { const x = 1 + Math.floor(p.rand() * 13), y = 1 + Math.floor(p.rand() * 13); p.set(x, y, hex('#f0e6dc')); p.set(x + 1, y, hex('#d8c8bc')); p.set(x, y + 1, hex('#e8dcd0')); } });
+tile('emberquartz_block', (p) => { p.fill(hex('#ece2d8'), 0.03); p.border(hex('#cfc2b4')); });
+tile('cinder_bricks', (p) => {
+  for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) {
+    const row = y >> 2, off = row % 2 ? 4 : 0;
+    const mortar = y % 4 === 3 || (x + off) % 8 === 7;
+    p.set(x, y, p.jit(mortar ? hex('#1e0e10') : hex('#4a1e20'), mortar ? 0.05 : 0.1));
+  }
+});
+tile('magma', (p) => { p.stones(hex('#5a1e12'), hex('#ff7a1a'), 10); p.speckle(hex('#ffc050'), 0.05); });
+tile('ember_cap', (p) => { p.transparent(); p.sprite(['....oooooo....', '..oooyooyoo...', '.ooooooooooo..', '..ssssssss....', '.....ss.......', '.....ss.......', '....sss.......'], { o: hex('#e8601a'), y: hex('#ffd060'), s: hex('#6a3a2a') }, 0.08, 1, 6); });
+tile('amber_ore', (p) => { painters.stone(p); for (let i = 0; i < 4; i++) { const x = 2 + Math.floor(p.rand() * 11), y = 2 + Math.floor(p.rand() * 11); p.sprite(['.a.', 'aha', '.a.'], { a: hex('#e8962a'), h: hex('#ffd890') }, 0.04, x, y); } });
+tile('amber_block', (p) => { p.fill(hex('#e8962a'), 0.04); p.border(hex('#b86a12')); for (let i = 3; i < 8; i++) p.set(i, 10 - i, hex('#ffd890')); });
+tile('path_top', (p) => { p.fill(hex('#9a7a4a'), 0.06); p.speckle(hex('#7a5a32'), 0.2); });
+tile('path_side', (p) => { painters.dirt(p); for (let x = 0; x < S; x++) p.set(x, 0, p.jit(hex('#9a7a4a'), 0.05)); for (let x = 0; x < S; x++) p.clear(x, 15); });
+tile('hay_top', (p) => { p.fill(hex('#c8a83a'), 0.08); for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) if ((x * 3 + y * 5) % 7 === 0) p.set(x, y, hex('#a8882a')); p.border(hex('#8a6a1a')); });
+tile('hay_side', (p) => { for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) p.set(x, y, p.jit(x % 3 === 0 ? hex('#b8982f') : hex('#d4b440'), 0.06)); p.rect(0, 3, 16, 2, hex('#7a3a1a')); p.rect(0, 11, 16, 2, hex('#7a3a1a')); });
+tile('melon_side', (p) => { for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) p.set(x, y, p.jit(x % 4 < 2 ? hex('#5a9a2a') : hex('#3a7a1a'), 0.06)); });
+tile('melon_top', (p) => { p.fill(hex('#4a8a22'), 0.06); p.rect(7, 7, 2, 2, hex('#6a4a1a')); });
+tile('terracotta', (p) => { p.fill(hex('#a8604a'), 0.04); p.speckle(hex('#98543e'), 0.2); });
+const woolTile = (c: RGB) => (p: Painter) => { p.fill(c, 0.05); for (let i = 0; i < 30; i++) { const x = Math.floor(p.rand() * 15), y = Math.floor(p.rand() * 15); p.shade(x, y, 0.88); p.shade(x + 1, y + 1, 0.93); } };
+tile('wool_red', woolTile(hex('#b8302a')));
+tile('wool_yellow', woolTile(hex('#e8c830')));
+tile('wool_green', woolTile(hex('#4a8a2a')));
+tile('wool_blue', woolTile(hex('#3a4ab0')));
+tile('wool_black', woolTile(hex('#262228')));
+tile('wool_orange', woolTile(hex('#e8781f')));
+tile('iron_bars', (p) => { p.transparent(); for (const x of [1, 6, 11]) for (let y = 0; y < S; y++) { p.set(x, y, hex('#9a9a9a')); p.set(x + 1, y, hex('#d8d8d8')); } for (const y of [2, 13]) p.rect(0, y, 16, 1, hex('#7a7a7a')); });
+tile('trapdoor', (p) => {
+  p.transparent();
+  p.rect(0, 0, 16, 16, C.plank, 0.05);
+  p.border(C.plankDark);
+  for (const [x, y] of [[3, 3], [9, 3], [3, 9], [9, 9]]) p.rect(x, y, 4, 4, hex('#4a3a28'));
+});
+tile('lantern', (p) => {
+  p.transparent();
+  p.rect(5, 5, 6, 9, hex('#3a3a42'));
+  p.rect(6, 7, 4, 6, hex('#ffc860'));
+  p.rect(7, 8, 2, 4, hex('#fff0b0'));
+  p.rect(6, 3, 4, 2, hex('#2a2a30'));
+  p.rect(7, 1, 2, 2, hex('#5a5a62'));
+});
+tile('lantern_item', (p) => { painters.lantern(p); });
+tile('bell', (p) => { p.fill(hex('#e8b830'), 0.05); p.rect(0, 0, 16, 2, hex('#c89818')); for (let y = 3; y < 14; y += 4) p.rect(0, y, 16, 1, hex('#fbe070')); });
+tile('bell_item', (p) => { p.transparent(); p.sprite(['....bb....', '...bbbb...', '..bbhbbb..', '..bbbbbb..', '.bbbbbbbb.', 'bbbbbbbbbb', '....dd....'], { b: hex('#e8b830'), h: hex('#fff0a0'), d: hex('#8a6a1a') }, 0.04, 3, 4); });
+tile('wire', (p) => {
+  p.transparent();
+  const c = hex('#e6e6e6');
+  for (let i = 0; i < S; i++) { p.set(i, 7, c); p.set(i, 8, c); p.set(7, i, c); p.set(8, i, c); }
+  p.rect(5, 5, 6, 6, c);
+});
+tile('spark_dust', (p) => { p.transparent(); for (let i = 0; i < 40; i++) p.set(4 + Math.floor(p.rand() * 8), 5 + Math.floor(p.rand() * 8), p.rand() < 0.5 ? hex('#e8301a') : hex('#b81a0a')); });
+tile('spark_ore', (p) => { painters.stone(p); for (let i = 0; i < 7; i++) { const x = 1 + Math.floor(p.rand() * 14), y = 1 + Math.floor(p.rand() * 14); p.set(x, y, hex('#e8301a')); p.set(x + 1, y, hex('#ff6a4a')); } });
+tile('button_item', (p) => { p.transparent(); p.rect(4, 6, 8, 5, hex('#8a8a8a'), 0.05); p.rect(4, 6, 8, 1, hex('#a8a8a8')); p.rect(4, 10, 8, 1, hex('#5a5a5a')); });
+tile('plate_item', (p) => { p.transparent(); p.rect(1, 10, 14, 3, hex('#8a8a8a'), 0.05); p.rect(1, 10, 14, 1, hex('#a8a8a8')); });
+tile('sign_item', (p) => { p.transparent(); p.rect(1, 2, 14, 8, C.plank, 0.05); p.border; p.rect(1, 2, 14, 1, C.plankDark); p.rect(1, 9, 14, 1, C.plankDark); for (let y = 4; y < 9; y += 2) p.rect(3, y, 10, 1, hex('#5a4020')); p.rect(7, 10, 2, 6, C.stick); });
+tile('lily_pad', (p) => { p.transparent(); for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) { const d = Math.hypot(x - 7.5, y - 7.5); if (d < 7.2 && !(x >= 7 && x <= 8 && y < 8)) p.set(x, y, p.jit(hex('#c4c9bd'), 0.1)); } });
+tile('vine', (p) => { p.transparent(); for (let b = 0; b < 5; b++) { let x = 1 + b * 3; for (let y = 0; y < S; y++) { if (p.rand() < 0.85) p.set(x, y, p.jit(hex('#b8bdb0'), 0.1)); if (p.rand() < 0.3) p.set(x + 1, y, p.jit(hex('#a8ad9f'), 0.1)); if (p.rand() < 0.2) x = Math.max(0, Math.min(15, x + (p.rand() < 0.5 ? -1 : 1))); } } });
+tile('cake_top', (p) => { p.fill(hex('#f4ecde'), 0.03); for (let i = 0; i < 8; i++) p.set(2 + Math.floor(p.rand() * 12), 2 + Math.floor(p.rand() * 12), hex('#d8303a')); });
+tile('cake_side', (p) => { p.transparent(); p.rect(0, 8, 16, 8, hex('#c89a5a'), 0.04); p.rect(0, 8, 16, 2, hex('#f4ecde')); p.rect(0, 12, 16, 1, hex('#d8303a')); });
+tile('cake_bottom', (p) => { p.fill(hex('#b08040'), 0.04); });
+tile('cake_item', (p) => { p.transparent(); p.sprite(['..rwwwwr..', '.wwwwwwww.', 'wwwwwwwwww', 'bbbbbbbbbb', 'brrrrrrrrb', 'bbbbbbbbbb', 'bbbbbbbbbb'], { w: hex('#f4ecde'), r: hex('#d8303a'), b: hex('#c89a5a') }, 0.04, 3, 5); });
+tile('red_mushroom', (p) => { p.transparent(); p.sprite(['..rrrr..', '.rwrrwr.', 'rrrrrrrr', '...ss...', '...ss...', '...ss...'], { r: hex('#d02a2a'), w: hex('#f0f0f0'), s: hex('#e8e0c8') }, 0.05, 4, 8); });
+tile('brown_mushroom', (p) => { p.transparent(); p.sprite(['..bbbb..', '.bbbbbb.', 'bbbbbbbb', '...ss...', '...ss...'], { b: hex('#9a6a4a'), s: hex('#e0d4b8') }, 0.05, 4, 9); });
+tile('cobweb', (p) => { p.transparent(); const c = hex('#e8e8e8'); for (let i = 0; i < S; i++) { p.set(i, i, c, 200); p.set(15 - i, i, c, 200); p.set(7, i, c, 160); p.set(i, 8, c, 160); } for (const r of [3, 6]) for (let a = 0; a < 24; a++) { const t = a / 24 * Math.PI * 2; p.set(Math.round(7.5 + Math.cos(t) * r), Math.round(7.5 + Math.sin(t) * r), c, 170); } });
+tile('slate', (p) => { p.fill(hex('#4a4e58'), 0.05); for (let y = 0; y < S; y += 3) for (let x = 0; x < S; x++) if (p.rand() < 0.6) p.shade(x, y, 0.8); });
+tile('polished_slate', (p) => { p.fill(hex('#565a64'), 0.03); p.border(hex('#3a3e46')); });
+tile('marble', (p) => { p.fill(hex('#e8e6e0'), 0.03); for (let i = 0; i < 3; i++) { let x = Math.floor(p.rand() * S); for (let y = 0; y < S; y++) { p.set(x, y, hex('#b8b4ac')); if (p.rand() < 0.5) x = (x + (p.rand() < 0.5 ? 1 : 15)) % S; } } });
+tile('polished_marble', (p) => { p.fill(hex('#f0eee8'), 0.02); p.border(hex('#cfccc4')); });
+tile('mossy_stone_bricks', (p) => { painters.stone_bricks(p); p.blobs(hex('#5d8a3a'), 6, 6, 0.1); });
+tile('cracked_stone_bricks', (p) => { painters.stone_bricks(p); let x = 3, y = 0; while (y < S) { p.set(x, y, hex('#3a3a3e')); y++; x = Math.max(0, Math.min(15, x + Math.round(p.rand() * 2 - 1))); } });
+tile('blue_flower', flower(hex('#4a6ae0'), hex('#e8d040')));
+tile('sunwood_side', (p) => { for (let x = 0; x < S; x++) for (let y = 0; y < S; y++) p.set(x, y, p.jit(x % 4 === 0 ? hex('#5a5048') : hex('#766a5e'), 0.07)); });
+tile('sunwood_top', (p) => rings(p, hex('#766a5e'), hex('#d8783a'), hex('#b8602a')));
+tile('sunwood_leaves', (p) => leaves(p, hex('#c8ccb8'), 0.22));
+// items
+tile('amber', (p) => { p.transparent(); p.sprite(['...hhh...', '..hccch..', '.hcccccd.', 'hccccccdd', '.dcccccd.', '..dcccd..', '...ddd...'], { h: hex('#ffd890'), c: hex('#e8962a'), d: hex('#b86a12') }, 0.03, 3, 4); });
+tile('emberquartz', (p) => { p.transparent(); p.sprite(['..hh....', '.hccd...', 'hcccd.h.', 'dccdd.cd', '.ddd.hcd', '....dcc.', '.....dd.'], { h: hex('#ffffff'), c: hex('#ece2d8'), d: hex('#bcaea0') }, 0.03, 4, 4); });
+tile('cinder_brick', (p) => { p.transparent(); p.sprite(['..hhhhhhhh', '.hccccccch', 'hcccccccdd', 'dddddddddd'], { h: hex('#6a2a2a'), c: hex('#4a1e20'), d: hex('#2a0e10') }, 0.04, 3, 6); });
+tile('ember_core', (p) => { p.transparent(); for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) { const d = Math.hypot(x - 7.5, y - 7.5); if (d < 5) p.set(x, y, d < 2 ? hex('#fff0a0') : d < 3.5 ? hex('#ffa030') : hex('#c8401a')); } });
+const dye = (c: RGB) => (p: Painter) => { p.transparent(); p.sprite(['...cc...', '..cccc..', '.cchccc.', '.cccccc.', '.cccccd.', '..cccd..'], { c, h: [Math.min(255, c[0] * 1.4), Math.min(255, c[1] * 1.4), Math.min(255, c[2] * 1.4)], d: [c[0] * 0.6, c[1] * 0.6, c[2] * 0.6] }, 0.04, 4, 5); };
+tile('dye_red', dye(hex('#c8302a')));
+tile('dye_yellow', dye(hex('#e8c830')));
+tile('dye_green', dye(hex('#4a8a2a')));
+tile('dye_blue', dye(hex('#3a4ab0')));
+tile('dye_black', dye(hex('#2a2628')));
+tile('dye_orange', dye(hex('#e8781f')));
+tile('bowl', (p) => { p.transparent(); p.sprite(['wwwwwwwwwwww', '.bbbbbbbbbb.', '..bbbbbbbb..', '...bbbbbb...'], { w: C.plankDark, b: C.plank }, 0.05, 2, 8); });
+tile('mushroom_stew', (p) => { painters.bowl(p); p.rect(3, 7, 10, 2, hex('#c8986a'), 0.08); p.set(5, 7, hex('#d02a2a')); p.set(9, 7, hex('#9a6a4a')); });
+tile('melon_slice', (p) => { p.transparent(); p.sprite(['gggggggggg', '.rrrrrrrr.', '..rkrrkr..', '...rrrr...', '....rr....'], { g: hex('#4a8a22'), r: hex('#e8404a'), k: hex('#1a1a1a') }, 0.05, 3, 5); });
+tile('fire_charge', (p) => { p.transparent(); for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) { const d = Math.hypot(x - 7.5, y - 7.5); if (d < 5.5) p.set(x, y, p.jit(d < 2.5 ? hex('#ffb030') : hex('#3a2a22'), 0.12)); } });
+tile('golden_apple', (p) => { painters.apple(p); for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) if (p.alpha(x, y) && !(x >= 6 && x <= 8 && y <= 4)) { const c = p.get(x, y); const l = (c[0] + c[1] + c[2]) / 3 / 255; p.set(x, y, [255 * Math.min(1, l * 1.6 + 0.2), 200 * Math.min(1, l * 1.5 + 0.15), 60 * l]); } });
 
 // Armor: original silhouettes per piece, coloured by material.
 const ARMOR_SHAPES: Record<string, string[]> = {

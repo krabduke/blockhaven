@@ -38,4 +38,4 @@ export function tileIndex(name: string): number {
 }
 
 /** Tiles multiplied by the biome's grass/foliage colour. */
-export const TINTED = new Set(['grass_top', 'leaves', 'tall_grass', 'spruce_leaves', 'sugar_cane']);
+export const TINTED = new Set(['grass_top', 'leaves', 'tall_grass', 'spruce_leaves', 'sugar_cane', 'sunwood_leaves', 'vine', 'lily_pad']);

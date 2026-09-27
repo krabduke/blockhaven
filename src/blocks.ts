@@ -1,7 +1,8 @@
 // Block registry. Every block is a row in one table; the renderer, physics,
 // lighting, mining and world generation all read from it.
 
-export type RenderShape = 'none' | 'cube' | 'cross' | 'liquid' | 'torch' | 'door' | 'bed' | 'cactus' | 'ladder' | 'slabBottom' | 'stairs' | 'fence' | 'gate' | 'table';
+export type RenderShape = 'none' | 'cube' | 'cross' | 'liquid' | 'torch' | 'door' | 'bed' | 'cactus' | 'ladder' | 'slabBottom' | 'stairs' | 'fence' | 'gate' | 'table'
+  | 'pane' | 'trapdoor' | 'lantern' | 'wire' | 'button' | 'plate' | 'sign' | 'flat' | 'vine' | 'cake' | 'carpet' | 'portal' | 'fire';
 export type Layer = 'opaque' | 'cutout' | 'translucent';
 export type Tool = 'pickaxe' | 'axe' | 'shovel' | 'sword' | null;
 export type SoundKind = 'stone' | 'wood' | 'gravel' | 'grass' | 'sand' | 'glass' | 'wool' | 'snow' | 'none';
@@ -32,6 +33,9 @@ export interface BlockDef {
   needsSupport: boolean;
   fluid: boolean;
   climbable: boolean;
+  flammable: boolean;
+  /** Movement multiplier while inside (cobweb) or standing on (ashsand). 1 = normal. */
+  slow: number;
   /** Tile used for the item icon when it differs from a cube render. */
   icon?: string;
 }
@@ -57,6 +61,8 @@ interface Opts {
   fluid?: boolean;
   climbable?: boolean;
   icon?: string;
+  flammable?: boolean;
+  slow?: number;
 }
 
 function def(id: number, key: string, name: string, o: Opts = {}): void {
@@ -90,6 +96,8 @@ function def(id: number, key: string, name: string, o: Opts = {}): void {
     fluid: o.fluid ?? false,
     climbable: o.climbable ?? false,
     icon: o.icon,
+    flammable: o.flammable ?? (o.sound === 'wood' || o.sound === 'wool' || o.sound === 'grass'),
+    slow: o.slow ?? 1,
   };
   defs[id] = d;
   B[key] = id;
@@ -124,7 +132,7 @@ def(23, 'clay', 'Clay', { hardness: 0.6, tool: 'shovel', sound: 'gravel' });
 def(24, 'crafting_table', 'Crafting Table', { tiles: { top: 'crafting_top', bottom: 'planks', side: 'crafting_side', front: 'crafting_front' }, hardness: 2.5, tool: 'axe', sound: 'wood' });
 def(25, 'furnace', 'Furnace', { tiles: { top: 'furnace_top', side: 'furnace_side', front: 'furnace_front' }, hardness: 3.5, tool: 'pickaxe', harvestTier: 0 });
 def(26, 'furnace_lit', 'Furnace', { tiles: { top: 'furnace_top', side: 'furnace_side', front: 'furnace_front_lit' }, emit: 13, hardness: 3.5, tool: 'pickaxe', harvestTier: 0, drop: () => [B.furnace, 1] });
-def(27, 'torch', 'Torch', { shape: 'torch', layer: 'cutout', solid: false, opaque: false, emit: 14, hardness: 0, sound: 'wood', needsSupport: true, tiles: 'torch' });
+def(27, 'torch', 'Torch', { shape: 'torch', layer: 'cutout', solid: false, opaque: false, emit: 14, hardness: 0, sound: 'wood', needsSupport: true, tiles: 'torch', flammable: false });
 def(28, 'tall_grass', 'Tall Grass', { ...plant, tiles: 'tall_grass', replaceable: true, drop: (r) => r < 0.125 ? [277 /* seeds */, 1] : null });
 def(29, 'poppy', 'Red Flower', { ...plant, tiles: 'poppy' });
 def(30, 'dandelion', 'Yellow Flower', { ...plant, tiles: 'dandelion' });
@@ -167,6 +175,57 @@ def(66, 'enchanting_table', 'Enchanting Table', { shape: 'table', opaque: false,
 def(67, 'stone_brick_stairs', 'Stone Brick Stairs', { shape: 'stairs', opaque: false, lightOpacity: 0, tiles: 'stone_bricks', hardness: 1.5, tool: 'pickaxe', harvestTier: 0 });
 def(68, 'carrots', 'Carrots', { ...plant, tiles: 'carrots_3', drop: 'none' });
 
+// ---- The Emberdeep ----
+def(69, 'portal', 'Ember Gate', { shape: 'portal', layer: 'translucent', solid: false, opaque: false, emit: 11, hardness: -1, drop: 'none', tiles: 'portal', sound: 'glass', flammable: false });
+def(70, 'fire', 'Fire', { shape: 'fire', layer: 'cutout', solid: false, opaque: false, emit: 15, hardness: 0, drop: 'none', replaceable: true, tiles: 'fire', sound: 'none', flammable: false });
+def(71, 'cinderstone', 'Cinderstone', { hardness: 0.4, tool: 'pickaxe', harvestTier: 0 });
+def(72, 'ashsand', 'Ashsand', { hardness: 0.5, tool: 'shovel', sound: 'sand', slow: 0.4 });
+def(73, 'emberquartz_ore', 'Emberquartz Ore', { hardness: 3, tool: 'pickaxe', harvestTier: 0, drop: () => [401, 1] });
+def(74, 'emberquartz_block', 'Block of Emberquartz', { hardness: 0.8, tool: 'pickaxe', harvestTier: 0 });
+def(75, 'cinder_bricks', 'Cinder Bricks', { hardness: 2, tool: 'pickaxe', harvestTier: 0 });
+def(76, 'magma', 'Magma Rock', { emit: 3, hardness: 0.5, tool: 'pickaxe', harvestTier: 0 });
+def(77, 'ember_cap', 'Ember Cap', { ...plant, tiles: 'ember_cap', emit: 6 });
+
+// ---- Villages and trading ----
+def(78, 'amber_ore', 'Amber Ore', { hardness: 3, tool: 'pickaxe', harvestTier: 2, drop: () => [400, 1] });
+def(79, 'amber_block', 'Block of Amber', { hardness: 5, tool: 'pickaxe', harvestTier: 2 });
+def(80, 'dirt_path', 'Dirt Path', { shape: 'slabBottom', opaque: false, lightOpacity: 0, tiles: { top: 'path_top', side: 'path_side', bottom: 'dirt' }, hardness: 0.65, tool: 'shovel', sound: 'gravel', drop: () => [B.dirt, 1] });
+def(81, 'hay_bale', 'Hay Bale', { tiles: { top: 'hay_top', side: 'hay_side' }, hardness: 0.5, sound: 'grass' });
+def(82, 'melon', 'Melon', { tiles: { top: 'melon_top', side: 'melon_side' }, hardness: 1, tool: 'axe', sound: 'wood', drop: (r) => [412, 3 + Math.floor(r * 5)] });
+def(83, 'terracotta', 'Terracotta', { hardness: 1.25, tool: 'pickaxe', harvestTier: 0 });
+def(84, 'wool_red', 'Red Wool', { hardness: 0.8, sound: 'wool' });
+def(85, 'wool_yellow', 'Yellow Wool', { hardness: 0.8, sound: 'wool' });
+def(86, 'wool_green', 'Green Wool', { hardness: 0.8, sound: 'wool' });
+def(87, 'wool_blue', 'Blue Wool', { hardness: 0.8, sound: 'wool' });
+def(88, 'wool_black', 'Black Wool', { hardness: 0.8, sound: 'wool' });
+def(89, 'wool_orange', 'Orange Wool', { hardness: 0.8, sound: 'wool' });
+def(90, 'glass_pane', 'Glass Pane', { shape: 'pane', layer: 'cutout', opaque: false, tiles: 'glass', hardness: 0.3, sound: 'glass', drop: 'none', icon: 'glass' });
+def(91, 'iron_bars', 'Iron Bars', { shape: 'pane', layer: 'cutout', opaque: false, tiles: 'iron_bars', hardness: 5, tool: 'pickaxe', harvestTier: 0, icon: 'iron_bars' });
+def(92, 'trapdoor', 'Oak Trapdoor', { shape: 'trapdoor', layer: 'cutout', opaque: false, tiles: 'trapdoor', hardness: 3, tool: 'axe', sound: 'wood' });
+def(93, 'lantern', 'Lantern', { shape: 'lantern', layer: 'cutout', solid: true, opaque: false, emit: 15, tiles: 'lantern', hardness: 3.5, tool: 'pickaxe', harvestTier: 0, icon: 'lantern_item', needsSupport: true });
+def(94, 'wire', 'Spark Dust', { shape: 'wire', layer: 'cutout', solid: false, opaque: false, hardness: 0, tiles: 'wire', drop: () => [413, 1], needsSupport: true, sound: 'none', icon: 'spark_dust' });
+def(95, 'button', 'Stone Button', { shape: 'button', layer: 'cutout', solid: false, opaque: false, hardness: 0.5, tiles: 'stone', needsSupport: true, icon: 'button_item' });
+def(96, 'pressure_plate', 'Pressure Plate', { shape: 'plate', layer: 'cutout', solid: false, opaque: false, hardness: 0.5, tool: 'pickaxe', tiles: 'stone', needsSupport: true, icon: 'plate_item' });
+def(97, 'sign', 'Sign', { shape: 'sign', layer: 'cutout', solid: false, opaque: false, hardness: 1, tool: 'axe', sound: 'wood', tiles: 'planks', icon: 'sign_item', needsSupport: true });
+def(98, 'lily_pad', 'Lily Pad', { shape: 'flat', layer: 'cutout', solid: true, opaque: false, hardness: 0, tiles: 'lily_pad', sound: 'grass', needsSupport: true });
+def(99, 'vine', 'Vines', { shape: 'vine', layer: 'cutout', solid: false, opaque: false, hardness: 0.2, tiles: 'vine', sound: 'grass', climbable: true, replaceable: true, drop: 'none' });
+def(100, 'cake', 'Cake', { shape: 'cake', layer: 'cutout', opaque: false, hardness: 0.5, tiles: { top: 'cake_top', side: 'cake_side', bottom: 'cake_bottom' }, sound: 'wool', drop: 'none', icon: 'cake_item', needsSupport: true });
+def(101, 'carpet', 'White Carpet', { shape: 'carpet', layer: 'cutout', opaque: false, hardness: 0.1, tiles: 'wool', sound: 'wool', needsSupport: true });
+def(102, 'red_mushroom', 'Red Mushroom', { ...plant, tiles: 'red_mushroom' });
+def(103, 'brown_mushroom', 'Brown Mushroom', { ...plant, tiles: 'brown_mushroom', emit: 1 });
+def(104, 'cobweb', 'Cobweb', { shape: 'cross', layer: 'cutout', solid: false, opaque: false, hardness: 4, tool: 'sword', tiles: 'cobweb', drop: () => [261, 1], slow: 0.25, sound: 'wool' });
+def(105, 'slate', 'Slate', { hardness: 1.5, tool: 'pickaxe', harvestTier: 0 });
+def(106, 'polished_slate', 'Polished Slate', { hardness: 1.5, tool: 'pickaxe', harvestTier: 0 });
+def(107, 'marble', 'Marble', { hardness: 1.5, tool: 'pickaxe', harvestTier: 0 });
+def(108, 'polished_marble', 'Polished Marble', { hardness: 1.5, tool: 'pickaxe', harvestTier: 0 });
+def(109, 'mossy_stone_bricks', 'Mossy Stone Bricks', { hardness: 1.5, tool: 'pickaxe', harvestTier: 0 });
+def(110, 'cracked_stone_bricks', 'Cracked Stone Bricks', { hardness: 1.5, tool: 'pickaxe', harvestTier: 0 });
+def(111, 'spark_ore', 'Sparkstone Ore', { hardness: 3, tool: 'pickaxe', harvestTier: 2, emit: 0, drop: (r) => [413, 4 + Math.floor(r * 2)] });
+def(112, 'blue_flower', 'Blue Flower', { ...plant, tiles: 'blue_flower' });
+def(113, 'sunwood_log', 'Sunwood Log', { tiles: { top: 'sunwood_top', side: 'sunwood_side' }, hardness: 2, tool: 'axe', sound: 'wood' });
+def(114, 'sunwood_leaves', 'Sunwood Leaves', { layer: 'cutout', opaque: false, lightOpacity: 1, hardness: 0.2, sound: 'grass', drop: (r) => r < 0.05 ? [B.sapling, 1] : null });
+def(115, 'bell', 'Village Bell', { shape: 'lantern', layer: 'cutout', opaque: false, hardness: 5, tool: 'pickaxe', tiles: 'bell', icon: 'bell_item', sound: 'stone' });
+
 // Fill gaps so lookups never return undefined.
 for (let i = 0; i < 256; i++) if (!defs[i]) defs[i] = { ...defs[0], id: i, key: 'unknown_' + i };
 
@@ -187,7 +246,7 @@ for (const d of defs) {
 }
 
 export function isLeaves(id: number): boolean {
-  return id === B.leaves || id === B.birch_leaves || id === B.spruce_leaves;
+  return id === B.leaves || id === B.birch_leaves || id === B.spruce_leaves || id === B.sunwood_leaves;
 }
 export function isStairs(id: number): boolean {
   return BLOCKS[id].shape === 'stairs';
@@ -195,8 +254,9 @@ export function isStairs(id: number): boolean {
 /** Fences and walls connect to these. */
 export function connectsFence(id: number): boolean {
   const d = BLOCKS[id];
-  return d.shape === 'fence' || d.shape === 'gate' || (d.shape === 'cube' && d.solid && d.layer !== 'cutout');
+  return d.shape === 'fence' || d.shape === 'gate' || d.shape === 'pane' || (d.shape === 'cube' && d.solid && d.layer !== 'cutout');
 }
 export function isLog(id: number): boolean {
-  return id === B.log || id === B.birch_log || id === B.spruce_log;
+  return id === B.log || id === B.birch_log || id === B.spruce_log || id === B.sunwood_log;
 }
+export const WOOL_COLORS = ['wool', 'wool_red', 'wool_orange', 'wool_yellow', 'wool_green', 'wool_blue', 'wool_black'] as const;

@@ -12,10 +12,12 @@ import { CH, CS, Chunk, SUBS, VOLUME, chunkKey, idx } from './chunk';
 import { LightEngine, type ChunkSource } from './light';
 import { P, pidx, type SubMesh } from './mesher';
 import type { WorkerPool } from './pool';
+import type { Spawn } from './worldgen';
 
 export interface ChestBE { kind: 'chest'; inv: Inventory }
 export interface FurnaceBE { kind: 'furnace'; inv: Inventory; burn: number; burnMax: number; cook: number }
-export type BlockEntity = ChestBE | FurnaceBE;
+export interface SignBE { kind: 'sign'; lines: string[] }
+export type BlockEntity = ChestBE | FurnaceBE | SignBE;
 
 const HORIZ: [number, number][] = [[1, 0], [-1, 0], [0, 1], [0, -1]];
 
@@ -60,6 +62,13 @@ export class World implements ChunkSource {
   onChunkUnload: (cx: number, cz: number) => void = () => {};
   onDrop: (x: number, y: number, z: number, stack: ItemStack) => void = () => {};
   onEvent: (kind: 'fizz' | 'break', x: number, y: number, z: number, id: number) => void = () => {};
+  /** Creatures a freshly generated chunk wants spawned (villagers, guardians). */
+  onSpawns: (spawns: Spawn[]) => void = () => {};
+  /** TNT set off by power. */
+  onIgnite: (x: number, y: number, z: number) => void = () => {};
+  /** Chunks whose generated creatures have already been spawned. */
+  spawnedChunks = new Set<string>();
+  dimension: 'overworld' | 'ember' = 'overworld';
 
   private genPending = new Set<string>();
   private meshSeq = new Map<string, number>();
@@ -124,6 +133,9 @@ export class World implements ChunkSource {
     this.markDirty(x, y, z);
   }
 
+  /** While true, setBlock skips neighbour reactions (used to place multi-block structures in one go). */
+  private quiet = false;
+
   /** Place or remove a block with all side effects. */
   setBlock(x: number, y: number, z: number, id: number, meta = 0): boolean {
     if (y < 0 || y >= CH) return false;
@@ -139,14 +151,15 @@ export class World implements ChunkSource {
     if (id === B.spawner) this.spawners.add(`${x},${y},${z}`);
     if (old !== id) {
       const key = `${x},${y},${z}`;
-      if (this.blockEntities.has(key) && id !== B.furnace && id !== B.furnace_lit && id !== B.chest) {
+      if (this.blockEntities.has(key) && id !== B.furnace && id !== B.furnace_lit && id !== B.chest && id !== B.sign) {
         const be = this.blockEntities.get(key)!;
-        for (const s of be.inv.slots) if (s) this.onDrop(x + 0.5, y + 0.5, z + 0.5, s);
+        if (be.kind !== 'sign') for (const s of be.inv.slots) if (s) this.onDrop(x + 0.5, y + 0.5, z + 0.5, s);
         this.blockEntities.delete(key);
       }
       if (LIGHT_OPACITY[old] !== LIGHT_OPACITY[id] || EMIT[old] !== EMIT[id]) this.light.update(x, y, z);
     }
     this.markDirty(x, y, z);
+    if (this.quiet) return true;
     this.schedule(x, y, z, 1);
     for (const [dx, dy, dz] of DIRS6) this.neighborChanged(x + dx, y + dy, z + dz);
     return true;
@@ -204,9 +217,248 @@ export class World implements ChunkSource {
         return SOLID[below] === 1 && BLOCKS[below].shape === 'cube' && this.getBlock(x, y + 1, z) === B.door;
       case 'bed':
         return SOLID[below] === 1;
+      case 'lantern':
+        return meta & 1 ? SOLID[this.getBlock(x, y + 1, z)] === 1 || this.getBlock(x, y + 1, z) === B.fence : SOLID[below] === 1;
+      case 'wire':
+      case 'plate':
+      case 'cake':
+      case 'carpet':
+        return SOLID[below] === 1 && below !== B.lily_pad;
+      case 'button': {
+        const off = [[0, -1, 0], [0, 0, -1], [0, 0, 1], [-1, 0, 0], [1, 0, 0]][meta & 7] ?? [0, -1, 0];
+        return SOLID[this.getBlock(x + off[0], y + off[1], z + off[2])] === 1;
+      }
+      case 'sign': {
+        if (!(meta & 4)) return SOLID[below] === 1;
+        const off = [[0, 0, -1], [1, 0, 0], [0, 0, 1], [-1, 0, 0]][meta & 3];
+        return SOLID[this.getBlock(x + off[0], y, z + off[2])] === 1;
+      }
+      case 'flat':
+        return below === B.water;
       default:
         return true;
     }
+  }
+
+  // ---------- Power (spark dust wiring) ----------
+  /** Strength a block emits into its neighbours (levers, buttons, plates). */
+  private sourcePower(x: number, y: number, z: number): number {
+    const id = this.getBlock(x, y, z);
+    if (id === B.lever || id === B.button) return this.getMeta(x, y, z) & 8 ? 15 : 0;
+    if (id === B.pressure_plate) return this.getMeta(x, y, z) & 1 ? 15 : 0;
+    return 0;
+  }
+
+  /** Is the block at (x,y,z) receiving power from a source, a solid block a source is attached to, or live wire? */
+  isPowered(x: number, y: number, z: number): boolean {
+    for (const [dx, dy, dz] of DIRS6) {
+      const nx = x + dx, ny = y + dy, nz = z + dz;
+      if (this.sourcePower(nx, ny, nz) > 0) return true;
+      const nid = this.getBlock(nx, ny, nz);
+      if (nid === B.wire && (this.getMeta(nx, ny, nz) & 15) > 0) return true;
+      // Power passes through a solid block from a lever/button attached to it or a plate on top.
+      if (SOLID[nid] && BLOCKS[nid].shape === 'cube') {
+        for (const [ex, ey, ez] of DIRS6) {
+          const sx = nx + ex, sy = ny + ey, sz = nz + ez;
+          if (sx === x && sy === y && sz === z) continue;
+          const sid = this.getBlock(sx, sy, sz);
+          if (sid === B.lever || sid === B.button) {
+            const m = this.getMeta(sx, sy, sz);
+            const off = [[0, -1, 0], [0, 0, -1], [0, 0, 1], [-1, 0, 0], [1, 0, 0]][m & 7] ?? [0, -1, 0];
+            if ((m & 8) && sx + off[0] === nx && sy + off[1] === ny && sz + off[2] === nz) return true;
+          }
+          if (sid === B.pressure_plate && ey === 1 && (this.getMeta(sx, sy, sz) & 1)) return true;
+        }
+      }
+    }
+    return false;
+  }
+
+  /** Recompute wire networks and consumers around a changed position. */
+  updatePower(x: number, y: number, z: number): void {
+    // 1. Collect connected wire near the change.
+    const wires = new Map<string, [number, number, number]>();
+    const queue: [number, number, number][] = [];
+    const consider = (a: number, b: number, c: number) => {
+      const k = `${a},${b},${c}`;
+      if (!wires.has(k) && this.getBlock(a, b, c) === B.wire) { wires.set(k, [a, b, c]); queue.push([a, b, c]); }
+    };
+    for (let dy = -2; dy <= 2; dy++) for (const [dx, , dz] of [[0, 0, 0], ...DIRS6]) consider(x + dx, y + dy, z + dz);
+    while (queue.length && wires.size < 4096) {
+      const [a, b, c] = queue.pop()!;
+      for (const [dx, dz] of HORIZ) for (const dy of [-1, 0, 1]) consider(a + dx, b + dy, c + dz);
+    }
+    // 2. Flood power levels from sources, losing one per wire.
+    const level = new Map<string, number>();
+    const frontier: [string, number][] = [];
+    for (const [k, [a, b, c]] of wires) {
+      let s = 0;
+      for (const [dx, dy, dz] of DIRS6) s = Math.max(s, this.sourcePower(a + dx, b + dy, c + dz));
+      // A source attached to the block under the wire powers it too.
+      if (this.isPoweredBlockBelow(a, b, c)) s = 15;
+      if (s > 0) { level.set(k, s); frontier.push([k, s]); }
+    }
+    while (frontier.length) {
+      frontier.sort((p, q) => q[1] - p[1]);
+      const [k, s] = frontier.shift()!;
+      if ((level.get(k) ?? 0) > s || s <= 1) continue;
+      const [a, b, c] = wires.get(k)!;
+      for (const [dx, dz] of HORIZ) for (const dy of [-1, 0, 1]) {
+        const nk = `${a + dx},${b + dy},${c + dz}`;
+        if (!wires.has(nk)) continue;
+        if ((level.get(nk) ?? 0) < s - 1) { level.set(nk, s - 1); frontier.push([nk, s - 1]); }
+      }
+    }
+    const touched = new Set<string>();
+    for (const [k, [a, b, c]] of wires) {
+      const want = level.get(k) ?? 0;
+      if ((this.getMeta(a, b, c) & 15) !== want) this.setMetaQuiet(a, b, c, want);
+      for (const [dx, dy, dz] of DIRS6) touched.add(`${a + dx},${b + dy},${c + dz}`);
+    }
+    for (const [dx, dy, dz] of [[0, 0, 0], ...DIRS6]) {
+      touched.add(`${x + dx},${y + dy},${z + dz}`);
+      for (const [ex, ey, ez] of DIRS6) touched.add(`${x + dx + ex},${y + dy + ey},${z + dz + ez}`);
+    }
+    // 3. Consumers react to their new power state.
+    for (const k of touched) {
+      const [a, b, c] = k.split(',').map(Number);
+      const id = this.getBlock(a, b, c);
+      if (id === B.lamp || id === B.lamp_on) {
+        const want = this.isPowered(a, b, c) ? B.lamp_on : B.lamp;
+        if (want !== id) this.setBlock(a, b, c, want);
+      } else if (id === B.tnt && this.isPowered(a, b, c)) {
+        this.setBlock(a, b, c, 0);
+        this.onIgnite(a, b, c);
+      } else if (id === B.door || id === B.trapdoor || id === B.fence_gate) {
+        const m = this.getMeta(a, b, c);
+        if (id === B.door && (m & 8)) continue; // the bottom half decides
+        const powered = this.isPowered(a, b, c) || (id === B.door && this.isPowered(a, b + 1, c));
+        const was = (m & 16) !== 0;
+        if (powered === was) continue;
+        const nm = (m & ~(4 | 16)) | (powered ? 4 | 16 : 0);
+        this.setMetaQuiet(a, b, c, nm);
+        if (id === B.door && this.getBlock(a, b + 1, c) === B.door) this.setMetaQuiet(a, b + 1, c, (this.getMeta(a, b + 1, c) & ~4) | (powered ? 4 : 0));
+      }
+    }
+  }
+
+  private isPoweredBlockBelow(a: number, b: number, c: number): boolean {
+    const below = this.getBlock(a, b - 1, c);
+    if (!SOLID[below]) return false;
+    for (const [dx, dy, dz] of DIRS6) {
+      const sx = a + dx, sy = b - 1 + dy, sz = c + dz;
+      const sid = this.getBlock(sx, sy, sz);
+      if (sid !== B.lever && sid !== B.button) continue;
+      const m = this.getMeta(sx, sy, sz);
+      const off = [[0, -1, 0], [0, 0, -1], [0, 0, 1], [-1, 0, 0], [1, 0, 0]][m & 7] ?? [0, -1, 0];
+      if ((m & 8) && sx + off[0] === a && sy + off[1] === b - 1 && sz + off[2] === c) return true;
+    }
+    return false;
+  }
+
+  /** Change meta without triggering neighbour updates (used by the power system). */
+  private setMetaQuiet(x: number, y: number, z: number, m: number): void {
+    const c = this.getChunk(x >> 4, z >> 4);
+    if (!c || y < 0 || y >= CH) return;
+    c.meta[idx(x & 15, y, z & 15)] = m;
+    c.modified = true;
+    this.markDirty(x, y, z);
+  }
+
+  /** Press a button: it pops back out after a second. */
+  pressButton(x: number, y: number, z: number): void {
+    const m = this.getMeta(x, y, z);
+    if (m & 8) return;
+    this.setMetaQuiet(x, y, z, m | 8);
+    this.updatePower(x, y, z);
+    this.schedule(x, y, z, 20);
+  }
+
+  setPlate(x: number, y: number, z: number, pressed: boolean): void {
+    if (this.getBlock(x, y, z) !== B.pressure_plate) return;
+    const m = this.getMeta(x, y, z);
+    if (((m & 1) !== 0) === pressed) return;
+    this.setMetaQuiet(x, y, z, pressed ? 1 : 0);
+    this.updatePower(x, y, z);
+  }
+
+  toggleLever(x: number, y: number, z: number): void {
+    this.setMetaQuiet(x, y, z, this.getMeta(x, y, z) ^ 8);
+    this.updatePower(x, y, z);
+  }
+
+  // ---------- Portals ----------
+  /** Try to fill an obsidian frame around (x, y, z) with an Ember Gate. */
+  tryLightPortal(x: number, y: number, z: number): boolean {
+    for (const axis of [0, 1]) {
+      const [ax, az] = axis === 0 ? [1, 0] : [0, 1];
+      // Walk down to the frame bottom and left to the frame side.
+      let by = y;
+      while (by > y - 22 && this.getBlock(x, by - 1, z) !== B.obsidian) { if (!this.portalAir(x, by - 1, z)) break; by--; }
+      if (this.getBlock(x, by - 1, z) !== B.obsidian) continue;
+      let lx = x, lz = z;
+      while (Math.abs(lx - x) + Math.abs(lz - z) < 22 && this.getBlock(lx - ax, by, lz - az) !== B.obsidian) { if (!this.portalAir(lx - ax, by, lz - az)) break; lx -= ax; lz -= az; }
+      if (this.getBlock(lx - ax, by, lz - az) !== B.obsidian) continue;
+      let width = 0;
+      while (width < 22 && this.portalAir(lx + ax * width, by, lz + az * width)) width++;
+      if (width < 2 || width > 21 || this.getBlock(lx + ax * width, by, lz + az * width) !== B.obsidian) continue;
+      let height = 0;
+      while (height < 22 && this.portalAir(lx, by + height, lz)) height++;
+      if (height < 3 || height > 21) continue;
+      let ok = true;
+      for (let u = 0; u < width && ok; u++) {
+        if (this.getBlock(lx + ax * u, by - 1, lz + az * u) !== B.obsidian) ok = false;
+        if (this.getBlock(lx + ax * u, by + height, lz + az * u) !== B.obsidian) ok = false;
+        for (let v = 0; v < height && ok; v++) if (!this.portalAir(lx + ax * u, by + v, lz + az * u)) ok = false;
+      }
+      for (let v = 0; v < height && ok; v++) {
+        if (this.getBlock(lx - ax, by + v, lz - az) !== B.obsidian) ok = false;
+        if (this.getBlock(lx + ax * width, by + v, lz + az * width) !== B.obsidian) ok = false;
+      }
+      if (!ok) continue;
+      this.quiet = true;
+      for (let u = 0; u < width; u++) for (let v = 0; v < height; v++) this.setBlock(lx + ax * u, by + v, lz + az * u, B.portal, axis);
+      this.quiet = false;
+      return true;
+    }
+    return false;
+  }
+
+  private portalAir(x: number, y: number, z: number): boolean {
+    const b = this.getBlock(x, y, z);
+    return b === 0 || b === B.fire;
+  }
+
+  /** Nearest Ember Gate block within `r` blocks horizontally, among loaded chunks. */
+  findPortal(x: number, y: number, z: number, r: number): [number, number, number] | null {
+    let best: [number, number, number] | null = null, bd = Infinity;
+    for (const c of this.chunks.values()) {
+      const cx0 = c.cx * 16, cz0 = c.cz * 16;
+      if (cx0 + 16 < x - r || cx0 > x + r || cz0 + 16 < z - r || cz0 > z + r) continue;
+      for (let i = 0; i < VOLUME; i++) {
+        if (c.blocks[i] !== B.portal) continue;
+        const px = cx0 + (i & 15), py = i >> 8, pz = cz0 + ((i >> 4) & 15);
+        if (this.getBlock(px, py - 1, pz) === B.portal) continue; // bottom row only
+        const d = Math.hypot(px - x, (py - y) * 0.5, pz - z);
+        if (d < bd && Math.abs(px - x) <= r && Math.abs(pz - z) <= r) { bd = d; best = [px, py, pz]; }
+      }
+    }
+    return best;
+  }
+
+  /** Build a fresh gate (with a small platform) at the given spot. */
+  buildPortal(x: number, y: number, z: number): void {
+    for (let u = -1; u <= 2; u++) for (let v = -1; v <= 3; v++) {
+      const edge = u === -1 || u === 2 || v === -1 || v === 3;
+      this.setBlock(x + u, y + v, z, edge ? B.obsidian : 0);
+    }
+    for (let u = -1; u <= 2; u++) for (const dz of [-1, 1]) {
+      if (!SOLID[this.getBlock(x + u, y - 1, z + dz)]) this.setBlock(x + u, y - 1, z + dz, B.obsidian);
+      for (let v = 0; v <= 2; v++) this.setBlock(x + u, y + v, z + dz, 0);
+    }
+    this.quiet = true;
+    for (let u = 0; u <= 1; u++) for (let v = 0; v <= 2; v++) this.setBlock(x + u, y + v, z, B.portal, 0);
+    this.quiet = false;
   }
 
   /** Break a block as if mined, dropping what it would drop. */
@@ -258,6 +510,19 @@ export class World implements ChunkSource {
     }
     if (d.fluid) this.schedule(x, y, z, id === B.lava ? 30 : 5);
     if (id === B.sand || id === B.gravel) this.schedule(x, y, z, 2);
+    if (id === B.portal && !this.portalIntact(x, y, z)) { this.setBlock(x, y, z, 0); return; }
+    if (id === B.fire) this.schedule(x, y, z, 30 + Math.floor(this.rand() * 10));
+    if (id === B.wire || id === B.lamp || id === B.lamp_on || id === B.door || id === B.trapdoor || id === B.tnt || id === B.fence_gate) this.schedule(x, y, z, 1);
+  }
+
+  private portalIntact(x: number, y: number, z: number): boolean {
+    const axis = this.getMeta(x, y, z) & 1;
+    const [ax, az] = axis === 0 ? [1, 0] : [0, 1];
+    for (const [dx, dy, dz] of [[ax, 0, az], [-ax, 0, -az], [0, 1, 0], [0, -1, 0]]) {
+      const b = this.getBlock(x + dx, y + dy, z + dz);
+      if (b !== B.portal && b !== B.obsidian) return false;
+    }
+    return true;
   }
 
   schedule(x: number, y: number, z: number, delay: number): void {
@@ -269,6 +534,18 @@ export class World implements ChunkSource {
 
   private scheduledTick(x: number, y: number, z: number): void {
     const id = this.getBlock(x, y, z);
+    if (id === B.button && (this.getMeta(x, y, z) & 8)) {
+      this.setMetaQuiet(x, y, z, this.getMeta(x, y, z) & ~8);
+      this.updatePower(x, y, z);
+      return;
+    }
+    if (id === B.fire) { this.fireTick(x, y, z); return; }
+    if (id === B.wire || id === B.lamp || id === B.lamp_on || id === B.door || id === B.trapdoor || id === B.tnt || id === B.fence_gate) { this.updatePower(x, y, z); return; }
+    if (id === B.water && this.dimension === 'ember') { this.setBlock(x, y, z, 0); this.onEvent('fizz', x, y, z, id); return; }
+    if (id === 0) {
+      // A block was removed: wires next to it may lose power.
+      for (const [dx, dy, dz] of DIRS6) if (this.getBlock(x + dx, y + dy, z + dz) === B.wire) { this.updatePower(x, y, z); break; }
+    }
     if (id === B.water || id === B.lava) this.fluidTick(x, y, z, id);
     else if (id === B.sand || id === B.gravel) {
       const below = this.getBlock(x, y - 1, z);
@@ -352,6 +629,32 @@ export class World implements ChunkSource {
     }
   }
 
+  // ---------- Fire ----------
+  private fireTick(x: number, y: number, z: number): void {
+    const below = this.getBlock(x, y - 1, z);
+    const eternal = below === B.cinderstone || below === B.magma;
+    const age = this.getMeta(x, y, z);
+    const rainedOn = this.weather !== 'clear' && this.dimension === 'overworld' && this.getSky(x, y, z) >= 15;
+    const fuel = DIRS6.some(([dx, dy, dz]) => BLOCKS[this.getBlock(x + dx, y + dy, z + dz)].flammable);
+    if (!eternal && (rainedOn || (!fuel && !SOLID[below]) || (age > 6 && this.rand() < 0.3) || age > 15)) { this.setBlock(x, y, z, 0); return; }
+    if (!eternal) this.setMetaQuiet(x, y, z, Math.min(15, age + 1 + Math.floor(this.rand() * 2)));
+    // Burn and spread into flammable neighbours.
+    for (const [dx, dy, dz] of DIRS6) {
+      const nx = x + dx, ny = y + dy, nz = z + dz;
+      const nid = this.getBlock(nx, ny, nz);
+      if (BLOCKS[nid].flammable && this.rand() < 0.3) {
+        if (nid === B.tnt) { this.setBlock(nx, ny, nz, 0); this.onIgnite(nx, ny, nz); continue; }
+        this.setBlock(nx, ny, nz, this.rand() < 0.5 ? B.fire : 0);
+      }
+    }
+    for (let k = 0; k < 2; k++) {
+      const nx = x + Math.floor(this.rand() * 3) - 1, ny = y + Math.floor(this.rand() * 4) - 1, nz = z + Math.floor(this.rand() * 3) - 1;
+      if (this.getBlock(nx, ny, nz) !== 0) continue;
+      if (DIRS6.some(([dx, dy, dz]) => BLOCKS[this.getBlock(nx + dx, ny + dy, nz + dz)].flammable) && this.rand() < 0.3) this.setBlock(nx, ny, nz, B.fire);
+    }
+    this.schedule(x, y, z, 20 + Math.floor(this.rand() * 10));
+  }
+
   // ---------- Block entities ----------
   getBlockEntity(x: number, y: number, z: number): BlockEntity | undefined {
     const key = `${x},${y},${z}`;
@@ -367,6 +670,7 @@ export class World implements ChunkSource {
         }
       }
       else if (id === B.furnace || id === B.furnace_lit) be = { kind: 'furnace', inv: new Inventory(3), burn: 0, burnMax: 0, cook: 0 };
+      else if (id === B.sign) be = { kind: 'sign', lines: ['', '', '', ''] };
       if (be) this.blockEntities.set(key, be);
     }
     return be;
@@ -603,6 +907,8 @@ export class World implements ChunkSource {
     for (let i = 0; i < VOLUME; i++) if (res.blocks[i] === B.spawner) this.spawners.add(`${cx * 16 + (i & 15)},${i >> 8},${cz * 16 + ((i >> 4) & 15)}`);
     // Resume fluids and falling blocks that were mid-flow when saved.
     if (saved) this.rescanPending(chunk);
+    if (res.spawns?.length && !this.spawnedChunks.has(key)) this.onSpawns(res.spawns);
+    this.spawnedChunks.add(key);
   }
 
   private rescanPending(c: Chunk): void {
@@ -732,14 +1038,15 @@ export class World implements ChunkSource {
   serializeBlockEntities(): unknown {
     const out: Record<string, unknown> = {};
     for (const [k, be] of this.blockEntities) {
-      out[k] = be.kind === 'chest' ? { kind: 'chest', slots: be.inv.toJSON() } : { kind: 'furnace', slots: be.inv.toJSON(), burn: be.burn, burnMax: be.burnMax, cook: be.cook };
+      out[k] = be.kind === 'sign' ? { kind: 'sign', lines: be.lines } : be.kind === 'chest' ? { kind: 'chest', slots: be.inv.toJSON() } : { kind: 'furnace', slots: be.inv.toJSON(), burn: be.burn, burnMax: be.burnMax, cook: be.cook };
     }
     return out;
   }
 
   loadBlockEntities(data: unknown): void {
     if (!data || typeof data !== 'object') return;
-    for (const [k, v] of Object.entries(data as Record<string, { kind: string; slots: Slot[]; burn?: number; burnMax?: number; cook?: number }>)) {
+    for (const [k, v] of Object.entries(data as Record<string, { kind: string; slots: Slot[]; burn?: number; burnMax?: number; cook?: number; lines?: string[] }>)) {
+      if (v.kind === 'sign') { this.blockEntities.set(k, { kind: 'sign', lines: (v.lines ?? []).slice(0, 4).map(String) }); continue; }
       if (v.kind === 'chest') {
         const inv = new Inventory(27); inv.load(v.slots);
         this.blockEntities.set(k, { kind: 'chest', inv });

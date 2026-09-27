@@ -1,3 +1,4 @@
+import * as THREE from 'three';
 // Ties everything together: the main loop, player control, mining and
 // placing, interactions, commands, saving, and the title screen flyover.
 
@@ -17,6 +18,7 @@ import { Menus, loadSettings, type Settings } from './ui/menus';
 import { SEA_LEVEL } from './world/chunk';
 import { WorkerPool } from './world/pool';
 import { BIOME, BIOME_NAMES, WorldGen } from './world/worldgen';
+import { nearestVillage } from './world/villages';
 import { World } from './world/world';
 
 const TICK = 1 / 20;
@@ -51,9 +53,31 @@ export const ACHIEVEMENTS: Record<string, [string, string]> = {
   enchant: ['Enchanter', 'Enchant an item'],
   bread: ['Bake bread', 'Turn wheat into bread'],
   armor: ['Suit up', 'Wear a piece of iron armor'],
+  gate: ['Into the fire', 'Light an Ember Gate'],
+  ember: ['Down below', 'Enter the Emberdeep'],
+  trade: ['Fair deal', 'Trade with a villager'],
 };
 
 type Mode = 'title' | 'loading' | 'playing';
+export type Dimension = 'overworld' | 'ember';
+
+interface DimState { blockEntities?: unknown; entities?: unknown; spawned?: string[] }
+type SaveMeta = WorldMeta & {
+  entities?: unknown;
+  weather?: World['weather'];
+  weatherTimer?: number;
+  dimension?: Dimension;
+  dims?: Partial<Record<Dimension, DimState>>;
+};
+
+function dimState(meta: WorldMeta, dim: Dimension): DimState {
+  const m = meta as SaveMeta;
+  const s = m.dims?.[dim];
+  if (s) return s;
+  // Saves from before dimensions existed.
+  if (dim === 'overworld') return { blockEntities: m.blockEntities, entities: m.entities };
+  return {};
+}
 
 export class Game {
   renderer: Renderer;
@@ -67,6 +91,7 @@ export class Game {
   entities: EntityManager | null = null;
   player = new Player(0.5, 90, 0.5);
   meta: WorldMeta | null = null;
+  dimension: Dimension = 'overworld';
 
   private keys = new Set<string>();
   private mouse = [false, false, false];
@@ -156,6 +181,8 @@ export class Game {
   // ---------- Setup ----------
   private applySettings(s: Settings): void {
     this.renderer.renderDistance = s.renderDistance;
+    this.renderer.fancy = s.fancy;
+    this.renderer.shadows = s.shadows;
     this.renderer.uniforms.uGamma.value = s.brightness;
     setVolume(s.volume);
   }
@@ -164,12 +191,18 @@ export class Game {
     this.renderer.resize(window.innerWidth, window.innerHeight);
   }
 
-  private startWorld(meta: WorldMeta): Promise<void> {
+  private startWorld(meta: WorldMeta, dim: Dimension = 'overworld'): Promise<void> {
     this.disposeWorld();
     this.meta = meta;
-    this.pool = new WorkerPool(meta.seed);
-    return (meta.id === '__title' ? Promise.resolve(new Set<string>()) : savedChunkKeys(meta.id).catch(() => new Set<string>())).then((keys) => {
-      const world = new World(meta.id, meta.seed, this.pool!, keys);
+    this.dimension = dim;
+    this.pool = new WorkerPool(meta.seed, dim);
+    this.renderer.dimension = dim;
+    const storeId = dim === 'ember' ? meta.id + '~ember' : meta.id;
+    const state = dimState(meta, dim);
+    return (meta.id === '__title' ? Promise.resolve(new Set<string>()) : savedChunkKeys(storeId).catch(() => new Set<string>())).then((keys) => {
+      const world = new World(storeId, meta.seed, this.pool!, keys);
+      world.dimension = dim;
+      world.spawnedChunks = new Set(state.spawned ?? []);
       world.time = meta.time;
       world.onSubMesh = (cx, sy, cz, m) => this.renderer.setSubMesh(cx, sy, cz, m);
       world.onChunkUnload = (cx, cz) => this.renderer.removeChunk(cx, cz);
@@ -183,13 +216,27 @@ export class Game {
           sfx.breakBlock(BLOCKS[id].sound, sp);
         }
       };
-      world.loadBlockEntities(meta.blockEntities);
+      world.loadBlockEntities(state.blockEntities);
       this.world = world;
-      this.entities = new EntityManager(world, this.renderer, this.player);
+      const ents = new EntityManager(world, this.renderer, this.player);
+      this.entities = ents;
+      ents.load(state.entities);
+      world.onSpawns = (spawns) => {
+        for (const s of spawns) if (MOBS[s.kind]) ents.spawnMob(s.kind, s.x, s.y, s.z, s.profession);
+      };
+      world.onIgnite = (x, y, z) => { ents.add(new TntEntity(x, y, z, this.renderer)); };
+      ents.onMobKilled = (mob, byPlayer) => { if (byPlayer && mob.spec.hostile) this.player.achieve('hunter'); };
+      ents.onBred = () => this.player.achieve('rancher');
+      ents.onProjectileHit = (proj, mob) => {
+        const pp = this.player.body.pos;
+        if (proj.kind === 'arrow' && Math.hypot(mob.body.pos[0] - pp[0], mob.body.pos[2] - pp[2]) >= 20) this.player.achieve('archer');
+      };
     });
   }
 
   private disposeWorld(): void {
+    for (const v of this.signMeshes?.values() ?? []) v.mesh.removeFromParent();
+    this.signMeshes?.clear();
     this.entities?.clear();
     this.entities = null;
     this.world?.dispose();
@@ -224,7 +271,7 @@ export class Game {
     this.menus.setLoading('Building terrain…');
     this.menus.show('loading');
     this.loadStart = performance.now();
-    await this.startWorld(meta);
+    await this.startWorld(meta, (meta as SaveMeta).dimension ?? 'overworld');
     const p = new Player(0.5, 100, 0.5);
     p.creative = meta.gamemode === 'creative';
     if (meta.player) p.load(meta.player);
@@ -242,16 +289,70 @@ export class Game {
     this.player = p;
     this.containers = this.rebuildContainers();
     this.entities!.player = p;
-    this.entities!.load((meta as WorldMeta & { entities?: unknown }).entities);
-    const wm = meta as WorldMeta & { weather?: World['weather']; weatherTimer?: number };
+    const wm = meta as SaveMeta;
     if (wm.weather) { this.world!.weather = wm.weather; this.world!.weatherTimer = wm.weatherTimer ?? 12000; }
-    const ents = this.entities!;
-    ents.onMobKilled = (mob, byPlayer) => { if (byPlayer && mob.spec.hostile) p.achieve('hunter'); };
-    ents.onBred = () => p.achieve('rancher');
-    ents.onProjectileHit = (proj, mob) => {
-      if (proj.kind === 'arrow' && Math.hypot(mob.body.pos[0] - p.body.pos[0], mob.body.pos[2] - p.body.pos[2]) >= 20) p.achieve('archer');
-    };
     this.prevPos = [...p.body.pos];
+  }
+
+  /** Step through an Ember Gate into the other dimension. */
+  async travel(to: Dimension): Promise<void> {
+    if (!this.meta || !this.world) return;
+    const p = this.player;
+    await this.save();
+    const scale = to === 'ember' ? 1 / 8 : 8;
+    const tx = Math.floor(p.body.pos[0] * scale), tz = Math.floor(p.body.pos[2] * scale);
+    const weather = this.world.weather, weatherTimer = this.world.weatherTimer;
+    this.mode = 'loading';
+    this.containers.close();
+    document.exitPointerLock?.();
+    this.menus.setLoading(to === 'ember' ? 'Descending into the Emberdeep…' : 'Returning to the surface…');
+    this.menus.show('loading');
+    this.loadStart = performance.now();
+    await this.startWorld(this.meta, to);
+    this.world!.weather = weather; this.world!.weatherTimer = weatherTimer;
+    this.entities!.player = p;
+    p.body.pos = [tx + 0.5, to === 'ember' ? 64 : 90, tz + 0.5];
+    p.body.vel = [0, 0, 0];
+    p.portalArrival = true;
+    p.portalCooldown = 200;
+    this.prevPos = [...p.body.pos];
+    if (to === 'ember') p.achieve('ember');
+  }
+
+  /** Put the player at a matching gate, building one if none is near. */
+  private arriveThroughPortal(): void {
+    const w = this.world!, p = this.player;
+    const [x, , z] = p.body.pos.map(Math.floor);
+    const found = w.findPortal(x, 64, z, w.dimension === 'ember' ? 16 : 96);
+    if (found) {
+      p.body.pos = [found[0] + 0.5, found[1], found[2] + 0.5];
+      return;
+    }
+    // Look for solid ground with room to stand, spiralling out.
+    const ember = w.dimension === 'ember';
+    for (let r = 0; r <= 16; r++) {
+      for (let dz = -r; dz <= r; dz++) for (let dx = -r; dx <= r; dx++) {
+        if (Math.max(Math.abs(dx), Math.abs(dz)) !== r) continue;
+        const cx = x + dx, cz = z + dz;
+        const top = ember ? 118 : w.groundY(cx, cz) + 1;
+        const bottom = ember ? 34 : top - 1;
+        for (let y = top; y >= bottom; y--) {
+          const ground = w.getBlock(cx, y - 1, cz);
+          if (!SOLID[ground] || BLOCKS[ground].fluid) continue;
+          let clear = true;
+          for (let u = -1; u <= 2 && clear; u++) for (let v = 0; v <= 3 && clear; v++) if (w.getBlock(cx + u, y + v, cz) !== 0 && !BLOCKS[w.getBlock(cx + u, y + v, cz)].replaceable) clear = false;
+          if (!clear) continue;
+          w.buildPortal(cx, y, cz);
+          p.body.pos = [cx + 0.5, y, cz + 0.5];
+          return;
+        }
+      }
+    }
+    // Nowhere suitable: carve a pocket and float a platform.
+    const y = ember ? 70 : Math.max(70, w.groundY(x, z));
+    for (let u = -3; u <= 4; u++) for (let v = -1; v <= 4; v++) for (let q = -2; q <= 2; q++) w.setBlock(x + u, y + v, z + q, v === -1 ? B.obsidian : 0);
+    w.buildPortal(x, y, z);
+    p.body.pos = [x + 0.5, y, z + 0.5];
   }
 
   private rebuildContainers(): ContainerScreen {
@@ -274,11 +375,17 @@ export class Game {
       if (s.id === I.bread) p.achieve('bread');
     };
     c.onEnchanted = () => p.achieve('enchant');
+    c.onTraded = () => p.achieve('trade');
     return c;
   }
 
   private finishLoading(): void {
     const p = this.player;
+    if (p.portalArrival && this.world) {
+      p.portalArrival = false;
+      this.arriveThroughPortal();
+      this.prevPos = [...p.body.pos];
+    }
     if (p.needsSurface && this.world) {
       const x = Math.floor(p.body.pos[0]), z = Math.floor(p.body.pos[2]);
       p.body.pos[1] = this.world.groundY(x, z) + 0.01;
@@ -293,16 +400,27 @@ export class Game {
 
   async save(): Promise<void> {
     if (!this.world || !this.meta || this.meta.id === '__title' || this.mode !== 'playing') return;
-    const meta: WorldMeta & { entities?: unknown } = {
-      ...this.meta,
+    const prev = this.meta as SaveMeta;
+    const meta: SaveMeta = {
+      ...prev,
       lastPlayed: Date.now(),
       time: this.world.time,
       player: this.player.serialize(),
-      blockEntities: this.world.serializeBlockEntities(),
-      entities: this.entities?.serialize(),
       weather: this.world.weather,
       weatherTimer: this.world.weatherTimer,
-    } as WorldMeta & { entities?: unknown };
+      dimension: this.dimension,
+      dims: {
+        ...(prev.dims ?? {}),
+        [this.dimension]: {
+          blockEntities: this.world.serializeBlockEntities(),
+          entities: this.entities?.serialize(),
+          spawned: [...this.world.spawnedChunks],
+        },
+      },
+    };
+    // Older saves kept the overworld state at the top level.
+    delete meta.blockEntities;
+    delete (meta as { entities?: unknown }).entities;
     meta.gamemode = this.player.creative ? 'creative' : 'survival';
     this.meta = meta;
     try {
@@ -472,7 +590,7 @@ export class Game {
     const findItem = (name: string) => ITEMS.find((it) => it && (it.key === name || it.name.toLowerCase() === name.replace(/_/g, ' ')));
     switch (cmd) {
       case 'help':
-        this.say('Commands: /gamemode survival|creative, /time set day|night|<ticks>, /weather clear|rain|thunder, /give <item> [count], /xp <n>, /tp <x> <y> <z>, /spawn <mob>, /seed, /kill');
+        this.say('Commands: /gamemode survival|creative, /time set day|night|<ticks>, /weather clear|rain|thunder, /give <item> [count], /xp <n>, /tp <x> <y> <z>, /spawn <mob>, /locate village, /dimension overworld|ember, /seed, /kill');
         break;
       case 'gamemode': case 'gm': {
         const m = parts[1]?.toLowerCase();
@@ -520,6 +638,19 @@ export class Game {
         const v = parts[1]?.toLowerCase();
         if (v === 'clear' || v === 'rain' || v === 'thunder') { w.weather = v; w.weatherTimer = 12000 + Math.floor(Math.random() * 12000); this.say(`Weather set to ${v}`); }
         else this.say('Usage: /weather clear|rain|thunder');
+        break;
+      }
+      case 'locate': {
+        if (parts[1] !== 'village') { this.say('Usage: /locate village'); break; }
+        if (w.dimension !== 'overworld') { this.say('There are no villages down here.'); break; }
+        const v = nearestVillage(new WorldGen(w.seed), p.body.pos[0], p.body.pos[2]);
+        this.say(v ? `Nearest village is at ${v.cx}, ${v.cz} (${Math.round(Math.hypot(v.cx - p.body.pos[0], v.cz - p.body.pos[2]))} blocks away)` : 'No village found nearby.');
+        break;
+      }
+      case 'dimension': {
+        const d = parts[1];
+        if (d === 'ember' || d === 'overworld') { if (d !== w.dimension) this.travel(d); }
+        else this.say('Usage: /dimension overworld|ember');
         break;
       }
       case 'xp': {
@@ -665,6 +796,24 @@ export class Game {
       const res = mobHit.mob.interact(this.entities, held);
       if (res === 'fed') { consume(); this.renderer.swingHand(); return; }
       if (res === 'sheared') { this.damageTool(1); this.renderer.swingHand(); return; }
+      if (res === 'trade') {
+        const v = mobHit.mob;
+        v.yaw = Math.atan2(-(p.body.pos[0] - v.body.pos[0]), -(p.body.pos[2] - v.body.pos[2]));
+        document.exitPointerLock();
+        this.containers.show('trade', { villager: v });
+        sfx.mobSay(v.spec.pitch, { gain: 1, pan: 0 });
+        return;
+      }
+    }
+    if ((def?.use === 'ignite' || def?.use === 'firecharge') && hit && held) {
+      const [x, y, z] = hit.pos;
+      const tx = x + hit.normal[0], ty = y + hit.normal[1], tz = z + hit.normal[2];
+      let did = false;
+      if (hit.id === B.tnt) { w.setBlock(x, y, z, 0); this.entities.add(new TntEntity(x, y, z, this.renderer)); sfx.fuse(spatial(eye[0], eye[1], eye[2], p.yaw, x, y, z)); did = true; }
+      else if (hit.id === B.obsidian && w.tryLightPortal(tx, ty, tz)) { sfx.fizz(); did = true; p.achieve('gate'); }
+      else if (w.getBlock(tx, ty, tz) === 0 && SOLID[hit.id]) { w.setBlock(tx, ty, tz, B.fire); sfx.fizz({ gain: 0.4, pan: 0 }); did = true; }
+      if (did) { if (def.use === 'ignite') this.damageTool(1); else consume(); this.renderer.swingHand(); }
+      return;
     }
     if (def?.use === 'bow') { this.bowCharge = 1; return; }
     if (def?.use === 'rod') { this.castOrReel(); return; }
@@ -707,19 +856,26 @@ export class Game {
         return;
       }
       if (id === B.bed) { this.sleep(x, y, z); return; }
-      if (id === B.lever) {
-        w.setMeta(x, y, z, w.getMeta(x, y, z) ^ 8);
-        sfx.click();
-        this.updateLamps(x, y, z);
+      if (id === B.lever) { w.toggleLever(x, y, z); sfx.click(); return; }
+      if (id === B.button) { w.pressButton(x, y, z); sfx.click(); return; }
+      if (id === B.bell) { sfx.levelUp(); this.renderer.swingHand(); return; }
+      if (id === B.trapdoor) {
+        const m = w.getMeta(x, y, z);
+        w.setMeta(x, y, z, m ^ 4);
+        sfx.door((m & 4) === 0);
+        this.renderer.swingHand();
         return;
       }
-      if (id === B.tnt && held?.id === I.flint_and_steel) {
-        w.setBlock(x, y, z, 0);
-        this.entities.add(new TntEntity(x, y, z, this.renderer));
-        sfx.fuse(spatial(eye[0], eye[1], eye[2], p.yaw, x, y, z));
-        this.damageTool(1);
+      if (id === B.cake) {
+        if (p.food >= 20 && !p.creative) return;
+        const m = w.getMeta(x, y, z);
+        p.food = Math.min(20, p.food + 2);
+        p.saturation = Math.min(p.food, p.saturation + 0.4);
+        sfx.eat();
+        if (m >= 6) w.setBlock(x, y, z, 0); else w.setMeta(x, y, z, m + 1);
         return;
       }
+      if (id === B.sign) { this.editSign(x, y, z); return; }
     }
 
     if (!held || !def) return;
@@ -750,10 +906,24 @@ export class Game {
       if (held.id >= 358 && held.id <= 361) p.achieve('armor');
       return;
     }
+    if (held.id === B.lily_pad) {
+      const wh = raycast(w, eye, dir, this.reach(), true);
+      if (wh && wh.id === B.water && w.getBlock(wh.pos[0], wh.pos[1] + 1, wh.pos[2]) === 0) {
+        w.setBlock(wh.pos[0], wh.pos[1] + 1, wh.pos[2], B.lily_pad);
+        sfx.place('grass'); consume(); this.renderer.swingHand();
+      }
+      return;
+    }
     if (!hit) return;
     if (held.id === I.water_bucket || held.id === I.lava_bucket) {
       const t = this.placeTarget(hit);
       if (!t) return;
+      if (held.id === I.water_bucket && w.dimension === 'ember') {
+        sfx.fizz();
+        for (let i = 0; i < 8; i++) this.entities.puff(t[0] + 0.5, t[1] + 0.5, t[2] + 0.5);
+        if (!p.creative) p.inv.slots[p.selected] = { id: I.bucket, count: 1 };
+        return;
+      }
       w.setBlock(t[0], t[1], t[2], held.id === I.water_bucket ? B.water : B.lava, 0);
       sfx.splash();
       if (!p.creative) p.inv.slots[p.selected] = { id: I.bucket, count: 1 };
@@ -778,8 +948,22 @@ export class Game {
       if (held.id >= 358 && held.id <= 361) p.achieve('armor');
       return;
     }
+    // Dye recolours white wool.
+    if (def.use === 'dye' && def.dye) {
+      const [x, y, z] = hit.pos;
+      if (hit.id === B.wool || hit.id === B.carpet) { w.setBlock(x, y, z, hit.id === B.carpet ? B.carpet : B[def.dye]); consume(); this.renderer.swingHand(); }
+      return;
+    }
+    // Shovel on grass makes a path.
+    if (def.tool?.kind === 'shovel' && hit.id === B.grass && hit.normal[1] === 1 && w.getBlock(hit.pos[0], hit.pos[1] + 1, hit.pos[2]) === 0) {
+      w.setBlock(hit.pos[0], hit.pos[1], hit.pos[2], B.dirt_path);
+      sfx.place('gravel');
+      this.damageTool(1);
+      this.renderer.swingHand();
+      return;
+    }
     // Hoe: till grass/dirt.
-    if (def.tool?.kind === 'hoe') {
+    if (def.tool?.kind === 'hoe' && !def.use) {
       const [x, y, z] = hit.pos;
       if ((hit.id === B.grass || hit.id === B.dirt) && w.getBlock(x, y + 1, z) === 0 && hit.normal[1] !== -1) {
         w.setBlock(x, y, z, B.farmland);
@@ -834,6 +1018,17 @@ export class Game {
       meta = q | (upper ? 4 : 0);
     } else if (blockId === B.fence_gate) {
       meta = q === 0 || q === 2 ? 0 : 1;
+    } else if (blockId === B.trapdoor) {
+      const upper = n[1] === -1 || (n[1] === 0 && hit.point[1] - Math.floor(hit.point[1]) > 0.5);
+      meta = [2, 3, 0, 1][q] | (upper ? 8 : 0);
+    } else if (blockId === B.lantern) {
+      meta = n[1] === -1 ? 1 : 0;
+    } else if (blockId === B.button) {
+      meta = n[1] === 1 ? 0 : n[2] === 1 ? 1 : n[2] === -1 ? 2 : n[0] === 1 ? 3 : n[0] === -1 ? 4 : 0;
+      if (n[1] === -1) return;
+    } else if (blockId === B.sign) {
+      if (n[1] === -1) return;
+      meta = n[1] === 1 ? [0, 3, 2, 1][q] : (n[2] === 1 ? 0 : n[2] === -1 ? 2 : n[0] === 1 ? 3 : 1) | 4;
     }
     // Keep solid blocks out of entities.
     if (SOLID[blockId]) {
@@ -866,6 +1061,7 @@ export class Game {
       }
       w.setBlock(x, y, z, blockId, meta);
       if (blockId === B.sapling && p.creative && this.keys.has('ControlLeft')) w.growTree(x, y, z);
+      if (blockId === B.sign) setTimeout(() => this.editSign(x, y, z), 0);
     }
     sfx.place(d.sound);
     consume();
@@ -876,38 +1072,14 @@ export class Game {
     return this.world!.canStay(x, y, z, id, meta);
   }
 
-  private updateLamps(x: number, y: number, z: number): void {
-    const w = this.world!;
-    const dirs = [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]];
-    const m = w.getMeta(x, y, z);
-    const off = [[0, -1, 0], [0, 0, -1], [0, 0, 1], [-1, 0, 0], [1, 0, 0]][m & 7] ?? [0, -1, 0];
-    const centers = [[x, y, z], [x + off[0], y + off[1], z + off[2]]];
-    const powered = (lx: number, ly: number, lz: number) => {
-      for (const [dx, dy, dz] of dirs) {
-        const ax = lx + dx, ay = ly + dy, az = lz + dz;
-        if (w.getBlock(ax, ay, az) === B.lever && (w.getMeta(ax, ay, az) & 8)) return true;
-        // A lever attached to a neighbouring block powers through it.
-        for (const [ex, ey, ez] of dirs) {
-          const bx = ax + ex, by = ay + ey, bz = az + ez;
-          if (w.getBlock(bx, by, bz) !== B.lever) continue;
-          const bm = w.getMeta(bx, by, bz);
-          const o = [[0, -1, 0], [0, 0, -1], [0, 0, 1], [-1, 0, 0], [1, 0, 0]][bm & 7] ?? [0, -1, 0];
-          if ((bm & 8) && bx + o[0] === ax && by + o[1] === ay && bz + o[2] === az && SOLID[w.getBlock(ax, ay, az)]) return true;
-        }
-      }
-      return false;
-    };
-    for (const [cx, cy, cz] of centers) for (const [dx, dy, dz] of dirs) {
-      const lx = cx + dx, ly = cy + dy, lz = cz + dz;
-      const id = w.getBlock(lx, ly, lz);
-      if (id !== B.lamp && id !== B.lamp_on) continue;
-      const want = powered(lx, ly, lz) ? B.lamp_on : B.lamp;
-      if (want !== id) w.setBlock(lx, ly, lz, want);
-    }
-  }
-
   private sleep(x: number, y: number, z: number): void {
     const w = this.world!;
+    if (w.dimension === 'ember') {
+      // Beds don't work down here.
+      w.setBlock(x, y, z, 0);
+      this.entities!.explode(x + 0.5, y + 0.5, z + 0.5, 5, true);
+      return;
+    }
     if (w.time < 12541 || w.time > 23458) { this.toast('You can only sleep at night.'); return; }
     const monsters = this.entities!.mobs().some((m) => m.spec.hostile && Math.hypot(m.body.pos[0] - x, m.body.pos[1] - y, m.body.pos[2] - z) < 8);
     if (monsters) { this.toast('You may not rest now. There are monsters nearby.'); return; }
@@ -920,6 +1092,68 @@ export class Game {
       this.fadeEl.style.opacity = '0';
       this.toast('Respawn point set.');
     }, 1200);
+  }
+
+  private signMeshes = new Map<string, { mesh: THREE.Mesh; text: string }>();
+  private signEditor: HTMLElement | null = null;
+
+  /** Open the text editor for a sign. */
+  editSign(x: number, y: number, z: number): void {
+    const w = this.world;
+    if (!w || w.getBlock(x, y, z) !== B.sign) return;
+    const be = w.getBlockEntity(x, y, z);
+    if (!be || be.kind !== 'sign') return;
+    document.exitPointerLock();
+    if (!this.signEditor) {
+      const el = document.createElement('div');
+      el.className = 'screen dim';
+      el.id = 'sign-editor';
+      el.innerHTML = `<div class="panel title-menu stack"><h2>Edit sign</h2>${[0, 1, 2, 3].map((i) => `<input class="field" maxlength="18" aria-label="Line ${i + 1}" data-line="${i}">`).join('')}<button class="btn primary" type="button">Done</button></div>`;
+      el.querySelectorAll('input').forEach((inp) => inp.addEventListener('keydown', (e) => { e.stopPropagation(); if (e.key === 'Enter') (el.querySelector('button') as HTMLButtonElement).click(); }));
+      this.root.appendChild(el);
+      this.signEditor = el;
+    }
+    const el = this.signEditor;
+    const inputs = [...el.querySelectorAll('input')] as HTMLInputElement[];
+    inputs.forEach((inp, i) => { inp.value = be.lines[i] ?? ''; });
+    const done = el.querySelector('button') as HTMLButtonElement;
+    done.onclick = () => {
+      be.lines = inputs.map((i) => i.value.slice(0, 18));
+      const c = w.getChunk(x >> 4, z >> 4);
+      if (c) c.modified = true;
+      el.classList.remove('show');
+      this.menus.current = null;
+      this.lockPointer();
+    };
+    el.classList.add('show');
+    this.menus.current = 'sign';
+    setTimeout(() => inputs[0].focus(), 0);
+  }
+
+  /** Keep sign text meshes in step with sign block entities in loaded chunks. */
+  private syncSigns(): void {
+    const w = this.world;
+    if (!w) return;
+    const seen = new Set<string>();
+    for (const [key, be] of w.blockEntities) {
+      if (be.kind !== 'sign') continue;
+      const [x, y, z] = key.split(',').map(Number);
+      if (!w.isLoaded(x, z) || w.getBlock(x, y, z) !== B.sign) continue;
+      seen.add(key);
+      const text = be.lines.join('\n');
+      const cur = this.signMeshes.get(key);
+      if (cur && cur.text === text) continue;
+      if (cur) { cur.mesh.removeFromParent(); cur.mesh.geometry.dispose(); }
+      const mesh = this.renderer.signText(be.lines);
+      const m = w.getMeta(x, y, z), f = m & 3, wall = (m & 4) !== 0;
+      const n = [[0, 1], [-1, 0], [0, -1], [1, 0]][f]; // direction the text faces
+      const off = wall ? -0.5 + 2 / 16 + 0.01 : 1 / 16 + 0.01;
+      mesh.position.set(x + 0.5 + n[0] * off, y + (wall ? 0.5 : 0.78), z + 0.5 + n[1] * off);
+      mesh.rotation.y = [0, -Math.PI / 2, Math.PI, Math.PI / 2][f];
+      this.renderer.scene.add(mesh);
+      this.signMeshes.set(key, { mesh, text });
+    }
+    for (const [key, v] of this.signMeshes) if (!seen.has(key)) { v.mesh.removeFromParent(); v.mesh.geometry.dispose(); this.signMeshes.delete(key); }
   }
 
   private releaseBow(): void {
@@ -1101,6 +1335,7 @@ export class Game {
     const heldId = this.player.held?.id ?? 0;
     this.renderer.setHeldItem(heldId === I.bow && this.bowCharge > 8 ? -2 : heldId);
     this.tickAchievements(dt);
+    if (w.tickCount % 5 === 0) this.syncSigns();
     const handLight = this.entities!.lightAt(cam.x, cam.y, cam.z);
     const moving = Math.hypot(this.player.body.vel[0], this.player.body.vel[2]) > 0.02 && this.player.body.onGround && this.settings.viewBobbing;
     this.renderer.renderFrame(dt, moving, handLight, !this.hudHidden && this.player.alive);
@@ -1211,6 +1446,17 @@ export class Game {
 
     p.tickStats();
     this.tickBreaking();
+    // Regeneration, magma floors and fire.
+    if (p.regenTicks > 0) { p.regenTicks--; if (p.regenTicks % 25 === 0) p.health = Math.min(20, p.health + 1); }
+    if (p.alive && p.body.onGround && !p.sneaking && w.getBlock(Math.floor(p.body.pos[0]), Math.floor(p.body.pos[1] - 0.1), Math.floor(p.body.pos[2])) === B.magma && w.tickCount % 20 === 0) p.damage(1, 'fire');
+    if (p.alive && p.body.inFire) p.burning = Math.max(p.burning, 80);
+    // Standing in a gate for 4 seconds (instantly in Creative) takes you through.
+    if (p.portalCooldown > 0 && !p.body.inPortal) p.portalCooldown = Math.max(0, p.portalCooldown - 1);
+    if (p.body.inPortal && p.alive && p.portalCooldown === 0) {
+      p.portalTime++;
+      if (p.portalTime % 20 === 1) sfx.fizz({ gain: 0.3, pan: 0 });
+      if (p.portalTime >= (p.creative ? 1 : 80)) { p.portalTime = 0; this.travel(w.dimension === 'ember' ? 'overworld' : 'ember'); return; }
+    } else p.portalTime = 0;
     if (this.bowCharge > 0) {
       if (p.held?.id !== I.bow || !this.mouse[2]) this.bowCharge = 0;
       else this.bowCharge++;
@@ -1234,7 +1480,13 @@ export class Game {
           this.eating++;
           if (this.eating % 4 === 0) sfx.eat();
           if (this.eating > 32) {
-            if (p.eat(held) && !p.creative) { held.count--; if (held.count <= 0) p.inv.slots[p.selected] = null; }
+            const eff = itemDef(held.id)?.effect;
+            const bowl = held.id === I.mushroom_stew;
+            if (p.eat(held) && !p.creative) {
+              held.count--;
+              if (held.count <= 0) p.inv.slots[p.selected] = bowl ? { id: I.bowl, count: 1 } : null;
+            }
+            if (eff === 'regen') p.regenTicks = 100;
             this.eating = 0;
           }
         }

@@ -4,7 +4,9 @@
 import type { SubMesh } from './mesher';
 import type { WorkerRequest } from './worker';
 
-export interface GenResult { cx: number; cz: number; blocks: Uint8Array; meta: Uint8Array; biomes: Uint8Array; light: Uint8Array }
+import type { Spawn } from './worldgen';
+
+export interface GenResult { cx: number; cz: number; blocks: Uint8Array; meta: Uint8Array; biomes: Uint8Array; light: Uint8Array; spawns: Spawn[] }
 
 type Pending = { resolve: (v: any) => void; worker: number };
 
@@ -14,7 +16,7 @@ export class WorkerPool {
   private pending = new Map<number, Pending>();
   private nextId = 1;
 
-  constructor(seed: number, size = Math.max(1, Math.min(4, (navigator.hardwareConcurrency || 4) - 1))) {
+  constructor(seed: number, dimension: 'overworld' | 'ember' = 'overworld', size = Math.max(1, Math.min(4, (navigator.hardwareConcurrency || 4) - 1))) {
     for (let i = 0; i < size; i++) {
       const w = new Worker(new URL('./worker.ts', import.meta.url), { type: 'module' });
       w.onmessage = (e) => {
@@ -25,7 +27,7 @@ export class WorkerPool {
         p.resolve(e.data);
       };
       w.onerror = (e) => console.error('Chunk worker error', e.message);
-      w.postMessage({ type: 'init', seed } satisfies WorkerRequest);
+      w.postMessage({ type: 'init', seed, dimension } satisfies WorkerRequest);
       this.workers.push(w);
       this.busy.push(0);
     }

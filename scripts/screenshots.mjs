@@ -205,6 +205,29 @@ await flyTo('mountains', [5], 0, 45, 60, -0.28);
 await flyTo('desert', [3], 0);
 await flyTo('snowy-taiga', [4], 0);
 
+// A village from above, then the Emberdeep.
+const vloc = await game(() => {
+  const g = window.blockhaven;
+  const log = [];
+  const orig = g.say.bind(g); g.say = (t) => { log.push(t); orig(t); };
+  g.runCommand('/locate village');
+  g.say = orig;
+  const m = /at (-?\d+), (-?\d+)/.exec(log.join(' '));
+  return m ? [+m[1], +m[2]] : null;
+});
+if (vloc) {
+  await game(([x, z]) => { const g = window.blockhaven; g.player.creative = true; g.player.flying = true; g.player.body.pos = [x + 22.5, 110, z + 22.5]; }, vloc);
+  await wait(20000);
+  await game(([x, z]) => { const g = window.blockhaven; g.player.body.pos[1] = g.world.groundY(x, z) + 14; }, vloc);
+  await view('village', { yaw: Math.PI * 0.25, pitch: -0.45, time: 4500, settle: 8000 });
+  await game(([x, z]) => { const g = window.blockhaven; const y = g.world.groundY(x + 6, z + 6); g.player.body.pos = [x + 6.5, y + 1.5, z + 6.5]; }, vloc);
+  await view('village-street', { yaw: Math.PI * 0.25, pitch: -0.08, time: 5000, settle: 5000 });
+}
+await game(() => window.blockhaven.runCommand('/dimension ember'));
+for (let i = 0; i < 90; i++) { await wait(1000); if (await game(() => window.blockhaven.dimension === 'ember' && window.blockhaven.mode === 'playing')) break; }
+await game(() => { const g = window.blockhaven; g.player.creative = true; g.player.flying = true; const [x, y, z] = g.player.body.pos; g.player.body.pos = [x + 3, y + 2, z + 3]; g.entities.spawnMob('emberwisp', x + 4, y + 5, z - 8); g.entities.spawnMob('cinderbrute', x + 1, y, z - 6); });
+await view('emberdeep-2', { yaw: 2.6, pitch: 0.05, settle: 4000 });
+
 // Debug stats for the log.
 console.log(await game(() => {
   const g = window.blockhaven;

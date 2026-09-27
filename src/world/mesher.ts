@@ -45,10 +45,11 @@ class Builder {
   index: number[] = [];
   verts = 0;
 
-  vert(x: number, y: number, z: number, u: number, v: number, layer: number, flags: number, sky: number, blk: number, bright: number, t: readonly number[]): void {
+  /** `face` 0-5 = +x -x +y -y +z -z (for sun shading in the shader); 6 = no direction. */
+  vert(x: number, y: number, z: number, u: number, v: number, layer: number, flags: number, sky: number, blk: number, bright: number, t: readonly number[], face = 6): void {
     this.pos.push(Math.round(x * 16), Math.round(y * 16), Math.round(z * 16), 0);
     this.uv.push(Math.round(u * 16), Math.round(v * 16), layer, flags);
-    this.light.push(Math.min(255, Math.round(sky * 16)), Math.min(255, Math.round(blk * 16)), Math.round(bright * 255), 0);
+    this.light.push(Math.min(255, Math.round(sky * 16)), Math.min(255, Math.round(blk * 16)), Math.round(bright * 255), face);
     this.tint.push(t[0], t[1], t[2], 255);
     this.verts++;
   }
@@ -211,7 +212,7 @@ export function meshSubchunk(input: MeshInput): SubMesh {
               const nid = blocks[pidx(x + fd.n[0], y + fd.n[1], z + fd.n[2])];
               if (f === 3 && OPAQUE[nid]) continue;
               if (f !== 2 && f !== 3 && OPAQUE[nid]) continue;
-              box(bld, x, y, z, 0, 0, 0, 1, 0.5, 1, f, TILE_LAYERS[id * 6 + f], WHITE, f === 2 ? light[i] : light[pidx(x + fd.n[0], y + fd.n[1], z + fd.n[2])] || light[i], 0, true);
+              box(bld, x, y, z, 0, 0, 0, 1, id === B.dirt_path ? 15 / 16 : 0.5, 1, f, TILE_LAYERS[id * 6 + f], WHITE, f === 2 ? light[i] : light[pidx(x + fd.n[0], y + fd.n[1], z + fd.n[2])] || light[i], 0, true);
             }
             break;
           case 'torch':
@@ -280,6 +281,148 @@ export function meshSubchunk(input: MeshInput): SubMesh {
             void gateBox;
             break;
           }
+          case 'pane': {
+            const layer = TILE_LAYERS[id * 6];
+            const t = id === B.iron_bars ? 1 / 16 : 1 / 16;
+            const n = connectsFence(blocks[pidx(x, y, z - 1)]), s = connectsFence(blocks[pidx(x, y, z + 1)]);
+            const w = connectsFence(blocks[pidx(x - 1, y, z)]), e = connectsFence(blocks[pidx(x + 1, y, z)]);
+            const none = !n && !s && !w && !e;
+            const c0 = 0.5 - t, c1 = 0.5 + t;
+            if (n || s || none) emitBox(bld, blocks, light, x, y, z, [c0, 0, n || none ? 0 : c0], [c1, 1, s || none ? 1 : c1], layer, i);
+            if (w || e || none) emitBox(bld, blocks, light, x, y, z, [w || none ? 0 : c0, 0, c0], [e || none ? 1 : c1, 1, c1], layer, i);
+            break;
+          }
+          case 'trapdoor': {
+            const layer = TILE_LAYERS[id * 6];
+            const f = m & 3, open = (m & 4) !== 0, top = (m & 8) !== 0, t = 3 / 16;
+            let mn = [0, top ? 1 - t : 0, 0], mx = [1, top ? 1 : t, 1];
+            if (open) {
+              if (f === 0) { mn = [0, 0, 1 - t]; mx = [1, 1, 1]; }
+              else if (f === 2) { mn = [0, 0, 0]; mx = [1, 1, t]; }
+              else if (f === 1) { mn = [1 - t, 0, 0]; mx = [1, 1, 1]; }
+              else { mn = [0, 0, 0]; mx = [t, 1, 1]; }
+            }
+            emitBox(bld, blocks, light, x, y, z, mn, mx, layer, i);
+            break;
+          }
+          case 'lantern': {
+            const layer = TILE_LAYERS[id * 6];
+            const hanging = (m & 1) !== 0;
+            if (id === B.bell) {
+              emitBox(bld, blocks, light, x, y, z, [4 / 16, 4 / 16, 4 / 16], [12 / 16, 13 / 16, 12 / 16], layer, i);
+              emitBox(bld, blocks, light, x, y, z, [7 / 16, 13 / 16, 7 / 16], [9 / 16, 1, 9 / 16], tileIndex('cobblestone'), i);
+              break;
+            }
+            const y0 = hanging ? 2 / 16 : 0;
+            emitBox(bld, blocks, light, x, y, z, [5 / 16, y0, 5 / 16], [11 / 16, y0 + 7 / 16, 11 / 16], layer, i);
+            emitBox(bld, blocks, light, x, y, z, [6 / 16, y0 + 7 / 16, 6 / 16], [10 / 16, y0 + 9 / 16, 10 / 16], layer, i);
+            if (hanging) emitBox(bld, blocks, light, x, y, z, [7.5 / 16, y0 + 9 / 16, 7.5 / 16], [8.5 / 16, 1, 8.5 / 16], tileIndex('iron_bars'), i);
+            break;
+          }
+          case 'wire': {
+            const layer = TILE_LAYERS[id * 6];
+            const pw = m & 15;
+            const r = Math.round(255 * (0.35 + 0.65 * pw / 15)), g = Math.round(pw > 0 ? 40 + pw * 4 : 20);
+            const t = [r, g, 20];
+            const s = skyAt(i), bl = Math.max(blkAt(i), pw > 0 ? 2 : 0), h = 1 / 32;
+            bld.vert(x, y + h, z + 1, 0, 1, layer, 0, s, bl, 1, t);
+            bld.vert(x + 1, y + h, z + 1, 1, 1, layer, 0, s, bl, 1, t);
+            bld.vert(x + 1, y + h, z, 1, 0, layer, 0, s, bl, 1, t);
+            bld.vert(x, y + h, z, 0, 0, layer, 0, s, bl, 1, t);
+            bld.quad(false);
+            break;
+          }
+          case 'button': {
+            const layer = TILE_LAYERS[id * 6];
+            const face = m & 7, d = m & 8 ? 1 / 16 : 2 / 16;
+            const boxes: Record<number, [number[], number[]]> = {
+              0: [[5 / 16, 0, 6 / 16], [11 / 16, d, 10 / 16]],
+              1: [[5 / 16, 6 / 16, 0], [11 / 16, 10 / 16, d]],
+              2: [[5 / 16, 6 / 16, 1 - d], [11 / 16, 10 / 16, 1]],
+              3: [[0, 6 / 16, 5 / 16], [d, 10 / 16, 11 / 16]],
+              4: [[1 - d, 6 / 16, 5 / 16], [1, 10 / 16, 11 / 16]],
+            };
+            const [a, b] = boxes[face] ?? boxes[0];
+            emitBox(bld, blocks, light, x, y, z, a, b, layer, i);
+            break;
+          }
+          case 'plate':
+            emitBox(bld, blocks, light, x, y, z, [1 / 16, 0, 1 / 16], [15 / 16, m & 1 ? 0.5 / 16 : 1 / 16, 15 / 16], TILE_LAYERS[id * 6], i);
+            break;
+          case 'carpet':
+            emitBox(bld, blocks, light, x, y, z, [0, 0, 0], [1, 1 / 16, 1], TILE_LAYERS[id * 6], i);
+            break;
+          case 'cake': {
+            const bites = Math.min(6, m & 7);
+            const x0 = 1 / 16 + bites * 2 / 16;
+            for (let f = 0; f < 6; f++) box(bld, x, y, z, x0, 0, 1 / 16, 15 / 16, 8 / 16, 15 / 16, f, TILE_LAYERS[id * 6 + f], WHITE, light[i], 0);
+            break;
+          }
+          case 'sign': {
+            const layer = TILE_LAYERS[id * 6];
+            const f = m & 3, wall = (m & 4) !== 0;
+            // Board spans x when facing +-z, spans z when facing +-x.
+            const alongX = f === 0 || f === 2;
+            const th = 1 / 16;
+            if (wall) {
+              const off = f === 0 ? [0, th * 2] : f === 2 ? [1 - th * 2, 1] : f === 3 ? [0, th * 2] : [1 - th * 2, 1];
+              if (alongX) emitBox(bld, blocks, light, x, y, z, [0, 4 / 16, off[0]], [1, 12 / 16, off[1]], layer, i);
+              else emitBox(bld, blocks, light, x, y, z, [off[0], 4 / 16, 0], [off[1], 12 / 16, 1], layer, i);
+            } else {
+              emitBox(bld, blocks, light, x, y, z, [7 / 16, 0, 7 / 16], [9 / 16, 9 / 16, 9 / 16], tileIndex('log_side'), i);
+              if (alongX) emitBox(bld, blocks, light, x, y, z, [0, 9 / 16, 0.5 - th], [1, 1, 0.5 + th], layer, i);
+              else emitBox(bld, blocks, light, x, y, z, [0.5 - th, 9 / 16, 0], [0.5 + th, 1, 1], layer, i);
+            }
+            break;
+          }
+          case 'flat': {
+            const layer = TILE_LAYERS[id * 6];
+            const s = skyAt(i), bl = blkAt(i), h = 1 / 64;
+            bld.vert(x, y + h, z + 1, 0, 1, layer, 0, s, bl, 1, tint);
+            bld.vert(x + 1, y + h, z + 1, 1, 1, layer, 0, s, bl, 1, tint);
+            bld.vert(x + 1, y + h, z, 1, 0, layer, 0, s, bl, 1, tint);
+            bld.vert(x, y + h, z, 0, 0, layer, 0, s, bl, 1, tint);
+            bld.quad(false, true);
+            break;
+          }
+          case 'vine': {
+            const layer = TILE_LAYERS[id * 6];
+            const s = skyAt(i), bl = blkAt(i), d = 0.8 / 16;
+            const q: Record<number, [number, number, number][]> = {
+              0: [[0, 0, d], [1, 0, d], [1, 1, d], [0, 1, d]],
+              2: [[1, 0, 1 - d], [0, 0, 1 - d], [0, 1, 1 - d], [1, 1, 1 - d]],
+              3: [[d, 0, 1], [d, 0, 0], [d, 1, 0], [d, 1, 1]],
+              1: [[1 - d, 0, 0], [1 - d, 0, 1], [1 - d, 1, 1], [1 - d, 1, 0]],
+            };
+            const uvs = [[0, 1], [1, 1], [1, 0], [0, 0]];
+            q[m & 3].forEach((c, k) => bld.vert(x + c[0], y + c[1], z + c[2], uvs[k][0], uvs[k][1], layer, 1, s, bl, 0.8, tint));
+            bld.quad(false, true);
+            break;
+          }
+          case 'portal': {
+            const layer = TILE_LAYERS[id * 6];
+            const alongX = (m & 1) === 0;
+            const mn = alongX ? [0, 0, 6 / 16] : [6 / 16, 0, 0], mx = alongX ? [1, 1, 10 / 16] : [10 / 16, 1, 1];
+            for (let f = 0; f < 6; f++) {
+              const fd = FACES[f];
+              if (blocks[pidx(x + fd.n[0], y + fd.n[1], z + fd.n[2])] === B.portal) continue;
+              box(bld, x, y, z, mn[0], mn[1], mn[2], mx[0], mx[1], mx[2], f, layer, WHITE, (light[i] & 0xf0) | 15, 2);
+            }
+            break;
+          }
+          case 'fire': {
+            const layer = TILE_LAYERS[id * 6];
+            const s = skyAt(i), o = 1 / 16;
+            const quads: [number, number, number, number][] = [[o, 0, o, 1], [1 - o, 1, 1 - o, 0], [0, o, 1, o], [1, 1 - o, 0, 1 - o]];
+            for (const [ax, az, bx, bz] of quads) {
+              bld.vert(x + ax, y, z + az, 0, 1, layer, 0, s, 15, 1, WHITE);
+              bld.vert(x + bx, y, z + bz, 1, 1, layer, 0, s, 15, 1, WHITE);
+              bld.vert(x + bx, y + 1.2, z + bz, 1, 0, layer, 0, s, 15, 1, WHITE);
+              bld.vert(x + ax, y + 1.2, z + az, 0, 0, layer, 0, s, 15, 1, WHITE);
+              bld.quad(false, true);
+            }
+            break;
+          }
           case 'table':
             for (let f = 0; f < 6; f++) {
               const fd = FACES[f];
@@ -330,7 +473,7 @@ function emitCubeFace(bld: Builder, blocks: Uint8Array, light: Uint8Array, x: nu
     const c = fd.corners[k];
     const [u, v] = faceUV(f, c[0], c[1], c[2]);
     const flags = waving && c[1] === 1 ? 1 : 0;
-    bld.vert(x + c[0], y + c[1], z + c[2], u, v, layer, flags, skies[k], blks[k], fd.shade * AO_CURVE[aos[k]], tint);
+    bld.vert(x + c[0], y + c[1], z + c[2], u, v, layer, flags, skies[k], blks[k], fd.shade * AO_CURVE[aos[k]], tint, f);
   }
   // Flip the triangulation so AO interpolates without a visible seam.
   bld.quad(aos[0] + aos[2] < aos[1] + aos[3]);
@@ -344,7 +487,7 @@ function box(bld: Builder, x: number, y: number, z: number, x0: number, y0: numb
     let px = c[0] ? x1 : x0, py = c[1] ? y1 : y0, pz = c[2] ? z1 : z0;
     if (insetSides) { /* cactus sides are already inset via x0/x1 */ }
     const [u, v] = faceUV(f, px, py, pz);
-    bld.vert(x + px, y + py, z + pz, u, v, layer, flags, s, bl, fd.shade, tint);
+    bld.vert(x + px, y + py, z + pz, u, v, layer, flags, s, bl, fd.shade, tint, f);
   }
   bld.quad(false);
 }
@@ -465,7 +608,7 @@ function emitLiquid(bld: Builder, blocks: Uint8Array, meta: Uint8Array, light: U
     for (const c of fd.corners) {
       const py = c[1] ? ht(c[0], c[2]) : 0;
       const [u, v] = faceUV(f, c[0], py, c[2]);
-      bld.vert(x + c[0], y + py, z + c[2], u, v, lyr, flags, ns, nb, fd.shade, WHITE);
+      bld.vert(x + c[0], y + py, z + c[2], u, v, lyr, flags, ns, nb, fd.shade, WHITE, f);
     }
     bld.quad(false, id === B.water && f === 2);
   }

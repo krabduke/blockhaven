@@ -291,3 +291,64 @@ describe('more recipes', () => {
     expect(craft([n, n, n, n, null, n, null, null, null], 3)?.id).toBe(I.iron_helmet);
   });
 });
+
+import { EmberGen } from '../src/world/embergen';
+import { nearestVillage, villagesNear } from '../src/world/villages';
+import { tradesFor } from '../src/trading';
+
+describe('the Emberdeep', () => {
+  it('is sealed by bedrock with a lava sea and cinderstone', () => {
+    const { blocks } = new EmberGen(5).generate(2, 3);
+    let lava = 0, cinder = 0;
+    for (let z = 0; z < 16; z++) for (let x = 0; x < 16; x++) {
+      expect(blocks[idx(x, 0, z)]).toBe(B.bedrock);
+      expect(blocks[idx(x, 127, z)]).toBe(B.bedrock);
+      for (let y = 5; y < 31; y++) if (blocks[idx(x, y, z)] === B.lava) lava++;
+      for (let y = 5; y < 120; y++) if (blocks[idx(x, y, z)] === B.cinderstone) cinder++;
+    }
+    expect(lava).toBeGreaterThan(0);
+    expect(cinder).toBeGreaterThan(1000);
+  });
+});
+
+describe('villages', () => {
+  it('are laid out deterministically with houses, roads and villagers', () => {
+    const gen = new WorldGen(1234);
+    const v = nearestVillage(gen, 0, 0)!;
+    expect(v).toBeTruthy();
+    expect(v.pieces.some((p) => p.type === 'well')).toBe(true);
+    expect(v.pieces.length).toBeGreaterThan(3);
+    expect(v.roads.length).toBeGreaterThan(0);
+    // Chunks under the village contain village blocks and report villagers.
+    let bells = 0, spawns = 0;
+    for (let cx = (v.bounds.x0 >> 4); cx <= (v.bounds.x1 >> 4); cx++) for (let cz = (v.bounds.z0 >> 4); cz <= (v.bounds.z1 >> 4); cz++) {
+      const r = gen.generate(cx, cz);
+      spawns += r.spawns.filter((s) => s.kind === 'villager').length;
+      for (const b of r.blocks) if (b === B.bell) bells++;
+    }
+    expect(bells).toBe(1);
+    expect(spawns).toBeGreaterThan(0);
+    expect(villagesNear(gen, v.cx >> 4, v.cz >> 4)).toContain(v);
+  });
+});
+
+describe('trading', () => {
+  it('gives every profession amber-based trades', () => {
+    for (const prof of ['farmer', 'shepherd', 'fisher', 'butcher', 'cleric', 'smith', 'librarian']) {
+      const t = tradesFor(prof, () => 0.5);
+      expect(t.length).toBeGreaterThanOrEqual(3);
+      expect(t.some((o) => o.get.id === I.amber || o.give.some((g) => g.id === I.amber))).toBe(true);
+    }
+  });
+});
+
+describe('batch 3 recipes', () => {
+  const s = (id: number) => ({ id, count: 1 });
+  it('dyes wool, makes panes and a golden apple', () => {
+    expect(craft([s(B.wool), s(I.dye_blue), null, null], 2)?.id).toBe(B.wool_blue);
+    const g = s(B.glass);
+    expect(craft([g, g, g, g, g, g, null, null, null], 3)).toEqual({ id: B.glass_pane, count: 16 });
+    const au = s(I.gold_ingot);
+    expect(craft([au, au, au, au, s(I.apple), au, au, au, au], 3)?.id).toBe(I.golden_apple);
+  });
+});

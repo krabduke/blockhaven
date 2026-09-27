@@ -18,7 +18,11 @@ export interface ItemDef {
   fuelTicks?: number;
   armor?: { slot: 0 | 1 | 2 | 3; points: number; durability: number };
   /** Right-click-and-hold / throw behaviours. */
-  use?: 'bow' | 'throw' | 'shears' | 'bonemeal' | 'rod';
+  use?: 'bow' | 'throw' | 'shears' | 'bonemeal' | 'rod' | 'ignite' | 'dye' | 'firecharge';
+  /** Extra effect when eaten. */
+  effect?: 'regen';
+  /** Dye colour -> wool block key. */
+  dye?: string;
 }
 
 export interface Enchant { id: EnchantId; level: number }
@@ -66,7 +70,7 @@ item(275, 'bucket', 'Bucket', { maxStack: 16 });
 item(276, 'water_bucket', 'Water Bucket', { maxStack: 1 });
 item(277, 'seeds', 'Wheat Seeds', { places: B.wheat });
 item(278, 'lava_bucket', 'Lava Bucket', { maxStack: 1, fuelTicks: 20000 });
-item(279, 'flint_and_steel', 'Flint and Steel', { maxStack: 1 });
+item(279, 'flint_and_steel', 'Flint and Steel', { maxStack: 1, use: 'ignite', tool: { kind: 'hoe', tier: 0, speed: 1, durability: 64, damage: 1 } });
 item(280, 'paper', 'Paper');
 item(281, 'sugar', 'Sugar');
 item(282, 'leather', 'Leather');
@@ -83,6 +87,22 @@ item(292, 'cooked_fish', 'Cooked Fish', { food: { hunger: 5, saturation: 6 } });
 item(293, 'carrot', 'Carrot', { food: { hunger: 3, saturation: 3.6 }, places: B.carrots });
 item(294, 'gunpowder', 'Gunpowder');
 item(295, 'glow_dust', 'Glow Dust');
+item(400, 'amber', 'Amber');
+item(401, 'emberquartz', 'Emberquartz');
+item(402, 'cinder_brick', 'Cinder Brick');
+item(403, 'ember_core', 'Ember Core', { fuelTicks: 2400 });
+item(404, 'dye_red', 'Red Dye', { use: 'dye', dye: 'wool_red' });
+item(405, 'dye_yellow', 'Yellow Dye', { use: 'dye', dye: 'wool_yellow' });
+item(406, 'dye_green', 'Green Dye', { use: 'dye', dye: 'wool_green' });
+item(407, 'dye_blue', 'Blue Dye', { use: 'dye', dye: 'wool_blue' });
+item(408, 'dye_black', 'Black Dye', { use: 'dye', dye: 'wool_black' });
+item(409, 'dye_orange', 'Orange Dye', { use: 'dye', dye: 'wool_orange' });
+item(410, 'bowl', 'Bowl', { fuelTicks: 100 });
+item(411, 'mushroom_stew', 'Mushroom Stew', { maxStack: 1, food: { hunger: 6, saturation: 7.2 } });
+item(412, 'melon_slice', 'Melon Slice', { food: { hunger: 2, saturation: 1.2 } });
+item(413, 'spark_dust', 'Spark Dust', { places: B.wire });
+item(414, 'fire_charge', 'Fire Charge', { use: 'firecharge' });
+item(415, 'golden_apple', 'Golden Apple', { food: { hunger: 4, saturation: 9.6 }, effect: 'regen' });
 
 // Planks, logs and wooden things burn too.
 for (const k of ['planks', 'log', 'birch_log', 'spruce_log', 'crafting_table', 'bookshelf', 'chest', 'plank_slab', 'ladder', 'sapling']) {
@@ -146,7 +166,7 @@ export function allItemIds(): number[] {
 
 /** Items shown in the creative inventory (skips technical blocks). */
 export function creativeItems(): number[] {
-  const hidden = new Set([B.furnace_lit, B.lamp_on, B.farmland, B.wheat, B.carrots, B.water, B.lava, B.bedrock]);
+  const hidden = new Set([B.furnace_lit, B.lamp_on, B.farmland, B.wheat, B.carrots, B.water, B.lava, B.bedrock, B.portal, B.fire, B.wire]);
   return allItemIds().filter((id) => !hidden.has(id));
 }
 

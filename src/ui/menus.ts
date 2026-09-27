@@ -10,9 +10,11 @@ export interface Settings {
   volume: number;
   viewBobbing: boolean;
   invertY: boolean;
+  fancy: boolean;
+  shadows: boolean;
 }
 
-const DEFAULTS: Settings = { renderDistance: 8, fov: 70, sensitivity: 1, brightness: 0.5, volume: 0.6, viewBobbing: true, invertY: false };
+const DEFAULTS: Settings = { renderDistance: 8, fov: 70, sensitivity: 1, brightness: 0.5, volume: 0.6, viewBobbing: true, invertY: false, fancy: true, shadows: true };
 
 export function loadSettings(): Settings {
   try {
@@ -223,12 +225,12 @@ export class Menus {
       row.append(lab, input);
       p.appendChild(row);
     };
-    const toggle = (label: string, key: 'viewBobbing' | 'invertY') => {
+    const toggle = (label: string, key: 'viewBobbing' | 'invertY' | 'fancy' | 'shadows', on = 'On', off = 'Off') => {
       const row = el('div', { class: 'setting' });
       row.appendChild(el('span', {}, label));
-      const b = button(st[key] ? 'On' : 'Off', '', () => {
+      const b = button(st[key] ? on : off, '', () => {
         st[key] = !st[key];
-        b.textContent = st[key] ? 'On' : 'Off';
+        b.textContent = st[key] ? on : off;
         saveSettings(st);
         this.cb.settingsChanged(st);
       });
@@ -240,6 +242,8 @@ export class Menus {
     slider('Mouse sensitivity', 'sensitivity', 0.2, 2.5, 0.05, (v) => `${Math.round(v * 100)}%`);
     slider('Brightness', 'brightness', 0, 1, 0.05, (v) => (v < 0.15 ? 'Moody' : v > 0.85 ? 'Bright' : `${Math.round(v * 100)}%`));
     slider('Volume', 'volume', 0, 1, 0.05, (v) => `${Math.round(v * 100)}%`);
+    toggle('Graphics', 'fancy', 'Fancy', 'Fast');
+    toggle('Sun shadows', 'shadows');
     toggle('View bobbing', 'viewBobbing');
     toggle('Invert mouse', 'invertY');
     p.appendChild(button('Done', 'primary', () => this.show(this.settingsBack)));

@@ -59,6 +59,40 @@ s([I.bone], I.bone_meal, 3);
 r(['SS', 'SS'], { S: I.snowball }, B.snow);
 r(['  S', ' SX', 'S X'], { S: I.stick, X: I.string }, I.fishing_rod);
 r(['GG', 'GG'], { G: I.glow_dust }, B.glowstone);
+// Emberdeep, village and building blocks.
+r(['BB', 'BB'], { B: I.cinder_brick }, B.cinder_bricks);
+r(['QQ', 'QQ'], { Q: I.emberquartz }, B.emberquartz_block);
+r(['AAA', 'AAA', 'AAA'], { A: I.amber }, B.amber_block);
+s([B.amber_block], I.amber, 9);
+r(['WWW', 'WWW', 'WWW'], { W: I.wheat_item }, B.hay_bale);
+s([B.hay_bale], I.wheat_item, 9);
+r(['MMM', 'MMM', 'MMM'], { M: I.melon_slice }, B.melon);
+r(['TT', 'TT'], { T: B.terracotta }, B.bricks, 4);
+s([B.poppy], I.dye_red, 2);
+s([B.dandelion], I.dye_yellow, 2);
+s([B.blue_flower], I.dye_blue, 2);
+s([I.coal, I.bone_meal], I.dye_black, 2);
+s([I.dye_red, I.dye_yellow], I.dye_orange, 2);
+const WOOL_DYES: [number, number][] = [[I.dye_red, B.wool_red], [I.dye_yellow, B.wool_yellow], [I.dye_green, B.wool_green], [I.dye_blue, B.wool_blue], [I.dye_black, B.wool_black], [I.dye_orange, B.wool_orange]];
+for (const [dye, wool] of WOOL_DYES) s([B.wool, dye], wool);
+r(['WW'], { W: B.wool }, B.carpet, 3);
+r(['GGG', 'GGG'], { G: B.glass }, B.glass_pane, 16);
+r(['III', 'III'], { I: I.iron_ingot }, B.iron_bars, 16);
+r(['PPP', 'PPP'], { P: PLANKS }, B.trapdoor, 2);
+r(['I', 'T'], { I: I.iron_ingot, T: B.torch }, B.lantern);
+s([B.stone], B.button);
+r(['SS'], { S: B.stone }, B.pressure_plate);
+r(['PPP', 'PPP', ' S '], { P: PLANKS, S: I.stick }, B.sign, 3);
+r(['WWW', 'SES', 'WWW'], { W: I.wheat_item, S: I.sugar, E: I.egg }, B.cake);
+r(['P P', ' P '], { P: PLANKS }, I.bowl, 4);
+s([I.bowl, B.red_mushroom, B.brown_mushroom], I.mushroom_stew);
+r(['GGG', 'GAG', 'GGG'], { G: I.gold_ingot, A: I.apple }, I.golden_apple);
+s([I.gunpowder, I.ember_core, I.coal], I.fire_charge, 3);
+r(['SS', 'SS'], { S: B.slate }, B.polished_slate, 4);
+r(['MM', 'MM'], { M: B.marble }, B.polished_marble, 4);
+s([B.stone_bricks, B.vine], B.mossy_stone_bricks);
+s([B.melon], I.melon_slice, 9);
+
 const ARMOR_MAT: Record<string, number> = { leather: I.leather, golden: I.gold_ingot, iron: I.iron_ingot, diamond: I.diamond };
 const ARMOR_PATTERNS = [['MMM', 'M M'], ['M M', 'MMM', 'MMM'], ['MMM', 'M M', 'M M'], ['M M', 'M M']];
 for (const m of ARMOR_MATERIALS) ARMOR_PIECES.forEach((pc, i) => r(ARMOR_PATTERNS[i], { M: ARMOR_MAT[m.key] }, I[`${m.key}_${pc.key}`]));
@@ -141,7 +175,13 @@ export const SMELTING: Record<number, number> = {
   [B.gold_ore]: I.gold_ingot,
   [B.sand]: B.glass,
   [B.cobblestone]: B.stone,
-  [B.clay]: B.bricks,
+  [B.clay]: B.terracotta,
+  [B.cinderstone]: I.cinder_brick,
+  [B.cactus]: I.dye_green,
+  [B.stone_bricks]: B.cracked_stone_bricks,
+  [B.emberquartz_ore]: I.emberquartz,
+  [B.amber_ore]: I.amber,
+  [B.spark_ore]: I.spark_dust,
   [I.raw_pork]: I.cooked_pork,
   [I.raw_chicken]: I.cooked_chicken,
   [I.raw_mutton]: I.cooked_mutton,
