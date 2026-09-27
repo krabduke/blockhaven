@@ -27,16 +27,17 @@ Worlds save automatically to your browser's storage (IndexedDB) every 30 seconds
 
 ## Screenshots
 
+All taken in-game at render distance 16 with the default Fancy graphics.
+
 | | |
 |---|---|
-| ![A village seen from above: houses, farms, a well and paths](docs/screenshots/village.png) | ![A village well with a villager and the Stonewarden guardian](docs/screenshots/village-street.png) |
-| ![Inside the Emberdeep: cinderstone caverns with glowstone hanging from the ceiling](docs/screenshots/emberdeep-2.png) | ![A golden-hour sunset with sun glow and haze](docs/screenshots/sunset.png) |
-| ![A dense jungle](docs/screenshots/jungle.png) | ![Terraced badlands with banded terracotta cliffs](docs/screenshots/badlands.png) |
-| ![A homestead with a fenced pen, wheat and animals](docs/screenshots/homestead.png) | ![The same homestead in the rain](docs/screenshots/rain.png) |
-| ![A torch-lit cave full of ore, with lava](docs/screenshots/cave.png) | ![A Mirewalker approaching at night](docs/screenshots/night-raid.png) |
-| ![Desert with cacti next to hills and mountains](docs/screenshots/desert.png) | ![Snowy mountain peaks](docs/screenshots/mountains.png) |
+| ![A village of timber-framed houses at golden hour](docs/screenshots/village.png) | ![A village well and houses from the street](docs/screenshots/village-street.png) |
+| ![Sunset over rolling hills](docs/screenshots/sunset.png) | ![A moonlit night over the sea](docs/screenshots/night.png) |
+| ![A blossom grove of pink trees](docs/screenshots/blossom.png) | ![Terraced badlands with banded cliffs](docs/screenshots/badlands.png) |
+| ![Snowy mountain peaks with icy tops](docs/screenshots/mountains.png) | ![A snowy spruce forest by a frozen lake](docs/screenshots/snowy-taiga.png) |
+| ![Boars, woolbacks, hens and a fox in a meadow](docs/screenshots/animals.png) | ![A torch-lit cave with glowmoss, dripstone and lava](docs/screenshots/cave.png) |
+| ![Monsters closing in on a torch-lit clearing at night](docs/screenshots/night-raid.png) | ![A glowstone-lit cavern in the Emberdeep](docs/screenshots/emberdeep.png) |
 | ![The crafting table screen](docs/screenshots/crafting.png) | ![The enchanting table screen](docs/screenshots/enchanting.png) |
-| ![A moonlit night](docs/screenshots/night.png) | ![Animals grazing](docs/screenshots/animals.png) |
 
 ## Features
 
@@ -89,6 +90,23 @@ Worlds save automatically to your browser's storage (IndexedDB) every 30 seconds
 **Game modes**
 - Survival, and Creative (fly, instant breaking, and every block and item in a searchable palette)
 - Title screen, world list, create world with a seed, pause menu, settings (render distance, field of view, mouse sensitivity, brightness, volume, view bobbing, invert mouse), death screen and a debug overlay
+
+## Play on a phone or tablet
+
+Open the same link on your phone and turn it sideways. Touch controls appear automatically:
+
+| Control | What it does |
+|---|---|
+| Left thumb | Drag anywhere on the left to walk; push all the way forward to sprint |
+| Right side | Drag to look around |
+| **Mine** | Hold to break blocks or attack |
+| **Use** | Tap to place, eat, open doors and chests (hold to draw a bow) |
+| **Jump** | Jump; double-tap to fly in Creative |
+| **Sneak** | Toggles sneaking |
+| Top buttons | Commands (`/`), drop item, inventory (▦) and pause |
+| Hotbar | Tap a slot to select it |
+
+Phones start with lighter graphics (render distance 6, no sun shadows or bloom); you can raise them in Settings.
 
 ## Controls
 

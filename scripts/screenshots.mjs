@@ -1,13 +1,14 @@
-// Loads the game in headless Chromium, plays through a few scenes and saves
-// screenshots. Used for smoke-testing and for the README images.
+// Plays through a set of scenes in Chromium (real GPU) and saves screenshots
+// for the README. Every shot uses render distance 16 and waits until the
+// terrain around the camera has finished loading.
 //
-//   npm run dev -- --port 5199   (in another terminal)
+//   npm run build && npx vite preview --port 5198   (in another terminal)
 //   node scripts/screenshots.mjs [url] [outDir]
 
 import { chromium } from 'playwright';
 import { mkdirSync } from 'node:fs';
 
-const url = process.argv[2] ?? 'http://localhost:5199/';
+const url = process.argv[2] ?? 'http://localhost:5198/';
 const out = process.argv[3] ?? 'docs/screenshots';
 mkdirSync(out, { recursive: true });
 
@@ -15,95 +16,209 @@ mkdirSync(out, { recursive: true });
 const browser = await chromium.launch({
   args: process.env.SOFTWARE_GL ? ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'] : ['--use-angle=metal', '--enable-gpu', '--ignore-gpu-blocklist'],
 });
-const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
+const page = await browser.newPage({ viewport: { width: 1600, height: 900 } });
 const errors = [];
-page.on('console', (m) => { if (m.type() === 'error' || m.type() === 'warning') errors.push(`${m.type()}: ${m.text()}`); });
+page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
 page.on('pageerror', (e) => errors.push('pageerror: ' + e.message));
 
 const wait = (ms) => page.waitForTimeout(ms);
-const shot = async (name) => { await page.screenshot({ path: `${out}/${name}.png` }); console.log('saved', name); };
 const game = (fn, arg) => page.evaluate(fn, arg);
-
-await page.goto(url);
-await wait(9000);
-await shot('title');
-
-// Create a survival world with a fixed seed and wait for it to load.
-await game(() => window.blockhaven.createWorld('Screenshot World', 'blockhaven', 'survival'));
-for (let i = 0; i < 90; i++) {
-  await wait(1000);
-  if (await game(() => window.blockhaven.mode === 'playing')) break;
-}
-console.log('mode', await game(() => window.blockhaven.mode));
-
-// Hide pause/menus that appear because pointer lock is unavailable headless.
-const clearUi = () => game(() => { const g = window.blockhaven; g.menus.show(null); });
-
-const view = async (name, { yaw, pitch, time, pos, settle = 6000, give } = {}) => {
-  await game(({ yaw, pitch, time, pos, give }) => {
-    const g = window.blockhaven;
-    if (pos) { g.player.body.pos = [...pos]; g.player.body.vel = [0, 0, 0]; }
-    if (yaw !== undefined) g.player.yaw = yaw;
-    if (pitch !== undefined) g.player.pitch = pitch;
-    if (time !== undefined) g.world.time = time;
-    if (give) g.runCommand(give);
-  }, { yaw, pitch, time, pos, give });
-  await wait(settle);
-  await clearUi();
-  await wait(400);
-  await shot(name);
+const shot = async (name) => {
+  await game(() => window.blockhaven.menus.show(null));
+  await wait(500);
+  await page.screenshot({ path: `${out}/${name}.png` });
+  console.log('saved', name);
 };
 
-await clearUi();
-await game(() => window.blockhaven.runCommand('/give stone_pickaxe'));
-await view('survival-day', { yaw: 0.6, pitch: -0.12, time: 2000, settle: 12000 });
-await view('looking-around', { yaw: 2.4, pitch: -0.05, time: 5000 });
-await game(() => { const g = window.blockhaven; const [x, , z] = g.player.body.pos; g.player.creative = true; g.player.flying = true; g.player.body.pos[1] = Math.max(78, g.world.groundY(Math.floor(x), Math.floor(z)) + 14); });
-await view('sunset', { yaw: Math.PI / 2 - 0.15, pitch: -0.06, time: 11300 });
-await view('night', { yaw: -Math.PI / 2 + 0.3, pitch: 0.08, time: 16800 });
-
-// Animals near the player.
-await game(() => {
-  const g = window.blockhaven, p = g.player, w = g.world;
-  const base = p.body.pos;
-  const spots = [['boar', 3, -6], ['woolback', -2, -7], ['hen', 1, -4], ['woolback', 5, -9], ['boar', -4, -10]];
-  for (const [k, dx, dz] of spots) {
-    const x = Math.floor(base[0] + dx), z = Math.floor(base[2] + dz);
-    const m = g.entities.spawnMob(k, x + 0.5, w.groundY(x, z), z + 0.5);
-    m.yaw = Math.random() * 6; m.wanderTimer = 400;
+/** Wait until every chunk within the render distance is generated and meshed (or give up after `max` ms). */
+const settle = async (max = 90000) => {
+  const t0 = Date.now();
+  while (Date.now() - t0 < max) {
+    await wait(1000);
+    const done = await game(() => {
+      const g = window.blockhaven, w = g.world, p = g.player.body.pos;
+      if (!w) return false;
+      const rd = g.settings.renderDistance, pcx = Math.floor(p[0]) >> 4, pcz = Math.floor(p[2]) >> 4;
+      for (let dz = -rd; dz <= rd; dz++) for (let dx = -rd; dx <= rd; dx++) {
+        if (dx * dx + dz * dz > rd * rd) continue;
+        const c = w.getChunk(pcx + dx, pcz + dz);
+        if (!c || c.dirty.size) return false;
+      }
+      return w.pendingWork === 0;
+    });
+    if (done) break;
   }
-});
-await view('animals', { yaw: 0, pitch: -0.25, time: 3000, settle: 4000 });
+  await wait(1500);
+};
 
-// A lit cave: carve a room underground, light it with torches, add ores and a Mirewalker.
+/** Show or hide the HUD and hand. Landscape shots hide them. */
+const hud = (show) => game((show) => { const g = window.blockhaven; g.hudHidden = !show; g.hud.setVisible(show); }, show);
+
+const setTime = (t) => game((t) => { window.blockhaven.world.time = t; }, t);
+
+/**
+ * Aerial view of a target: the camera sits `dist` blocks away in the direction `yaw` points away from,
+ * high enough to clear any ground between it and the target, and looks down at the target.
+ */
+const aerial = async (name, target, { dist = 60, height = 30, yaw = 0, time = 5000, aim = 0, capture = true } = {}) => {
+  const [tx, tz] = target;
+  // Go above the target first so its chunks load.
+  await game(([tx, tz]) => { const g = window.blockhaven; g.player.creative = true; g.player.flying = true; g.player.body.pos = [tx + 0.5, 180, tz + 0.5]; g.player.body.vel = [0, 0, 0]; }, [tx, tz]);
+  await settle();
+  await game(([tx, tz, dist, height, yaw, aim]) => {
+    const g = window.blockhaven, w = g.world;
+    const cx = tx + Math.sin(yaw) * dist, cz = tz + Math.cos(yaw) * dist;
+    let top = 0;
+    for (let k = 0; k <= 20; k++) {
+      const x = Math.floor(cx + (tx - cx) * k / 20), z = Math.floor(cz + (tz - cz) * k / 20);
+      top = Math.max(top, w.groundY(x, z));
+    }
+    const ty = w.groundY(Math.floor(tx), Math.floor(tz)) + aim;
+    const cy = Math.max(top, ty) + height;
+    g.player.body.pos = [cx, cy, cz];
+    g.player.yaw = Math.atan2(-(tx - cx), -(tz - cz));
+    g.player.pitch = Math.atan2(ty - (cy + 1.6), Math.hypot(tx - cx, tz - cz));
+  }, [tx, tz, dist, height, yaw, aim]);
+  await setTime(time);
+  await settle(40000);
+  if (capture) await shot(name);
+};
+
+/** Fly to a spot and wait for its chunks, so edits made there actually land. */
+const visit = async ([x, z]) => {
+  await game(([x, z]) => { const g = window.blockhaven; g.player.creative = true; g.player.flying = true; g.player.body.pos = [x + 0.5, 150, z + 0.5]; g.player.body.vel = [0, 0, 0]; }, [x, z]);
+  await settle();
+};
+
+await page.goto(url);
+await wait(14000);
+// The title shot keeps the menu (shot() would hide it).
+await page.screenshot({ path: `${out}/title.png` }); console.log('saved title');
+
+// A creative world with a fixed seed, render distance 16.
+await game(() => {
+  const g = window.blockhaven;
+  g.settings.renderDistance = 16;
+  g.applySettings(g.settings);
+  g.createWorld('Screenshots', 'blockhaven', 'creative');
+});
+for (let i = 0; i < 120; i++) { await wait(1000); if (await game(() => window.blockhaven.mode === 'playing')) break; }
+await hud(false);
+
+// Village at golden hour, then down in the street.
+const vloc = await game(() => {
+  const g = window.blockhaven, log = [];
+  const say = g.say.bind(g); g.say = (t) => { log.push(t); say(t); };
+  g.runCommand('/locate village');
+  g.say = say;
+  const m = /at (-?\d+), (-?\d+)/.exec(log.join(' '));
+  return m ? [+m[1], +m[2]] : null;
+});
+if (vloc) {
+  await aerial('village', vloc, { dist: 46, height: 24, yaw: 0.6, time: 10400 });
+  await game(([x, z]) => { const g = window.blockhaven; const y = g.world.groundY(x + 7, z + 7); g.player.body.pos = [x + 7.5, y + 0.6, z + 7.5]; g.player.yaw = 0.8; g.player.pitch = -0.05; }, vloc);
+  await setTime(10800);
+  await settle(20000);
+  await shot('village-street');
+}
+
+// Biomes from the air, each aimed at the middle of the biome.
+const biome = (ids, slope = Infinity) => game(([ids, slope]) => window.blockhaven.findBiomeArea(ids, 40, slope), [ids, slope]);
+const sites = {
+  blossom: await biome([14], 10), jungle: await biome([13], 12), badlands: await biome([12]),
+  mountains: await biome([5]), taiga: await biome([4]), desert: await biome([3]),
+};
+console.log('sites', JSON.stringify(sites));
+if (sites.blossom) await aerial('blossom', [sites.blossom[0], sites.blossom[2]], { dist: 40, height: 20, yaw: 0.9, time: 4500 });
+if (sites.jungle) await aerial('jungle', [sites.jungle[0], sites.jungle[2]], { dist: 50, height: 22, yaw: 2.2, time: 5000 });
+if (sites.badlands) await aerial('badlands', [sites.badlands[0], sites.badlands[2]], { dist: 70, height: 26, yaw: 1.2, time: 9800 });
+if (sites.mountains) await aerial('mountains', [sites.mountains[0], sites.mountains[2]], { dist: 110, height: 10, yaw: 0.3, time: 4200, aim: 20 });
+if (sites.taiga) await aerial('snowy-taiga', [sites.taiga[0], sites.taiga[2]], { dist: 50, height: 20, yaw: 1.8, time: 5500 });
+if (sites.desert) await aerial('desert', [sites.desert[0], sites.desert[2]], { dist: 60, height: 22, yaw: 0.4, time: 7000 });
+
+// Sunset and a moonlit night over open country.
+const plains = await biome([1, 2], 8);
+if (plains) {
+  // In the evening the sun sits toward -x; a camera on the +x side of the target faces it.
+  await aerial('sunset', [plains[0], plains[2]], { dist: 70, height: 26, yaw: Math.PI / 2, time: 11400, capture: false });
+  await game(() => { window.blockhaven.player.pitch = -0.05; });
+  await settle(5000);
+  await shot('sunset');
+  // Early in the night the moon rises toward +x.
+  await setTime(14600);
+  await game(() => { const g = window.blockhaven; g.player.yaw = -Math.PI / 2; g.player.pitch = 0.18; });
+  await settle(5000);
+  await shot('night');
+}
+
+// Animals grazing.
+if (plains) {
+  await visit([plains[0], plains[2]]);
+  await game(([x, z]) => {
+    const g = window.blockhaven, w = g.world;
+    // Level a small meadow so nothing blocks the view, then scatter animals facing the camera.
+    const y = w.groundY(x, z) - 1;
+    for (let dx = -9; dx <= 9; dx++) for (let dz = -16; dz <= 12; dz++) {
+      for (let dy = 1; dy <= 8; dy++) w.setBlock(x + dx, y + dy, z + dz, 0);
+      w.setBlock(x + dx, y, z + dz, 2);
+      if ((dx * 7 + dz * 13) % 5 === 0) w.setBlock(x + dx, y + 1, z + dz, 28);
+      else if ((dx * 11 + dz * 3) % 23 === 0) w.setBlock(x + dx, y + 1, z + dz, [29, 30, 112, 154][Math.abs(dx + dz) % 4]);
+    }
+    g.player.body.pos = [x + 0.5, y + 2.4, z + 9.5];
+    g.player.yaw = 0; g.player.pitch = -0.2;
+    const spots = [['boar', 2, 2], ['woolback', -3, -1], ['hen', 0, 4], ['woolback', 4, -4], ['boar', -2, -6], ['burrowfox', 5, 1], ['hen', -4, 3]];
+    for (const [k, dx, dz] of spots) {
+      const m = g.entities.spawnMob(k, x + dx + 0.5, y + 1, z + dz + 0.5);
+      m.yaw = Math.PI + (Math.random() - 0.5) * 1.6; m.wanderTimer = 4000; m.target = null;
+    }
+  }, [plains[0], plains[2]]);
+  await setTime(5500);
+  await settle(10000);
+  await shot('animals');
+}
+
+// Gameplay shots keep the HUD: a torch-lit cave with ore, crafting and enchanting screens, a night raid.
+await hud(true);
+await visit([0, 0]);
 await game(() => {
   const g = window.blockhaven, w = g.world, p = g.player;
   const x0 = Math.floor(p.body.pos[0]), z0 = Math.floor(p.body.pos[2]), y0 = 30;
-  for (let x = -6; x <= 6; x++) for (let z = -9; z <= 3; z++) for (let y = -1; y <= 5; y++) {
-    const edge = x === -6 || x === 6 || z === -9 || z === 3 || y === -1 || y === 5;
-    const ore = [14, 15, 16, 17][Math.abs(x * 7 + z * 13 + y * 3) % 23] ?? 1;
-    w.setBlock(x0 + x, y0 + y, z0 + z, edge ? ore : (y === 0 && Math.abs(x) === 5 ? 1 : 0));
+  // An irregular cavern: an ellipsoid with noise, stone walls with scattered ore, dripstone,
+  // glowmoss, a lava pool, and a small mining camp.
+  const h = (a, b, c) => { let n = Math.sin(a * 12.9898 + b * 78.233 + c * 37.719) * 43758.5453; return n - Math.floor(n); };
+  for (let x = -12; x <= 12; x++) for (let z = -16; z <= 6; z++) for (let y = -4; y <= 9; y++) {
+    const d = Math.hypot(x / 11, (z + 5) / 11, (y - 2) / 6) + (h(x, y, z) - 0.5) * 0.12;
+    const wx = x0 + x, wy = y0 + y, wz = z0 + z;
+    if (d < 1) { w.setBlock(wx, wy, wz, y <= -2 ? 1 : 0); continue; }
+    if (d < 1.25) {
+      const r = h(x + 3, y + 7, z + 1);
+      w.setBlock(wx, wy, wz, r < 0.02 ? 17 : r < 0.06 ? 15 : r < 0.11 ? 14 : r < 0.13 ? 16 : r < 0.35 ? 120 : r < 0.5 ? 116 : 1);
+    }
   }
-  w.setBlock(x0 - 5, y0 + 1, z0 - 4, 27, 0);
-  w.setBlock(x0 + 5, y0 + 1, z0 - 7, 27, 0);
-  w.setBlock(x0, y0 + 1, z0 - 8, 27, 0);
-  w.setBlock(x0 + 3, y0, z0 - 6, 13, 0);
-  w.setBlock(x0 - 3, y0, z0 - 2, 25, 0);
-  w.setBlock(x0 - 2, y0, z0 - 2, 24, 0);
-  w.setBlock(x0 - 1, y0, z0 - 2, 35, 0);
-  p.body.pos = [x0 + 0.5, y0, z0 + 0.5];
-  const m = g.entities.spawnMob('mirewalker', x0 + 1.5, y0, z0 - 6.5);
-  m.wanderTimer = 400;
-  g.player.creative = true; g.player.flying = true;
-  g.player.inv.slots[0] = { id: 27, count: 32 };
-  g.player.selected = 0;
+  // Floor dressing, ceiling dripstone and glowmoss.
+  for (let x = -10; x <= 10; x++) for (let z = -14; z <= 4; z++) {
+    let floor = -1, ceil = -1;
+    for (let y = -3; y <= 8; y++) { if (w.getBlock(x0 + x, y0 + y, z0 + z) === 0) { if (floor < 0) floor = y; ceil = y; } }
+    if (floor < 0) continue;
+    const r = h(x, 1, z);
+    if (r < 0.08) w.setBlock(x0 + x, y0 + ceil, z0 + z, 137);
+    else if (r < 0.13) { for (let k = 0; k < 3; k++) w.setBlock(x0 + x, y0 + ceil - k, z0 + z, 138); }
+    if (r > 0.97) w.setBlock(x0 + x, y0 + floor, z0 + z, 102 + (x & 1));
+  }
+  for (let x = 3; x <= 6; x++) for (let z = -11; z <= -8; z++) w.setBlock(x0 + x, y0 - 2, z0 + z, 13, 0);
+  w.setBlock(x0 - 3, y0 - 1, z0 - 1, 25, 3); w.setBlock(x0 - 2, y0 - 1, z0 - 1, 24, 3); w.setBlock(x0 - 4, y0 - 1, z0 - 1, 35, 3);
+  for (const [dx, dz] of [[-5, -6], [2, -13], [-1, 0], [7, -3]]) w.setBlock(x0 + dx, y0 - 1, z0 + dz, 27, 0);
+  p.body.pos = [x0 + 0.5, y0 - 1, z0 + 3.5]; p.yaw = 0.15; p.pitch = -0.12;
+  p.creative = true; p.flying = false;
+  p.inv.slots[0] = { id: 320, count: 1 }; p.inv.slots[1] = { id: 27, count: 32 }; p.selected = 0;
+  const m = g.entities.spawnMob('mirewalker', x0 - 2.5, y0 - 1, z0 - 10.5);
+  m.wanderTimer = 4000; m.yaw = 0.3;
 });
-await view('cave', { yaw: 0, pitch: -0.08, time: 6000, settle: 5000 });
+await settle(15000);
+await shot('cave');
 
-// Inventory and crafting table screens.
 await game(() => {
   const g = window.blockhaven, p = g.player;
-  p.creative = false; p.flying = true;
   const give = [[323, 1], [319, 1], [9, 24], [5, 40], [256, 12], [27, 20], [4, 64], [258, 9], [260, 3], [264, 7], [262, 4], [24, 1], [25, 1], [35, 2]];
   p.inv.slots.fill(null);
   give.forEach(([id, count], i) => { p.inv.slots[i < 9 ? i : i + 9] = { id, count }; });
@@ -111,133 +226,51 @@ await game(() => {
   g.containers.show('crafting');
 });
 await wait(800);
-await shot('crafting');
+await page.mouse.move(5, 5);
+await page.screenshot({ path: `${out}/crafting.png` }); console.log('saved crafting');
 await game(() => window.blockhaven.containers.close());
-
-// A small homestead with stairs, fences and a gate, then rain.
-await game(() => {
-  const g = window.blockhaven, w = g.world, p = g.player;
-  p.creative = true; p.flying = true;
-  const x0 = Math.floor(p.body.pos[0]) + 40, z0 = Math.floor(p.body.pos[2]);
-  const y0 = w.groundY(x0, z0);
-  for (let x = -7; x <= 7; x++) for (let z = -12; z <= 6; z++) {
-    for (let y = 0; y <= 8; y++) w.setBlock(x0 + x, y0 + y, z0 + z, 0);
-    w.setBlock(x0 + x, y0 - 1, z0 + z, 2);
-    for (let y = y0 - 5; y < y0 - 1; y++) w.setBlock(x0 + x, y, z0 + z, 3);
-  }
-  // Cabin: cobblestone base, plank walls, stair roof.
-  for (let x = -3; x <= 3; x++) for (let z = -9; z <= -4; z++) {
-    const wall = Math.abs(x) === 3 || z === -9 || z === -4;
-    w.setBlock(x0 + x, y0, z0 + z, wall ? 4 : 5);
-    if (wall) for (let y = 1; y <= 3; y++) w.setBlock(x0 + x, y0 + y, z0 + z, (Math.abs(x) === 3 && (z === -9 || z === -4)) ? 9 : 5);
-  }
-  for (let z = -10; z <= -3; z++) {
-    for (let k = 0; k <= 3; k++) {
-      w.setBlock(x0 - 4 + k, y0 + 4 + k, z0 + z, 61, 3);
-      w.setBlock(x0 + 4 - k, y0 + 4 + k, z0 + z, 61, 1);
-    }
-    w.setBlock(x0, y0 + 7, z0 + z, 54);
-  }
-  w.setBlock(x0, y0 + 1, z0 - 4, 0); w.setBlock(x0, y0 + 2, z0 - 4, 0);
-  w.setBlock(x0, y0 + 2, z0 - 4, 36, 0 | 8); w.setBlock(x0, y0 + 1, z0 - 4, 36, 0);
-  w.setBlock(x0 - 2, y0 + 2, z0 - 4, 11); w.setBlock(x0 + 2, y0 + 2, z0 - 4, 11);
-  w.setBlock(x0 - 2, y0 + 3, z0 - 3, 27, 1); w.setBlock(x0 + 2, y0 + 3, z0 - 3, 27, 1);
-  // Fenced pen with a gate, animals and a small wheat field.
-  for (let x = -6; x <= 6; x++) { w.setBlock(x0 + x, y0, z0 + 4, x === 0 ? 64 : 63, 0); w.setBlock(x0 + x, y0, z0 - 1, x === 0 ? 0 : 63); }
-  for (let z = -1; z <= 4; z++) { w.setBlock(x0 - 6, y0, z0 + z, 63); w.setBlock(x0 + 6, y0, z0 + z, 63); }
-  for (let x = -5; x <= -1; x++) for (let z = 0; z <= 3; z++) { w.setBlock(x0 + x, y0 - 1, z0 + z, 52); w.setBlock(x0 + x, y0, z0 + z, 51, 3 + ((x + z) & 3) + 1); }
-  w.setBlock(x0 - 3, y0 - 1, z0 + 2, 12);  w.setBlock(x0 - 3, y0, z0 + 2, 0);
-  for (const [k, dx, dz] of [['woolback', 3, 1], ['boar', 4, 3], ['hen', 2, 2]]) { const m = g.entities.spawnMob(k, x0 + dx + 0.5, y0, z0 + dz + 0.5); m.wanderTimer = 5000; m.yaw = 2.6; }
-  p.body.pos = [x0 + 7.5, y0 + 4, z0 + 12.5];
-  p.armor.slots[0] = { id: 362, count: 1 }; p.armor.slots[1] = { id: 363, count: 1 };
-  p.creative = false; p.flying = true;
-  p.addXp(160);
-  p.inv.slots[0] = { id: 283, count: 1, ench: [{ id: 'power', level: 3 }] };
-  p.selected = 0;
-});
-await view('homestead', { yaw: 0.45, pitch: -0.22, time: 4000, settle: 6000 });
-await game(() => window.blockhaven.runCommand('/weather rain'));
-await game(() => { window.blockhaven.renderer.rain = 1; });
-await view('rain', { yaw: 0.45, pitch: -0.1, time: 5000, settle: 3000 });
-await game(() => window.blockhaven.runCommand('/weather clear'));
-await game(() => { window.blockhaven.renderer.rain = 0; });
-
-// Night raid: hostile mobs near the homestead.
-await game(() => {
-  const g = window.blockhaven, p = g.player, w = g.world;
-  const [px, , pz] = p.body.pos;
-  for (const [k, dx, dz] of [['mirewalker', -3, -7], ['brambler', 2, -9], ['shellcrawler', -1, -5]]) {
-    const x = Math.floor(px + dx), z = Math.floor(pz + dz);
-    const m = g.entities.spawnMob(k, x + 0.5, w.groundY(x, z), z + 0.5);
-    m.yaw = Math.PI * 0; m.wanderTimer = 5000;
-  }
-  g.player.creative = true;
-  p.body.pos[1] = w.groundY(Math.floor(px), Math.floor(pz)) + 1;
-  w.setBlock(Math.floor(px) - 2, Math.floor(p.body.pos[1]), Math.floor(pz) - 3, 27, 0);
-});
-await view('night-raid', { yaw: 0, pitch: -0.12, time: 17500, settle: 2500 });
-
-// Enchanting screen.
-await game(() => {
-  const g = window.blockhaven, p = g.player;
-  p.creative = false;
-  p.inv.slots[1] = { id: 320, count: 1 };
-  g.containers.show('enchant', { bookshelves: 12 });
-});
+await game(() => { const g = window.blockhaven; g.player.addXp(160); g.player.inv.slots[1] = { id: 320, count: 1 }; g.containers.show('enchant', { bookshelves: 12 }); });
 await wait(500);
-await page.mouse.move(10, 10);
 {
   const slots = await page.$$('#container .slot');
-  await slots[29].click();
-  await wait(100);
-  await slots[0].click();
-  await wait(400);
+  await slots[29].click(); await wait(100); await slots[0].click(); await wait(400);
 }
-await shot('enchanting');
-await game(() => { window.blockhaven.containers.close(); window.blockhaven.player.creative = true; });
+await page.mouse.move(5, 5);
+await page.screenshot({ path: `${out}/enchanting.png` }); console.log('saved enchanting');
+await game(() => window.blockhaven.containers.close());
 
-// Mountains and a desert from the air.
-const flyTo = async (name, biomeIds, yaw, lift = 14, back = 20, pitch = -0.3) => {
-  const found = await game((biomes) => window.blockhaven.findBiome(biomes), biomeIds);
-  if (!found) { console.log('no biome for', name); return; }
-  await game(([x, h, z, lift, back]) => { const g = window.blockhaven; g.player.creative = true; g.player.flying = true; g.player.body.pos = [x + 0.5, h + lift, z + back + 0.5]; }, [...found, lift, back]);
-  await view(name, { yaw, pitch, time: 4500, settle: 25000 });
-};
-await flyTo('mountains', [5], 0, 45, 60, -0.28);
-await flyTo('desert', [3], 0);
-await flyTo('snowy-taiga', [4], 0);
-await flyTo('jungle', [13], 0, 18, 20, -0.3);
-await flyTo('badlands', [12], 0, 16, 22, -0.25);
-
-// A village from above, then the Emberdeep.
-const vloc = await game(() => {
-  const g = window.blockhaven;
-  const log = [];
-  const orig = g.say.bind(g); g.say = (t) => { log.push(t); orig(t); };
-  g.runCommand('/locate village');
-  g.say = orig;
-  const m = /at (-?\d+), (-?\d+)/.exec(log.join(' '));
-  return m ? [+m[1], +m[2]] : null;
-});
-if (vloc) {
-  await game(([x, z]) => { const g = window.blockhaven; g.player.creative = true; g.player.flying = true; g.player.body.pos = [x + 22.5, 110, z + 22.5]; }, vloc);
-  await wait(20000);
-  await game(([x, z]) => { const g = window.blockhaven; g.player.body.pos[1] = g.world.groundY(x, z) + 14; }, vloc);
-  await view('village', { yaw: Math.PI * 0.25, pitch: -0.45, time: 4500, settle: 8000 });
-  await game(([x, z]) => { const g = window.blockhaven; const y = g.world.groundY(x + 6, z + 6); g.player.body.pos = [x + 6.5, y + 1.5, z + 6.5]; }, vloc);
-  await view('village-street', { yaw: Math.PI * 0.25, pitch: -0.08, time: 5000, settle: 5000 });
+// Night raid: a torch-lit clearing on the plains with monsters closing in.
+if (plains) {
+  await visit([plains[0], plains[2]]);
+  await game(([x, z]) => {
+    const g = window.blockhaven, w = g.world, p = g.player;
+    const y = w.groundY(x, z) - 1;
+    for (let dx = -10; dx <= 10; dx++) for (let dz = -18; dz <= 8; dz++) {
+      for (let dy = 1; dy <= 8; dy++) w.setBlock(x + dx, y + dy, z + dz, 0);
+      w.setBlock(x + dx, y, z + dz, 2);
+      if ((dx * 7 + dz * 13) % 6 === 0) w.setBlock(x + dx, y + 1, z + dz, 28);
+    }
+    for (const [dx, dz] of [[-3, -2], [3, -5], [-5, -10], [4, -12]]) { w.setBlock(x + dx, y + 1, z + dz, 63); w.setBlock(x + dx, y + 2, z + dz, 93); }
+    p.creative = true; p.flying = false;
+    p.body.pos = [x + 0.5, y + 1, z + 6.5]; p.yaw = 0; p.pitch = -0.08;
+    p.inv.slots[0] = { id: 323, count: 1 }; p.selected = 0;
+    for (const [k, dx, dz] of [['mirewalker', -2, -4], ['brambler', 3, -8], ['shellcrawler', 0, -1], ['mirewalker', 5, -3]]) {
+      const m = g.entities.spawnMob(k, x + dx + 0.5, y + 1, z + dz + 0.5);
+      m.wanderTimer = 4000; m.yaw = Math.PI; m.target = null;
+    }
+  }, [plains[0], plains[2]]);
+  await setTime(15500);
+  await settle(8000);
+  await shot('night-raid');
 }
+
+// The Emberdeep.
+await hud(false);
 await game(() => window.blockhaven.runCommand('/dimension ember'));
-for (let i = 0; i < 90; i++) { await wait(1000); if (await game(() => window.blockhaven.dimension === 'ember' && window.blockhaven.mode === 'playing')) break; }
-await game(() => { const g = window.blockhaven; g.player.creative = true; g.player.flying = true; const [x, y, z] = g.player.body.pos; g.player.body.pos = [x + 3, y + 2, z + 3]; g.entities.spawnMob('emberwisp', x + 4, y + 5, z - 8); g.entities.spawnMob('cinderbrute', x + 1, y, z - 6); });
-await view('emberdeep-2', { yaw: 2.6, pitch: 0.05, settle: 4000 });
+for (let i = 0; i < 120; i++) { await wait(1000); if (await game(() => window.blockhaven.dimension === 'ember' && window.blockhaven.mode === 'playing')) break; }
+await game(() => { const g = window.blockhaven; g.player.creative = true; g.player.flying = true; const [x, y, z] = g.player.body.pos; g.player.body.pos = [x + 3, y + 3, z + 3]; g.player.yaw = 2.6; g.player.pitch = -0.05; g.entities.spawnMob('emberwisp', x - 6, y + 6, z - 10); });
+await settle(30000);
+await shot('emberdeep');
 
-// Debug stats for the log.
-console.log(await game(() => {
-  const g = window.blockhaven;
-  return JSON.stringify({ fps: g.fps, chunks: g.world.chunks.size, meshes: g.renderer.meshCount, pos: g.player.body.pos.map((v) => v.toFixed(1)), calls: g.renderer.gl.info.render.calls });
-}));
-
-console.log('--- console errors/warnings ---');
-console.log(errors.slice(0, 40).join('\n') || '(none)');
+console.log('errors:', errors.length ? errors.slice(0, 20).join('\n') : '(none)');
 await browser.close();

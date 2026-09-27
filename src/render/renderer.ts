@@ -68,6 +68,15 @@ float fbm(vec2 p, int oct) {
   return s;
 }
 const float CLOUD_Y = 210.0;
+uniform float uDuskAmt;
+uniform vec3 uDuskWarm;
+uniform vec3 uDuskCool;
+/** Sky/fog colour near the horizon at dusk for a view direction: gold toward the sun, violet away. */
+vec3 duskTint(vec3 dir, vec3 sunDir, vec3 base) {
+  vec3 f = normalize(vec3(dir.x, 0.0, dir.z) + 1e-4), s = normalize(vec3(sunDir.x, 0.0, sunDir.z) + 1e-4);
+  float toward = pow(max(dot(f, s) * 0.5 + 0.5, 0.0), 2.2);
+  return mix(base, mix(uDuskCool, uDuskWarm, toward), uDuskAmt);
+}
 float cloudDensity(vec2 xz, float cover, float time, int oct) {
   // Domain-warped noise gives rounded, billowing cumulus instead of streaks.
   vec2 q = xz / 520.0 + vec2(time * 0.004, time * 0.0015);
@@ -213,8 +222,10 @@ void main() {
   float fog = smoothstep(uFogNear, uFogFar, vFogDepth);
   vec3 fogCol = uFogColor;
   if (uFancy > 0.5) {
-    float toward = pow(max(dot(-v, uSunDir), 0.0), 6.0) * uDay;
-    fogCol = mix(uFogColor, uSunColor * 1.1, toward * 0.55);
+    // Distant land fades into the sky colour behind it, so dusk horizons stay saturated.
+    fogCol = duskTint(-v, uSunDir, uFogColor);
+    float toward = pow(max(dot(-v, uSunDir), 0.0), 8.0) * uDay;
+    fogCol = mix(fogCol, uSunColor * vec3(1.0, 0.75, 0.5), toward * 0.35);
     float mist = uHaze * exp(-max(vWorld.y - 58.0, 0.0) * 0.06) * smoothstep(6.0, 70.0, vFogDepth);
     fog = max(fog, clamp(mist, 0.0, 0.7));
   }
@@ -268,12 +279,15 @@ ${NOISE}
 void main() {
   vec3 d = normalize(vDir);
   float h = clamp(d.y, -1.0, 1.0);
-  vec3 col = mix(uHorizon, uSkyTop, pow(smoothstep(-0.05, 0.6, h), 0.8));
-  if (h < 0.0) col = mix(uHorizon, uHorizon * 0.7, smoothstep(0.0, -0.4, h));
+  vec3 horizon = duskTint(d, uSunDir, uHorizon);
+  vec3 zenith = mix(uSkyTop, vec3(0.1, 0.16, 0.38), uDuskAmt * 0.6);
+  vec3 col = mix(horizon, zenith, pow(smoothstep(-0.05, 0.55, h), 0.7));
+  if (h < 0.0) col = mix(horizon, horizon * 0.6, smoothstep(0.0, -0.4, h));
   float sd = max(dot(d, uSunDir), 0.0);
-  col += uSunColor * (pow(sd, 6.0) * 0.3 + pow(sd, 48.0) * 0.55) * max(uDay, uDusk);
+  col += uSunColor * (pow(sd, 6.0) * mix(0.3, 0.1, uDuskAmt) + pow(sd, 48.0) * 0.55) * max(uDay, uDusk);
   vec3 sunFlat = normalize(vec3(uSunDir.x, 0.0, uSunDir.z) + 1e-4);
-  col = mix(col, vec3(1.0, 0.52, 0.28), uDusk * pow(1.0 - abs(h), 5.0) * pow(max(dot(normalize(vec3(d.x, 0.0, d.z) + 1e-4), sunFlat), 0.0), 1.5) * 0.65);
+  // A hot band right along the horizon under the sun.
+  col = mix(col, vec3(1.0, 0.42, 0.12), uDusk * pow(1.0 - abs(h), 12.0) * pow(max(dot(normalize(vec3(d.x, 0.0, d.z) + 1e-4), sunFlat), 0.0), 3.0) * 0.7);
   // Moon glow and a milky band of stars' haze at night.
   vec3 moonDir = -uSunDir;
   float md = max(dot(d, moonDir), 0.0);
@@ -411,6 +425,9 @@ export class Renderer {
       uHaze: { value: 0.15 },
       uCloudCover: { value: 0.55 },
       uClip: { value: new THREE.Vector2(0, 0) },
+      uDuskAmt: { value: 0 },
+      uDuskWarm: { value: new THREE.Color(1.0, 0.55, 0.22) },
+      uDuskCool: { value: new THREE.Color(0.42, 0.34, 0.62) },
     };
     this.postfx = new PostFX(this.gl);
     this.reflTarget = new THREE.WebGLRenderTarget(1, 1, { type: THREE.HalfFloatType, depthBuffer: true });
@@ -430,8 +447,9 @@ export class Renderer {
       uSkyTop: this.uniforms.uSkyTop, uHorizon: { value: new THREE.Color() }, uSunDir: this.uniforms.uSunDir,
       uSunColor: this.uniforms.uSunColor, uDay: this.uniforms.uDay, uDusk: { value: 0 },
       uNight: { value: 0 }, uCloudCover: this.uniforms.uCloudCover, uCloudsOn: { value: 1 }, uTime: this.uniforms.uTime, uCamPos: this.uniforms.uCamPos,
+      uDuskAmt: this.uniforms.uDuskAmt, uDuskWarm: this.uniforms.uDuskWarm, uDuskCool: this.uniforms.uDuskCool,
     };
-    this.skyDome = new THREE.Mesh(new THREE.SphereGeometry(900, 24, 16), new THREE.ShaderMaterial({ glslVersion: THREE.GLSL3, vertexShader: SKY_VERT, fragmentShader: SKY_FRAG, uniforms: this.skyUniforms, side: THREE.BackSide, depthWrite: false }));
+    this.skyDome = new THREE.Mesh(new THREE.SphereGeometry(900, 24, 16), new THREE.ShaderMaterial({ glslVersion: THREE.GLSL3, vertexShader: SKY_VERT, fragmentShader: SKY_FRAG, uniforms: this.skyUniforms, side: THREE.BackSide, depthWrite: false, depthTest: false }));
     this.skyDome.renderOrder = -20;
     this.skyDome.frustumCulled = false;
     this.scene.add(this.skyDome);
@@ -618,7 +636,11 @@ export class Renderer {
       this.uniforms.uDay.value = 0;
       this.uniforms.uMinLight.value = 0.5;
       (this.uniforms.uFogColor.value as THREE.Color).copy(fog);
-      (this.uniforms.uSkyTop.value as THREE.Color).set(0x2a0a06);
+      // No sky down here: the dome is just the smoky fog colour, with no clouds or sun.
+      (this.uniforms.uSkyTop.value as THREE.Color).copy(fog);
+      this.skyUniforms.uCloudsOn.value = 0;
+      this.skyUniforms.uNight.value = 0;
+      this.uniforms.uDuskAmt.value = 0;
       (this.skyUniforms.uHorizon.value as THREE.Color).copy(fog);
       this.skyUniforms.uDusk.value = 0;
       const far = this.renderDistance * 16;
@@ -652,13 +674,15 @@ export class Renderer {
     (this.uniforms.uSkyLightColor.value as THREE.Color).setRGB(0.42 + 0.58 * dayness, 0.62 + 0.38 * dayness, 1.2 - 0.2 * dayness);
     (this.uniforms.uFogColor.value as THREE.Color).copy(fogC);
     const far = this.renderDistance * 16;
-    this.uniforms.uFogNear.value = this.underwater ? 2 : far * (0.62 - this.rain * 0.3);
-    this.uniforms.uFogFar.value = this.underwater ? 22 : far * (0.95 - this.rain * 0.2);
+    const duskClear = this.fancy ? twilight * (1 - this.rain) * 0.12 : 0;
+    this.uniforms.uFogNear.value = this.underwater ? 2 : far * (0.62 + duskClear - this.rain * 0.3);
+    this.uniforms.uFogFar.value = this.underwater ? 22 : far * (0.95 + duskClear * 0.4 - this.rain * 0.2);
     this.gl.setClearColor(fogC.clone().lerp(skyC, 0.5));
     // Sun direction and colour for shading; warmer and weaker near the horizon.
     const sunDir = new THREE.Vector3(Math.cos(theta), Math.sin(theta), 0.25).normalize();
     (this.uniforms.uSunDir.value as THREE.Vector3).copy(sunDir);
-    const dayAmt = Math.max(0, Math.min(1, sy * 3)) * (1 - this.rain * 0.8);
+    // Keep direct sun until it's close to the horizon so evenings get golden light.
+    const dayAmt = Math.max(0, Math.min(1, sy * 6)) * (1 - this.rain * 0.8);
     this.uniforms.uDay.value = dayAmt;
     // Golden-orange near the horizon, near-white at noon.
     const hi = Math.min(1, Math.max(0, sy / 0.5));
@@ -667,19 +691,22 @@ export class Renderer {
     (this.uniforms.uSkyTop.value as THREE.Color).copy(skyC).multiplyScalar(sy > 0 ? 0.78 : 0.7).lerp(new THREE.Color(0x2a5ab8), 0.25 * Math.max(0, sy));
     (this.skyUniforms.uHorizon.value as THREE.Color).copy(fogC);
     this.skyUniforms.uDusk.value = twilight * (1 - this.rain);
+    this.uniforms.uDuskAmt.value = this.fancy ? twilight * (1 - this.rain) * (sy > -0.15 ? 1 : 0) : 0;
     this.skyUniforms.uNight.value = Math.max(0, Math.min(1, -sy * 3)) * (1 - this.rain * 0.7);
     this.skyUniforms.uCloudsOn.value = this.fancy ? 1 : 0;
     // More cloud when it rains; lower value = more coverage.
     this.uniforms.uCloudCover.value = 0.47 - this.rain * 0.3 - this.thunder * 0.1;
     this.uniforms.uWet.value = this.rain;
-    this.uniforms.uHaze.value = 0.07 + twilight * 0.12 + this.rain * 0.22;
+    this.uniforms.uHaze.value = 0.05 + twilight * 0.03 + this.rain * 0.22;
     this.uniforms.uPost.value = this.post && this.fancy ? 1 : 0;
 
     this.sky.position.copy(camPos);
     const d = 400;
-    this.sun.position.set(Math.cos(theta) * d, Math.sin(theta) * d, 0);
+    // Sprites follow the same directions the shaders use for the sun and moon glow.
+    this.sun.position.copy(sunDir).multiplyScalar(d);
+    (this.sun.material as THREE.MeshBasicMaterial).color.setRGB(1, 0.75 + 0.25 * Math.min(1, sy * 3), 0.5 + 0.5 * Math.min(1, sy * 3));
     this.sun.lookAt(camPos);
-    this.moon.position.set(-Math.cos(theta) * d, -Math.sin(theta) * d, 0);
+    this.moon.position.copy(sunDir).multiplyScalar(-d);
     this.moon.lookAt(camPos);
     this.stars.rotation.z = theta;
     (this.stars.material as THREE.PointsMaterial).opacity = Math.max(0, Math.min(1, -sy * 3));
@@ -939,8 +966,9 @@ export class Renderer {
         sunScreen,
         sunColor: (this.uniforms.uSunColor.value as THREE.Color).clone().multiplyScalar(0.9),
         rays: day * (0.55 + (this.skyUniforms.uDusk.value as number) * 0.9) * (1 - this.rain * 0.7),
-        bloom: this.dimension === 'ember' ? 0.9 : 0.55,
-        exposure: this.dimension === 'ember' ? 1.1 : 1.0,
+        bloom: this.dimension === 'ember' ? 0.9 : 0.55 - (this.uniforms.uDuskAmt.value as number) * 0.2,
+        exposure: this.dimension === 'ember' ? 1.1 : 1.0 - (this.uniforms.uDuskAmt.value as number) * 0.08,
+        saturation: 1.04 + (this.uniforms.uDuskAmt.value as number) * 0.16,
         underwater: this.underwater,
         time: this.uniforms.uTime.value as number,
       });

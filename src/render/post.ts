@@ -78,6 +78,7 @@ uniform float uExposure;
 uniform float uUnderwater;
 uniform float uTime;
 uniform float uVignette;
+uniform float uSat;
 in vec2 vUv;
 out vec4 o;
 
@@ -98,7 +99,7 @@ void main() {
   c = shoulder(c);
   // A touch more contrast and saturation, like a camera's picture profile.
   float l = dot(c, vec3(0.2126, 0.7152, 0.0722));
-  c = mix(vec3(l), c, 1.04);
+  c = mix(vec3(l), c, uSat);
   c = mix(c, c * c * (3.0 - 2.0 * c), 0.12);
   if (uUnderwater > 0.5) c = mix(c, c * vec3(0.55, 0.8, 1.1), 0.6);
   float d = distance(vUv, vec2(0.5));
@@ -117,6 +118,7 @@ export interface PostParams {
   rays: number;
   bloom: number;
   exposure: number;
+  saturation?: number;
   underwater: boolean;
   time: number;
 }
@@ -151,7 +153,7 @@ export class PostFX {
     this.compMat = quadMaterial(COMPOSITE_FRAG, {
       tScene: { value: this.scene.texture }, tBloom: { value: this.blurB.texture }, tRays: { value: this.rays.texture },
       uSunColor: { value: new THREE.Color() }, uRays: { value: 0 }, uBloom: { value: 0.6 }, uExposure: { value: 1 },
-      uUnderwater: { value: 0 }, uTime: { value: 0 }, uVignette: { value: 0.35 },
+      uUnderwater: { value: 0 }, uTime: { value: 0 }, uVignette: { value: 0.35 }, uSat: { value: 1.04 },
     });
     this.quad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), this.compMat);
     this.quad.frustumCulled = false;
@@ -199,6 +201,7 @@ export class PostFX {
     u.uRays.value = raysOn ? p.rays : 0;
     u.uBloom.value = p.bloom;
     u.uExposure.value = p.exposure;
+    u.uSat.value = p.saturation ?? 1.04;
     u.uUnderwater.value = p.underwater ? 1 : 0;
     u.uTime.value = p.time;
     this.pass(this.compMat, null);

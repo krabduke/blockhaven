@@ -90,6 +90,12 @@ export class Hud {
     this.heldName = this.root.querySelector('.held-name')!;
   }
 
+  /** Make hotbar slots tappable (touch screens). */
+  enableTouch(onSelect: (slot: number) => void): void {
+    this.root.classList.add('touchable');
+    this.slots.forEach((el, i) => el.addEventListener('pointerdown', (e) => { e.preventDefault(); onSelect(i); }));
+  }
+
   setVisible(v: boolean): void {
     this.root.classList.toggle('hidden', !v);
   }

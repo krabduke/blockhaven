@@ -14,6 +14,7 @@ import { listWorlds, saveWorldMeta, savedChunkKeys, type WorldMeta } from './sto
 import type { Atlas } from './textures';
 import { ContainerScreen } from './ui/containers';
 import { Hud } from './ui/hud';
+import { TouchControls, isTouchDevice } from './ui/touch';
 import { Menus, loadSettings, type Settings } from './ui/menus';
 import { SEA_LEVEL } from './world/chunk';
 import { WorkerPool } from './world/pool';
@@ -113,6 +114,8 @@ export class Game {
   private titleAngle = 0;
   private debug = false;
   private hudHidden = false;
+  readonly touchMode = isTouchDevice();
+  private touch: TouchControls | null = null;
   private autosave = 0;
   private fovCurrent = 70;
   private canvas: HTMLCanvasElement;
@@ -138,7 +141,32 @@ export class Game {
     this.canvas = root.querySelector('canvas#game')!;
     this.renderer = new Renderer(this.canvas, atlas);
     this.settings = loadSettings();
+    if (this.touchMode) {
+      let saved = false;
+      try { saved = !!localStorage.getItem('blockhaven.settings'); } catch { /* no storage */ }
+      // Phones: lighter graphics until the player chooses otherwise.
+      if (!saved) Object.assign(this.settings, { renderDistance: 6, shadows: false, post: false, sensitivity: 1 });
+      document.body.classList.add('touch');
+    }
     this.hud = new Hud(root);
+    if (this.touchMode) {
+      this.touch = new TouchControls(root, {
+        mineStart: () => { if (!this.controlling) return; this.mouse[0] = true; this.attack(); },
+        mineEnd: () => { this.mouse[0] = false; this.breakProgress = 0; this.breakPos = null; },
+        useStart: () => { if (!this.controlling) return; this.mouse[2] = true; this.useCooldown = 0; this.use(); },
+        useEnd: () => { this.mouse[2] = false; this.eating = 0; this.releaseBow(); },
+        jumpStart: () => {
+          const now = performance.now();
+          if (this.player.creative && now - this.lastSpace < 300) { this.player.flying = !this.player.flying; this.lastSpace = 0; }
+          else this.lastSpace = now;
+        },
+        inventory: () => { if (this.controlling && this.player.alive) this.containers.show(this.player.creative ? 'creative' : 'player'); },
+        chat: () => this.openCommand('/'),
+        pause: () => { if (this.mode === 'playing') this.menus.show('pause'); },
+        drop: () => this.dropHeld(false),
+      });
+      this.hud.enableTouch((i) => { this.player.selected = i; });
+    }
     this.hud.setVisible(false);
     this.containers = new ContainerScreen(root, this.player);
     this.containers.onClose = () => this.lockPointer();
@@ -282,7 +310,7 @@ export class Game {
       p.body.pos = [sx + 0.5, gen.column(sx, sz).height + 1.2, sz + 0.5];
       p.spawn = [...p.body.pos];
       p.needsSurface = true;
-      if (!p.creative) this.toast('Punch a tree to get started. Press E for your inventory.');
+      if (!p.creative) this.toast(this.touchMode ? 'Hold Mine on a tree to get started. Tap ▦ for your inventory.' : 'Punch a tree to get started. Press E for your inventory.');
     }
     p.onDeath = (src) => this.onDeath(src);
     p.onAchievement = (id) => this.achQueue.push(id);
@@ -451,12 +479,35 @@ export class Game {
     return null;
   }
 
+  /** A column well inside a biome: it and a ring of points `radius` away all share the biome. */
+  findBiomeArea(biomes: number[], radius = 32, maxSlope = Infinity): [number, number, number] | null {
+    if (!this.world) return null;
+    const gen = new WorldGen(this.world.seed);
+    // Score candidates by how many surrounding points share the biome and sit near the same height.
+    let best: [number, number, number] | null = null, bestScore = -1;
+    for (let r = 150; r < 8000; r += 48) for (let a = 0; a < 6.28; a += 0.2) {
+      const x = Math.round(Math.cos(a) * r), z = Math.round(Math.sin(a) * r);
+      const c = gen.column(x, z);
+      if (!biomes.includes(c.biome)) continue;
+      let score = 0;
+      for (let k = 0; k < 8; k++) for (const f of [0.5, 1]) {
+        const col = gen.column(x + Math.round(Math.cos(k * 0.785) * radius * f), z + Math.round(Math.sin(k * 0.785) * radius * f));
+        if (biomes.includes(col.biome)) score++;
+        if (Math.abs(col.height - c.height) <= maxSlope) score++;
+      }
+      if (score > bestScore) { bestScore = score; best = [x, c.height, z]; }
+      if (score === 32) return best;
+    }
+    return best;
+  }
+
   listWorlds(): Promise<WorldMeta[]> {
     return listWorlds();
   }
 
   // ---------- Input ----------
   private lockPointer(): void {
+    if (this.touchMode) return;
     if (this.mode !== 'playing' || this.containers.open || this.menus.current || this.cmdEl.classList.contains('show')) return;
     const p = this.canvas.requestPointerLock?.() as unknown as Promise<void> | undefined;
     if (p && typeof p.catch === 'function') p.catch(() => {});
@@ -464,6 +515,12 @@ export class Game {
 
   private get locked(): boolean {
     return document.pointerLockElement === this.canvas;
+  }
+
+  /** The player is steering the game: pointer locked on desktop, or no menu open on a touch screen. */
+  private get controlling(): boolean {
+    if (this.locked) return true;
+    return this.touchMode && this.mode === 'playing' && !this.containers.open && !this.menus.current && !this.cmdEl.classList.contains('show');
   }
 
   private bindInput(): void {
@@ -531,7 +588,7 @@ export class Game {
       this.openCommand(code === 'Slash' ? '/' : '');
       return;
     }
-    if (!this.locked) return;
+    if (!this.controlling) return;
     this.keys.add(code);
     if (code === 'Space') {
       const now = performance.now();
@@ -1328,6 +1385,16 @@ export class Game {
       }
     }
     const alpha = paused ? 1 : this.acc / TICK;
+    if (this.touch) {
+      this.touch.setVisible(this.controlling && this.player.alive && !this.hudHidden);
+      const [dx, dy] = this.touch.takeLook();
+      if (this.controlling) {
+        const s = 0.0055 * this.settings.sensitivity;
+        this.player.yaw -= dx * s;
+        this.player.pitch -= dy * s * (this.settings.invertY ? -1 : 1);
+        this.player.pitch = Math.max(-Math.PI / 2 + 0.001, Math.min(Math.PI / 2 - 0.001, this.player.pitch));
+      }
+    }
     w.update(this.player.body.pos[0], this.player.body.pos[2], this.settings.renderDistance);
     this.placeCamera(alpha);
     this.updateTarget();
@@ -1420,17 +1487,20 @@ export class Game {
   private tick(): void {
     const w = this.world!, p = this.player, ents = this.entities!;
     this.prevPos = [...p.body.pos];
-    const active = this.locked && p.alive;
+    const active = this.controlling && p.alive;
     const k = (c: string) => active && this.keys.has(c);
-    const forward = (k('KeyW') ? 1 : 0) - (k('KeyS') ? 1 : 0);
-    const strafe = (k('KeyD') ? 1 : 0) - (k('KeyA') ? 1 : 0);
-    p.sneaking = k('ShiftLeft') || k('ShiftRight');
+    const t = active ? this.touch : null;
+    const forward = Math.max(-1, Math.min(1, (k('KeyW') ? 1 : 0) - (k('KeyS') ? 1 : 0) + (t?.moveY ?? 0)));
+    const strafe = Math.max(-1, Math.min(1, (k('KeyD') ? 1 : 0) - (k('KeyA') ? 1 : 0) + (t?.moveX ?? 0)));
+    p.sneaking = k('ShiftLeft') || k('ShiftRight') || !!t?.sneak;
     if (k('ControlLeft') && forward > 0) p.sprinting = true;
+    // On a touch screen, pushing the stick all the way forward sprints.
+    if (t && t.moveY > 0.9) p.sprinting = true;
     if (forward <= 0 || p.sneaking || (p.food <= 6 && !p.creative) || p.body.collidedH) p.sprinting = false;
     if (!p.creative) p.flying = false;
     updateContacts(w, p.body, p.eyeHeight);
     const wasOnGround = p.body.onGround;
-    const jump = k('Space');
+    const jump = k('Space') || !!t?.jump;
     if (p.alive) {
       stepBody(w, p.body, { forward, strafe, jump, sneak: p.sneaking, sprint: p.sprinting, yaw: p.yaw }, p.flying, p.speed);
     }
@@ -1485,7 +1555,7 @@ export class Game {
       setTimeout(() => sfx.explode({ gain: 0.5, pan: (Math.random() - 0.5) }), 300 + Math.random() * 1500);
     }
     // Holding right click repeats placing / keeps eating.
-    if (this.mouse[2] && active) {
+    if (this.mouse[2] && (active || this.locked)) {
       if (this.eating > 0) {
         const held = p.held;
         const food = held ? itemDef(held.id)?.food : undefined;
