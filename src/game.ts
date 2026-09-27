@@ -35,6 +35,9 @@ const DEATH_MESSAGES: Record<string, string> = {
   void: 'You fell out of the world.',
   command: 'You gave up.',
   brambler: 'A Brambler shot you full of thorns.',
+  zombie: 'A zombie got you.',
+  skeleton: 'A skeleton shot you.',
+  witch: 'A witch’s potion got you.',
 };
 
 /** Achievements: id -> [title, description]. */

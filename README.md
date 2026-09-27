@@ -79,13 +79,17 @@ All taken in-game at render distance 16 with the default Fancy graphics.
 
 **Creatures (all original designs)**
 - **Boar**, **Hen** and **Woolback** (a curly-horned ram): follow you when you hold their food, can be bred into babies, and drop food, leather, feathers and wool. Shear a Woolback for its wool; it grows back as it grazes. Hens lay eggs
-- **Mirewalker**: a mossy shambler that comes out at night and burns in sunlight
-- **Shellcrawler**: a six-legged cave dweller, calm in daylight unless provoked
-- **Brambler**: a thorn-covered creature that keeps its distance and shoots barbs at you
+- **Zombie**: a pallid, bandaged shambler that lurches at you in the dark and burns in daylight
+- **Skeleton**: a hooded bone archer that keeps its distance and shoots arrows
+- **Witch**: a spectacled potion-brewer in a patchwork robe who lobs splash potions and drinks a healing brew when hurt; most common in swamps
+- **Blastcap**: a spotted mushroom creature that sneaks up, hisses, swells and bursts
+- **Mirewalker**: a hunched bog-dweller draped in moss that comes out at night and burns in sunlight
+- **Shellcrawler**: a six-legged cave crawler under a ridged shell, calm in daylight unless provoked
+- **Brambler**: a walking thorn-bud on root legs that keeps its distance and spits barbs
 - **Burrowfox**, **Bogfrog** (swamps), **Streamfish** (water) and **cave moths**
-- **Dune Scuttler**: a fast desert pest. **Frostling**: an icy imp in snowy places that throws snowballs
+- **Dune Scuttler**: a fast desert scorpion-thing with a curled stinger. **Frostling**: a crystal-horned ice imp in snowy places that throws snowballs
 - **Villagers**: farmers, shepherds, fishers, butchers, clerics, smiths and librarians, each with their own trades. **Stonewarden**: a mossy guardian that fights monsters near its village
-- **Emberwisp**: floats through the Emberdeep lobbing fireballs. **Cinderbrute**: a heavy basalt brute that shrugs off fire
+- **Emberwisp**: a floating soot-black lantern skull that lobs fireballs. **Cinderbrute**: a hulking basalt ape with glowing seams that shrugs off fire
 
 **Game modes**
 - Survival, and Creative (fly, instant breaking, and every block and item in a searchable palette)
@@ -132,7 +136,7 @@ In inventories: click to pick up or place a stack, right-click to split or place
 
 ## Commands
 
-`/gamemode survival|creative`, `/speed <multiplier>` (walk and fly faster; `/speed 1` resets), `/time set day|noon|sunset|night|midnight|<ticks>`, `/weather clear|rain|thunder`, `/give <item> [count]`, `/xp <amount>`, `/tp <x> <y> <z>`, `/spawn <mob>`, `/locate village`, `/dimension overworld|ember`, `/seed`, `/kill`, `/help`
+`/gamemode survival|creative`, `/speed <multiplier>` (walk and fly faster; `/speed 1` resets), `/time set day|noon|sunset|night|midnight|<ticks>`, `/weather clear|rain|thunder`, `/give <item> [count]`, `/xp <amount>`, `/tp <x> <y> <z>`, `/spawn <mob>` (for example `zombie`, `skeleton`, `witch`, `blastcap`), `/locate village`, `/dimension overworld|ember`, `/seed`, `/kill`, `/help`
 
 Item names for `/give` are the lowercase names with underscores, for example `/give diamond_pickaxe` or `/give oak_stairs 64`.
 

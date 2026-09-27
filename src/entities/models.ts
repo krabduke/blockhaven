@@ -3,10 +3,11 @@
 
 import * as THREE from 'three';
 import { hashString, mulberry32 } from '../noise';
+import { HOSTILE_MODELS } from './hostile-models';
 
-type Paint = (g: CanvasRenderingContext2D, w: number, h: number, face: number, rand: () => number) => void;
+export type Paint = (g: CanvasRenderingContext2D, w: number, h: number, face: number, rand: () => number) => void;
 
-function speckle(base: string, dark: string, light?: string, amount = 0.25): Paint {
+export function speckle(base: string, dark: string, light?: string, amount = 0.25): Paint {
   return (g, w, h, _f, rand) => {
     g.fillStyle = base; g.fillRect(0, 0, w, h);
     for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
@@ -18,14 +19,14 @@ function speckle(base: string, dark: string, light?: string, amount = 0.25): Pai
 }
 
 /** Face index in BoxGeometry order: +x, -x, +y, -y, +z, -z. Front of a mob is -z. */
-function withFace(base: Paint, front: (g: CanvasRenderingContext2D, w: number, h: number) => void): Paint {
+export function withFace(base: Paint, front: (g: CanvasRenderingContext2D, w: number, h: number) => void): Paint {
   return (g, w, h, f, rand) => {
     base(g, w, h, f, rand);
     if (f === 5) front(g, w, h);
   };
 }
 
-function shade(hexColor: string, f: number): string {
+export function shade(hexColor: string, f: number): string {
   const n = parseInt(hexColor.slice(1), 16);
   const c = [(n >> 16) & 255, (n >> 8) & 255, n & 255].map((v) => Math.round(v * f));
   return `rgb(${c[0]},${c[1]},${c[2]})`;
@@ -54,7 +55,7 @@ function boxMaterials(key: string, paint: Paint, px: [number, number, number]): 
   return mats.map((m) => m.clone());
 }
 
-interface PartSpec {
+export interface PartSpec {
   name: string;
   /** Size in model pixels (16 px = 1 block). */
   size: [number, number, number];
@@ -64,6 +65,8 @@ interface PartSpec {
   offset: [number, number, number];
   paint: Paint;
   parent?: string;
+  /** Resting rotation in radians; animations add to it. */
+  rot?: [number, number, number];
 }
 
 export interface MobModel {
@@ -72,7 +75,7 @@ export interface MobModel {
   materials: THREE.MeshBasicMaterial[];
 }
 
-function build(kind: string, specs: PartSpec[]): MobModel {
+export function build(kind: string, specs: PartSpec[]): MobModel {
   const root = new THREE.Group();
   const inner = new THREE.Group();
   root.add(inner);
@@ -89,13 +92,16 @@ function build(kind: string, specs: PartSpec[]): MobModel {
     const parent = s.parent ? parts[s.parent] : inner;
     if (s.parent) pivot.position.sub(parts[s.parent].userData.worldPivot ?? new THREE.Vector3());
     pivot.userData.worldPivot = new THREE.Vector3(s.pivot[0] / 16, s.pivot[1] / 16, s.pivot[2] / 16);
+    const r = s.rot ?? [0, 0, 0];
+    pivot.rotation.set(r[0], r[1], r[2]);
+    pivot.userData.baseRot = r;
     parent.add(pivot);
     parts[s.name] = pivot;
   }
   return { root, parts, materials };
 }
 
-const eyes = (color: string, pupil: string, y: number, spread: number) => (g: CanvasRenderingContext2D, w: number) => {
+export const eyes = (color: string, pupil: string, y: number, spread: number) => (g: CanvasRenderingContext2D, w: number) => {
   const cx = Math.floor(w / 2);
   g.fillStyle = color;
   g.fillRect(cx - spread - 1, y, 2, 2); g.fillRect(cx + spread - 1, y, 2, 2);
@@ -109,6 +115,8 @@ const ROBES: Record<string, [string, string]> = {
 };
 
 export function createModel(kind: string): MobModel {
+  const hostile = HOSTILE_MODELS[kind];
+  if (hostile) return hostile();
   if (kind.startsWith('villager')) {
     const prof = kind.split(':')[1] ?? 'farmer';
     const [robe, trim] = ROBES[prof] ?? ROBES.farmer;
@@ -146,35 +154,6 @@ export function createModel(kind: string): MobModel {
         { name: 'legR', size: [5, 19, 5], pivot: [3.5, 19, 0], offset: [0, -9.5, 0], paint: stone },
       ]);
     }
-    case 'emberwisp': {
-      const shell = speckle('#3a2a2a', '#2a1c1c', '#5a3a30', 0.3);
-      const core: Paint = (g, w, h) => { g.fillStyle = '#ff9a2a'; g.fillRect(0, 0, w, h); g.fillStyle = '#fff0a0'; g.fillRect(1, 1, Math.max(1, w - 2), Math.max(1, h - 2)); };
-      const face = withFace(shell, (g, w) => { g.fillStyle = '#ffb030'; g.fillRect(2, 3, 2, 2); g.fillRect(w - 4, 3, 2, 2); g.fillStyle = '#ff6a1a'; g.fillRect(3, 7, w - 6, 1); });
-      return build(kind, [
-        { name: 'torso', size: [10, 10, 10], pivot: [0, 14, 0], offset: [0, 0, 0], paint: face },
-        { name: 'core', size: [6, 6, 6], pivot: [0, 8, 0], offset: [0, -1, 0], paint: core },
-        { name: 'wingL', size: [1, 6, 9], pivot: [-6, 16, 0], offset: [-1, 0, 0], paint: speckle('#6a2a1a', '#4a1a10') },
-        { name: 'wingR', size: [1, 6, 9], pivot: [6, 16, 0], offset: [1, 0, 0], paint: speckle('#6a2a1a', '#4a1a10') },
-        { name: 'spark', size: [2, 5, 2], pivot: [0, 20, 0], offset: [0, 2, 0], paint: core },
-      ]);
-    }
-    case 'cinderbrute': {
-      const basalt: Paint = (g, w, h, f, rand) => {
-        speckle('#2e2a2c', '#1e1a1c', '#3e383a', 0.35)(g, w, h, f, rand);
-        g.fillStyle = '#ff7a1a';
-        let x = Math.floor(rand() * w);
-        for (let y = 0; y < h; y++) { if (rand() < 0.7) g.fillRect(x, y, 1, 1); x = Math.max(0, Math.min(w - 1, x + (rand() < 0.5 ? -1 : 1))); }
-      };
-      const face = withFace(basalt, (g, w) => { g.fillStyle = '#ffd060'; g.fillRect(1, 2, 2, 1); g.fillRect(w - 3, 2, 2, 1); });
-      return build(kind, [
-        { name: 'torso', size: [14, 12, 9], pivot: [0, 17, 0], offset: [0, 0, 0], paint: basalt },
-        { name: 'head', size: [7, 5, 6], pivot: [0, 22, -2], offset: [0, 2.5, -1], paint: face },
-        { name: 'armL', size: [5, 15, 5], pivot: [-9.5, 21, 0], offset: [0, -6, 0], paint: basalt },
-        { name: 'armR', size: [5, 15, 5], pivot: [9.5, 21, 0], offset: [0, -6, 0], paint: basalt },
-        { name: 'legL', size: [5, 11, 5], pivot: [-4, 11, 0], offset: [0, -5.5, 0], paint: basalt },
-        { name: 'legR', size: [5, 11, 5], pivot: [4, 11, 0], offset: [0, -5.5, 0], paint: basalt },
-      ]);
-    }
     case 'burrowfox': {
       const fur = speckle('#c8682a', '#a8521e', '#e0843a', 0.3);
       const face = withFace(fur, (g, w) => { g.fillStyle = '#f0e8dc'; g.fillRect(1, 4, w - 2, 2); g.fillStyle = '#1a1210'; g.fillRect(1, 2, 1, 1); g.fillRect(w - 2, 2, 1, 1); g.fillRect(Math.floor(w / 2), 5, 1, 1); });
@@ -200,35 +179,6 @@ export function createModel(kind: string): MobModel {
         { name: 'eyeR', size: [2, 2, 2], pivot: [2.5, 8, -3], offset: [0, 0, 0], paint: withFace(speckle('#e8e0a0', '#d8d090'), (g) => { g.fillStyle = '#101010'; g.fillRect(1, 0, 1, 1); }), parent: 'head' },
         { name: 'legBL', size: [3, 2, 4], pivot: [-4, 1, 3], offset: [0, 0, 0], paint: skin },
         { name: 'legBR', size: [3, 2, 4], pivot: [4, 1, 3], offset: [0, 0, 0], paint: skin },
-      ]);
-    }
-    case 'dunescuttler': {
-      const chitin = speckle('#c8a868', '#a88848', '#e0c888', 0.35);
-      const legs: PartSpec[] = [];
-      for (let i = 0; i < 3; i++) {
-        legs.push({ name: 'legL' + i, size: [7, 1.5, 1.5], pivot: [-3, 3, -2 + i * 2.5], offset: [-3.5, -0.5, 0], paint: chitin });
-        legs.push({ name: 'legR' + i, size: [7, 1.5, 1.5], pivot: [3, 3, -2 + i * 2.5], offset: [3.5, -0.5, 0], paint: chitin });
-      }
-      return build(kind, [
-        { name: 'torso', size: [6, 3, 9], pivot: [0, 4, 0], offset: [0, 0, 0], paint: chitin },
-        { name: 'head', size: [5, 3, 3], pivot: [0, 4, -5], offset: [0, 0, -1], paint: withFace(chitin, (g) => { g.fillStyle = '#1a1208'; g.fillRect(1, 1, 1, 1); g.fillRect(3, 1, 1, 1); }) },
-        { name: 'tail', size: [2, 2, 7], pivot: [0, 5, 4], offset: [0, 2, 3], paint: chitin },
-        { name: 'sting', size: [2, 4, 2], pivot: [0, 10, 9], offset: [0, 0, -1], paint: speckle('#6a2a1a', '#4a1a10'), parent: 'tail' },
-        ...legs,
-      ]);
-    }
-    case 'frostling': {
-      const ice = speckle('#b8d8f0', '#98bcd8', '#e0f0ff', 0.35);
-      const face = withFace(ice, (g, w) => { g.fillStyle = '#1a3a6a'; g.fillRect(1, 3, 2, 1); g.fillRect(w - 3, 3, 2, 1); });
-      return build(kind, [
-        { name: 'torso', size: [6, 8, 4], pivot: [0, 12, 0], offset: [0, 0, 0], paint: ice },
-        { name: 'head', size: [6, 6, 6], pivot: [0, 16, 0], offset: [0, 3, 0], paint: face },
-        { name: 'hornL', size: [1, 4, 1], pivot: [-2, 22, 0], offset: [0, 1.5, 0], paint: speckle('#ffffff', '#d8e8f8'), parent: 'head' },
-        { name: 'hornR', size: [1, 4, 1], pivot: [2, 22, 0], offset: [0, 1.5, 0], paint: speckle('#ffffff', '#d8e8f8'), parent: 'head' },
-        { name: 'armL', size: [2, 8, 2], pivot: [-4, 15, 0], offset: [0, -4, 0], paint: ice },
-        { name: 'armR', size: [2, 8, 2], pivot: [4, 15, 0], offset: [0, -4, 0], paint: ice },
-        { name: 'legL', size: [2, 8, 2], pivot: [-1.5, 8, 0], offset: [0, -4, 0], paint: ice },
-        { name: 'legR', size: [2, 8, 2], pivot: [1.5, 8, 0], offset: [0, -4, 0], paint: ice },
       ]);
     }
     case 'cavemoth': {
@@ -292,61 +242,6 @@ export function createModel(kind: string): MobModel {
         { name: 'legFR', size: [3, 9, 3], pivot: [3, 9, -5], offset: [0, -4.5, 0], paint: speckle('#3b3431', '#2b2522') },
         { name: 'legBL', size: [3, 9, 3], pivot: [-3, 9, 5], offset: [0, -4.5, 0], paint: speckle('#3b3431', '#2b2522') },
         { name: 'legBR', size: [3, 9, 3], pivot: [3, 9, 5], offset: [0, -4.5, 0], paint: speckle('#3b3431', '#2b2522') },
-      ]);
-    }
-    case 'mirewalker': {
-      const mud = speckle('#3f4a2e', '#2c3520', '#5a6a3a', 0.4);
-      const face = withFace(mud, (g, w) => {
-        g.fillStyle = '#1a1f12'; g.fillRect(1, 3, w - 2, 2);
-        g.fillStyle = '#f2d24a'; g.fillRect(2, 3, 2, 1); g.fillRect(w - 4, 3, 2, 1);
-      });
-      return build(kind, [
-        { name: 'torso', size: [8, 12, 4], pivot: [0, 18, 0], offset: [0, 0, 0], paint: mud },
-        { name: 'head', size: [8, 8, 8], pivot: [0, 24, 0], offset: [0, 4, 0], paint: face },
-        { name: 'armL', size: [3, 14, 3], pivot: [-5.5, 23, 0], offset: [0, -6, 0], paint: speckle('#34402a', '#252e1c') },
-        { name: 'armR', size: [3, 14, 3], pivot: [5.5, 23, 0], offset: [0, -6, 0], paint: speckle('#34402a', '#252e1c') },
-        { name: 'legL', size: [4, 12, 4], pivot: [-2, 12, 0], offset: [0, -6, 0], paint: speckle('#2c3520', '#1f2717') },
-        { name: 'legR', size: [4, 12, 4], pivot: [2, 12, 0], offset: [0, -6, 0], paint: speckle('#2c3520', '#1f2717') },
-      ]);
-    }
-    case 'brambler': {
-      const bark = speckle('#34462a', '#243220', '#4a6236', 0.4);
-      const thorny: Paint = (g, w, h, f, rand) => {
-        bark(g, w, h, f, rand);
-        g.fillStyle = '#a8342a';
-        for (let i = 0; i < Math.max(2, (w * h) / 10); i++) g.fillRect(Math.floor(rand() * w), Math.floor(rand() * h), 1, 1);
-      };
-      const face = withFace(thorny, (g, w) => {
-        g.fillStyle = '#141a10'; g.fillRect(1, 2, w - 2, 3);
-        g.fillStyle = '#f5b030'; g.fillRect(Math.floor(w / 2) - 1, 3, 2, 1);
-      });
-      return build(kind, [
-        { name: 'torso', size: [8, 11, 6], pivot: [0, 18, 1], offset: [0, 0, 0], paint: thorny },
-        { name: 'head', size: [7, 7, 7], pivot: [0, 23, -1], offset: [0, 3.5, -1], paint: face },
-        { name: 'crest', size: [2, 4, 6], pivot: [0, 30, -1], offset: [0, 1, 0], paint: speckle('#a8342a', '#7a2018'), parent: 'head' },
-        { name: 'armL', size: [2, 14, 2], pivot: [-5, 22, 0], offset: [0, -6, 0], paint: thorny },
-        { name: 'armR', size: [2, 14, 2], pivot: [5, 22, 0], offset: [0, -6, 0], paint: thorny },
-        { name: 'legL', size: [3, 12, 3], pivot: [-2, 12, 1], offset: [0, -6, 0], paint: speckle('#243220', '#18220f') },
-        { name: 'legR', size: [3, 12, 3], pivot: [2, 12, 1], offset: [0, -6, 0], paint: speckle('#243220', '#18220f') },
-      ]);
-    }
-    case 'shellcrawler': {
-      const shell = speckle('#2f6f6a', '#1f4f4b', '#4a948c', 0.35);
-      const face = withFace(speckle('#244a47', '#1a3634'), (g, w) => {
-        g.fillStyle = '#f0a030';
-        g.fillRect(1, 1, 1, 1); g.fillRect(3, 2, 1, 1); g.fillRect(w - 2, 1, 1, 1); g.fillRect(w - 4, 2, 1, 1);
-      });
-      const leg = speckle('#1a3634', '#10221f');
-      const legs: PartSpec[] = [];
-      for (let i = 0; i < 3; i++) {
-        const z = -4 + i * 4;
-        legs.push({ name: 'legL' + i, size: [12, 2, 2], pivot: [-5, 5, z], offset: [-6, 0, 0], paint: leg });
-        legs.push({ name: 'legR' + i, size: [12, 2, 2], pivot: [5, 5, z], offset: [6, 0, 0], paint: leg });
-      }
-      return build(kind, [
-        { name: 'torso', size: [11, 6, 14], pivot: [0, 6, 1], offset: [0, 0, 0], paint: shell },
-        { name: 'head', size: [8, 5, 5], pivot: [0, 6, -6], offset: [0, 0, -2.5], paint: face },
-        ...legs,
       ]);
     }
     default:

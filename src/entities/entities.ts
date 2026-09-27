@@ -46,6 +46,10 @@ interface MobSpec {
   guardian?: boolean;
   trader?: boolean;
   hops?: boolean;
+  /** Creeps up, swells and bursts. */
+  exploder?: boolean;
+  /** Ticks between ranged attacks. */
+  shotDelay?: number;
   /** Where it naturally spawns. */
   habitat?: 'ember' | 'cave' | 'water' | 'desert' | 'cold' | 'forest' | 'swamp';
 }
@@ -66,6 +70,10 @@ export const MOBS: Record<string, MobSpec> = {
   frostling: { kind: 'frostling', width: 0.5, height: 1.4, health: 14, speed: 0.75, hostile: true, ranged: true, projectile: 'snowball', habitat: 'cold', pitch: 1100, xp: 5, drops: (r) => [{ id: I.snowball, count: 1 + Math.floor(r() * 4) }, ...(r() < 0.2 ? [{ id: B.ice, count: 1 }] : [])] },
   cavemoth: { kind: 'cavemoth', width: 0.4, height: 0.4, health: 4, speed: 0.4, hostile: false, flying: true, habitat: 'cave', pitch: 1400, xp: 0, drops: () => [] },
   streamfish: { kind: 'streamfish', width: 0.4, height: 0.3, health: 3, speed: 0.5, hostile: false, aquatic: true, habitat: 'water', pitch: 1200, xp: 1, drops: () => [{ id: I.raw_fish, count: 1 }] },
+  zombie: { kind: 'zombie', width: 0.6, height: 1.95, health: 20, speed: 0.7, hostile: true, attack: 3, burnsInDay: true, pitch: 140, xp: 5, drops: (r) => [{ id: I.rotten_flesh, count: Math.floor(r() * 3) }, ...(r() < 0.03 ? [{ id: I.iron_ingot, count: 1 }] : r() < 0.04 ? [{ id: I.carrot, count: 1 }] : [])] },
+  skeleton: { kind: 'skeleton', width: 0.6, height: 1.95, health: 20, speed: 0.7, hostile: true, ranged: true, projectile: 'arrow', shotDelay: 34, burnsInDay: true, pitch: 480, xp: 5, drops: (r) => [{ id: I.bone, count: Math.floor(r() * 3) }, { id: I.arrow, count: Math.floor(r() * 3) }] },
+  witch: { kind: 'witch', width: 0.6, height: 1.95, health: 26, speed: 0.6, hostile: true, ranged: true, projectile: 'potion', shotDelay: 60, pitch: 620, xp: 5, drops: (r) => [[I.glow_dust, I.sugar, I.string, I.stick, I.gunpowder][Math.floor(r() * 5)]].map((id) => ({ id, count: 1 + Math.floor(r() * 2) })) },
+  blastcap: { kind: 'blastcap', width: 0.8, height: 1.1, health: 16, speed: 0.8, hostile: true, exploder: true, pitch: 360, xp: 5, drops: (r) => [{ id: I.gunpowder, count: Math.floor(r() * 3) }] },
   brambler: { kind: 'brambler', width: 0.6, height: 1.9, health: 20, speed: 0.7, hostile: true, ranged: true, projectile: 'thorn', burnsInDay: true, pitch: 260, xp: 5, drops: (r) => [{ id: I.arrow, count: Math.floor(r() * 3) }, { id: I.bone, count: Math.floor(r() * 3) }, { id: I.gunpowder, count: Math.floor(r() * 2) }] },
 };
 
@@ -232,6 +240,11 @@ export class Mob extends Entity {
   offers: TradeOffer[] = [];
   hopTimer = 0;
   flyTarget: [number, number, number] | null = null;
+  /** Aiming at or chasing a target this tick (drives arm poses). */
+  aiming = false;
+  /** Blastcap fuse, 0..30. */
+  fuse = 0;
+  healCooldown = 0;
   model: MobModel;
   constructor(readonly spec: MobSpec, x: number, y: number, z: number, profession?: string) {
     const body = new Body(x, y, z, spec.width, spec.height);
@@ -316,6 +329,8 @@ export class Mob extends Entity {
     const w = m.world, b = this.body, p = m.player;
     updateContacts(w, b, this.body.height * 0.85);
     if (this.angry > 0) this.angry--;
+    if (this.healCooldown > 0) this.healCooldown--;
+    this.aiming = false;
     if (this.spec.flying) { this.flyTick(m); return; }
     if (this.spec.aquatic) { this.swimTick(m); return; }
     let forward = 0;
@@ -347,12 +362,40 @@ export class Mob extends Entity {
       const tp = target!.pos;
       const sees = m.lineOfSight([b.pos[0], b.pos[1] + b.height * 0.8, b.pos[2]], [tp[0], tp[1] + target!.eye, tp[2]]);
       forward = pd > 10 || !sees ? 1 : pd < 5 ? -1 : 0;
+      this.aiming = sees && pd < 16;
+      // Witches drink a healing brew when badly hurt.
+      if (this.spec.kind === 'witch' && this.health < this.spec.health * 0.4 && this.healCooldown === 0) {
+        this.health = Math.min(this.spec.health, this.health + 10);
+        this.healCooldown = 400;
+        for (let i = 0; i < 8; i++) m.heart(b.pos[0], b.pos[1] + 1.8, b.pos[2]);
+      }
       if (sees && pd < 14 && this.attackCooldown === 0) {
-        this.attackCooldown = this.spec.projectile === 'snowball' ? 25 : 40;
-        m.shoot(this.spec.projectile ?? 'thorn', this, [b.pos[0], b.pos[1] + b.height * 0.8, b.pos[2]], [toPlayer[0], toPlayer[1] + target!.eye - b.height * 0.8 + pd * 0.03, toPlayer[2]], this.spec.projectile === 'snowball' ? 1.3 : 1.4, 0.12);
+        this.attackCooldown = this.spec.shotDelay ?? (this.spec.projectile === 'snowball' ? 25 : 40);
+        const kind = this.spec.projectile ?? 'thorn';
+        const speed = kind === 'snowball' ? 1.3 : kind === 'potion' ? 0.75 : kind === 'arrow' ? 1.6 : 1.4;
+        const lob = kind === 'potion' ? pd * 0.09 : pd * 0.03;
+        m.shoot(kind, this, [b.pos[0], b.pos[1] + b.height * 0.8, b.pos[2]], [toPlayer[0], toPlayer[1] + target!.eye - b.height * 0.8 + lob, toPlayer[2]], speed, kind === 'arrow' ? 0.06 : 0.12);
+      }
+    } else if (aggressive && this.spec.exploder) {
+      face(toPlayer[0], toPlayer[2]);
+      this.aiming = true;
+      const close = pd < 3 && m.lineOfSight([b.pos[0], b.pos[1] + 0.8, b.pos[2]], [target!.pos[0], target!.pos[1] + target!.eye, target!.pos[2]]);
+      if (close || (this.fuse > 0 && pd < 7)) {
+        if (this.fuse === 0) sfx.fuse(m.spatialFor(b.pos));
+        this.fuse++;
+        forward = 0;
+        if (this.fuse >= 30) {
+          this.dead = true;
+          m.explode(b.pos[0], b.pos[1] + 0.5, b.pos[2], 3);
+          return;
+        }
+      } else {
+        this.fuse = Math.max(0, this.fuse - 1);
+        forward = pd > 1.5 ? 1 : 0;
       }
     } else if (aggressive) {
       face(toPlayer[0], toPlayer[2]);
+      this.aiming = true;
       forward = pd > 0.9 ? 1 : 0;
       if (pd < 1.3 + this.spec.width / 2 && Math.abs(toPlayer[1]) < 1.8 && this.attackCooldown === 0) {
         this.attackCooldown = this.spec.guardian ? 30 : 20;
@@ -523,21 +566,43 @@ export class Mob extends Entity {
     this.object.scale.setScalar(this.baby ? 0.55 : 1);
     if (this.baby && parts.head) parts.head.scale.setScalar(1.35);
     const swing = Math.sin(this.walkAnim) * 0.7;
+    const crawler = this.spec.kind === 'shellcrawler' || this.spec.kind === 'dunescuttler';
     for (const [name, o] of Object.entries(parts)) {
+      const base = (o.userData.baseRot as number[] | undefined) ?? [0, 0, 0];
       if (name.startsWith('leg')) {
         const phase = /FL|BR|L$|L0|R1|L2/.test(name) ? 1 : -1;
-        if (this.spec.kind === 'shellcrawler') o.rotation.y = swing * 0.4 * phase;
-        else o.rotation.x = swing * phase;
+        if (crawler) o.rotation.y = base[1] + swing * 0.4 * phase;
+        else o.rotation.x = base[0] + swing * phase * (this.spec.kind === 'cinderbrute' ? 0.5 : 1);
       }
       if (name === 'armL' || name === 'armR') {
-        const raise = this.spec.ranged ? (this.attackCooldown > 30 ? -2.2 : -1.2) : -1.4;
-        o.rotation.x = raise + Math.sin(this.walkAnim) * 0.2 * (name === 'armL' ? 1 : -1) - (!this.spec.ranged && this.attackCooldown > 14 ? 0.6 : 0);
+        const left = name === 'armL';
+        let a = Math.sin(this.walkAnim) * 0.35 * (left ? 1 : -1);
+        const k = this.spec.kind;
+        if (k === 'skeleton' && this.aiming) a = -1.45 + (left ? 0.1 : 0);         // bow up, drawing
+        else if (k === 'witch' && !left && this.attackCooldown > (this.spec.shotDelay ?? 40) - 10) a = -2.2; // throwing arm
+        else if (k === 'frostling' && !left && this.attackCooldown > 15) a = -2.0;
+        else if (k === 'brambler' && this.attackCooldown > 30) a = -1.9;
+        else if (!this.spec.ranged && this.attackCooldown > 14) a -= 1.2;          // melee swipe
+        else if (k === 'zombie' && this.aiming) a -= 0.55;                          // reaching lurch
+        o.rotation.x = base[0] + a;
       }
       const flap = this.spec.flying ? Math.sin(this.age * (this.spec.kind === 'cavemoth' ? 1.4 : 0.3)) * 0.8 : Math.sin(this.age) * 0.8;
-      if (name === 'wingL') o.rotation.z = this.body.onGround && !this.spec.flying ? 0 : flap;
-      if (name === 'wingR') o.rotation.z = this.body.onGround && !this.spec.flying ? 0 : -flap;
+      if (name === 'wingL') o.rotation.z = base[2] + (this.body.onGround && !this.spec.flying ? 0 : flap);
+      if (name === 'wingR') o.rotation.z = base[2] - (this.body.onGround && !this.spec.flying ? 0 : flap);
       if (name === 'tail' && this.spec.kind === 'streamfish') o.rotation.y = Math.sin(this.walkAnim) * 0.6;
+      if (name === 'tail' && this.spec.kind === 'dunescuttler') o.rotation.x = base[0] + Math.sin(this.age * 0.15) * 0.12;
+      if (name.startsWith('flame')) o.scale.y = 0.8 + Math.sin(this.age * 0.5 + name.length) * 0.25;
       if (name === 'core') o.rotation.y = this.age * 0.05;
+    }
+    if (this.fuse > 0) {
+      // Swell and flash white before bursting.
+      const t = this.fuse / 30;
+      this.object.scale.multiplyScalar(1 + t * 0.35 + Math.sin(this.age * 1.3) * 0.03 * t);
+      if (Math.floor(this.age / 3) % 2 === 0) this.object.traverse((o) => {
+        const mat = (o as THREE.Mesh).material;
+        if (!mat) return;
+        for (const mm of Array.isArray(mat) ? mat : [mat]) (mm as THREE.MeshBasicMaterial).color.lerp(new THREE.Color(1, 1, 1), 0.5 + t * 0.4);
+      });
     }
     if (parts.torso && this.spec.kind === 'woolback') parts.torso.scale.set(this.sheared ? 0.78 : 1, this.sheared ? 0.8 : 1, this.sheared ? 0.92 : 1);
     if (parts.head) parts.head.rotation.y = Math.max(-1, Math.min(1, this.headYaw));
@@ -554,7 +619,7 @@ export class Mob extends Entity {
 }
 
 // ---------- Projectiles, XP orbs, fishing bobber ----------
-export type ProjectileKind = 'arrow' | 'thorn' | 'snowball' | 'egg' | 'fireball';
+export type ProjectileKind = 'arrow' | 'thorn' | 'snowball' | 'egg' | 'fireball' | 'potion';
 
 export class Projectile extends Entity {
   stuck = 0;
@@ -565,7 +630,12 @@ export class Projectile extends Entity {
   }
   static makeObject(kind: ProjectileKind, renderer: Renderer): THREE.Object3D {
     const g = new THREE.Group();
-    if (kind === 'arrow' || kind === 'thorn') {
+    if (kind === 'potion') {
+      const bottle = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.24, 0.18), new THREE.MeshBasicMaterial({ color: 0x9a4ad8 }));
+      const neck = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.08, 0.08), new THREE.MeshBasicMaterial({ color: 0x8a6a3a }));
+      neck.position.y = 0.16;
+      g.add(bottle, neck);
+    } else if (kind === 'arrow' || kind === 'thorn') {
       const shaft = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.05, 0.6), new THREE.MeshBasicMaterial({ color: kind === 'arrow' ? 0x8a6a3a : 0x3f6a2a }));
       const tip = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.08, 0.1), new THREE.MeshBasicMaterial({ color: kind === 'arrow' ? 0xbcbcbc : 0xa02a2a }));
       tip.position.z = -0.32;
@@ -613,6 +683,7 @@ export class Projectile extends Entity {
         for (let s = 0; s <= 4; s++) {
           const q = [b.pos[0] + dir[0] * speed * s / 4, b.pos[1] + dir[1] * speed * s / 4, b.pos[2] + dir[2] * speed * s / 4];
           if (q[0] > lo[0] && q[0] < hi[0] && q[1] > lo[1] && q[1] < hi[1] && q[2] > lo[2] && q[2] < hi[2]) {
+            if (this.kind === 'potion') return true; // splash damage is dealt on impact
             p.damage(Math.ceil(speed * this.baseDamage), (this.owner as Mob).spec.kind, [dir[0], dir[2]]);
             return true;
           }
@@ -653,6 +724,14 @@ export class Projectile extends Entity {
   private impact(m: EntityManager): void {
     const b = this.body;
     if (this.kind === 'fireball') { m.explode(b.pos[0], b.pos[1], b.pos[2], 1.2, true); return; }
+    if (this.kind === 'potion') {
+      sfx.breakBlock('glass', m.spatialFor(b.pos));
+      for (let i = 0; i < 24; i++) m.particles.add(new THREE.Vector3(...b.pos), new THREE.Vector3((Math.random() - 0.5) * 0.25, Math.random() * 0.15, (Math.random() - 0.5) * 0.25), new THREE.Color(0.6 + Math.random() * 0.2, 0.3, 0.85), 18, 0.08, 0.01);
+      const p = m.player;
+      const d = Math.hypot(p.body.pos[0] - b.pos[0], p.body.pos[1] + 0.9 - b.pos[1], p.body.pos[2] - b.pos[2]);
+      if (p.alive && d < 2.6) p.damage(Math.ceil(5 * (1 - d / 2.6)) + 1, 'witch');
+      return;
+    }
     if (this.kind === 'snowball') for (let i = 0; i < 6; i++) m.particles.add(new THREE.Vector3(...b.pos), new THREE.Vector3((Math.random() - 0.5) * 0.1, Math.random() * 0.1, (Math.random() - 0.5) * 0.1), new THREE.Color(0.95, 0.97, 1), 12, 0.07);
     if (this.kind === 'egg') {
       for (let i = 0; i < 6; i++) m.particles.add(new THREE.Vector3(...b.pos), new THREE.Vector3((Math.random() - 0.5) * 0.1, Math.random() * 0.1, (Math.random() - 0.5) * 0.1), new THREE.Color(0.9, 0.85, 0.7), 12, 0.07);
@@ -887,7 +966,7 @@ export class EntityManager {
       let t = this.spawnerTimers.get(key) ?? 20 + Math.floor(Math.random() * 200);
       if (--t > 0) { this.spawnerTimers.set(key, t); continue; }
       this.spawnerTimers.set(key, 200 + Math.floor(Math.random() * 600));
-      const kinds = this.world.dimension === 'ember' ? ['emberwisp', 'cinderbrute'] : ['mirewalker', 'shellcrawler', 'brambler'];
+      const kinds = this.world.dimension === 'ember' ? ['emberwisp', 'cinderbrute'] : ['zombie', 'skeleton', 'shellcrawler', 'mirewalker', 'brambler'];
       const kind = kinds[Math.abs(x * 31 + z * 17 + y) % kinds.length];
       const nearby = this.mobs().filter((m) => m.spec.kind === kind && Math.hypot(m.body.pos[0] - x, m.body.pos[1] - y, m.body.pos[2] - z) < 9).length;
       if (nearby >= 6) continue;
@@ -1055,8 +1134,12 @@ export class EntityManager {
           if (bl > 0 || sky > 7) break;
           const biome = this.biomeAt(pos[0], pos[2]);
           const surface = w.getSky(pos[0], y, pos[2]) > 10;
-          const r = Math.random();
-          let kind = r < 0.45 ? 'mirewalker' : r < 0.7 ? 'shellcrawler' : 'brambler';
+          const table: [string, number][] = biome === 8
+            ? [['witch', 3], ['mirewalker', 4], ['zombie', 2], ['blastcap', 1]]
+            : [['zombie', 26], ['skeleton', 20], ['blastcap', 14], ['shellcrawler', 14], ['mirewalker', 8], ['brambler', 8], ['witch', 4]];
+          let pick = Math.random() * table.reduce((n, t) => n + t[1], 0);
+          let kind = table[0][0];
+          for (const [k, wgt] of table) { if (pick < wgt) { kind = k; break; } pick -= wgt; }
           if (surface && biome === 3 && Math.random() < 0.5) kind = 'dunescuttler';
           if (surface && (biome === 4 || biome === 5) && Math.random() < 0.5) kind = 'frostling';
           if (kind === 'shellcrawler' && (w.getBlock(pos[0] + 1, y, pos[2]) !== 0 || w.getBlock(pos[0], y, pos[2] + 1) !== 0)) break;
@@ -1188,6 +1271,7 @@ export class EntityManager {
       return Math.floor((impact * impact + impact) / 2 * 7 * power * 2 + 1);
     };
     for (const e of this.list) {
+      if (e.dead) continue;
       if (e instanceof Mob) { const dmg = hitBody(e.body); if (dmg) e.hurt(this, dmg, null, 0.4, true); }
       else if (e instanceof ItemEntity && hitBody(e.body) > 20) e.dead = true;
     }

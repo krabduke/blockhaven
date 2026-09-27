@@ -319,12 +319,49 @@ check('fire spreads through and burns wooden planks', fire.planksLeft < 4, JSON.
 const zoo = await g(async ({ x, y, z }) => {
   const G = window.blockhaven;
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-  const kinds = ['burrowfox', 'bogfrog', 'dunescuttler', 'frostling', 'cavemoth', 'stonewarden', 'villager'];
+  const kinds = ['burrowfox', 'bogfrog', 'dunescuttler', 'frostling', 'cavemoth', 'stonewarden', 'villager', 'zombie', 'skeleton', 'witch', 'blastcap'];
   const ms = kinds.map((k, i) => G.entities.spawnMob(k, x + 0.5 + i, y + 1, z + 3.5, 'smith'));
   await sleep(2000);
   return ms.map((m) => ({ k: m.spec.kind, alive: !m.dead, y: +m.body.pos[1].toFixed(1) }));
 }, setup);
 check('new creatures spawn and move without errors', zoo.every((m) => m.alive), JSON.stringify(zoo));
+
+// --- Classic monsters: a Blastcap bursts next to you, a skeleton shoots you, a witch's potion splashes you.
+const monsters = await g(async ({ x, y, z }) => {
+  const G = window.blockhaven, p = G.player, w = G.world, E = G.entities;
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  const out = {};
+  for (const m of E.mobs()) m.dead = true;
+  const bx = x + 40, bz = z + 40;
+  const by = w.groundY(bx, bz) - 1;
+  for (let dx = -8; dx <= 8; dx++) for (let dz = -12; dz <= 4; dz++) { for (let dy = 1; dy <= 5; dy++) w.setBlock(bx + dx, by + dy, bz + dz, 0); w.setBlock(bx + dx, by, bz + dz, 1); }
+  const reset = () => { p.creative = false; p.flying = false; p.alive = true; p.health = 20; p.invulnerable = 0; p.armor.slots.fill(null); p.body.pos = [bx + 0.5, by + 1, bz + 0.5]; p.body.vel = [0, 0, 0]; };
+  G.world.time = 18000;
+  reset();
+  const sk = E.spawnMob('skeleton', bx + 0.5, by + 1, bz - 9.5);
+  let t1 = w.tickCount;
+  while (w.tickCount - t1 < 160 && p.health === 20) await sleep(100);
+  out.healthAfterSkeleton = p.health;
+  sk.dead = true;
+  reset();
+  const wi = E.spawnMob('witch', bx + 0.5, by + 1, bz - 7.5);
+  t1 = w.tickCount;
+  while (w.tickCount - t1 < 200 && p.health === 20) await sleep(100);
+  out.healthAfterWitch = p.health;
+  wi.dead = true;
+  reset();
+  const cap = E.spawnMob('blastcap', bx + 0.5, by + 1, bz - 1.5);
+  const t0 = w.tickCount;
+  while (w.tickCount - t0 < 80 && !cap.dead) await sleep(100);
+  out.blastcapExploded = cap.dead;
+  out.healthAfterBlast = p.health;
+  reset();
+  G.world.time = 6000;
+  return out;
+}, setup);
+check('a Blastcap swells up and bursts next to you', monsters.blastcapExploded && monsters.healthAfterBlast < 20, JSON.stringify(monsters));
+check('a skeleton shoots you with arrows', monsters.healthAfterSkeleton < 20, `health ${monsters.healthAfterSkeleton}`);
+check('a witch hits you with a splash potion', monsters.healthAfterWitch < 20, `health ${monsters.healthAfterWitch}`);
 
 // --- Villages: find one, go there, meet villagers, trade.
 const village = await g(async () => {
