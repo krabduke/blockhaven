@@ -1,0 +1,167 @@
+// Heads-up display: crosshair, hotbar, health / hunger / air meters.
+
+import { itemDef, maxDurability } from '../items';
+import type { Player } from '../player';
+import { iconURL } from './icons';
+
+type Pix = string[];
+function sprite(rows: Pix, pal: Record<string, string>): string {
+  const cv = document.createElement('canvas');
+  cv.width = rows[0].length; cv.height = rows.length;
+  const g = cv.getContext('2d')!;
+  rows.forEach((r, y) => [...r].forEach((ch, x) => {
+    if (pal[ch]) { g.fillStyle = pal[ch]; g.fillRect(x, y, 1, 1); }
+  }));
+  return cv.toDataURL();
+}
+
+const HEART = ['.kk.kk.', 'kffkffk', 'kfhffff', 'kffffff', '.kffff.', '..kff..', '...k...'];
+const HALF_HEART = ['.kk.kk.', 'kffkeek', 'kfhfeee', 'kfffeee', '.kffee.', '..kfe..', '...k...'];
+const LOAF = ['..kkkk..', '.kbbbbk.', 'kbhbhbbk', 'kbbbbbbk', 'kdddddk.', '.kkkkk..'];
+const HALF_LOAF = ['..kkkk..', '.kbbeek.', 'kbhbeeek', 'kbbbeeek', 'kddeeek.', '.kkkkk..'];
+const BUBBLE = ['.kkk.', 'kwbbk', 'kbbbk', 'kbbbk', '.kkk.'];
+const SHIELD = ['kkkkkkk', 'kfhfffk', 'kffffff', 'kffffek', '.kffek.', '..kek..', '...k...'];
+const HALF_SHIELD = ['kkkkkkk', 'kfhfeek', 'kffeeek', 'kffeeek', '.kfeek.', '..kek..', '...k...'];
+
+let icons: Record<string, string> | null = null;
+function hudIcons(): Record<string, string> {
+  if (icons) return icons;
+  const heartPal = { k: '#2a0e0a', f: '#d9383a', h: '#ff9a8a', e: '#4a2a26' };
+  const emptyPal = { k: '#2a0e0a', f: '#4a2a26', h: '#5a3a36', e: '#4a2a26' };
+  const loafPal = { k: '#2a1a0a', b: '#d08a3a', h: '#f0c070', d: '#8a5a22', e: '#3a2a1c' };
+  const loafEmpty = { k: '#2a1a0a', b: '#3a2a1c', h: '#3a2a1c', d: '#2a1d14', e: '#3a2a1c' };
+  icons = {
+    heart: sprite(HEART, heartPal), halfHeart: sprite(HALF_HEART, heartPal), emptyHeart: sprite(HEART, emptyPal),
+    loaf: sprite(LOAF, loafPal), halfLoaf: sprite(HALF_LOAF, loafPal), emptyLoaf: sprite(LOAF, loafEmpty),
+    bubble: sprite(BUBBLE, { k: '#0e2a4a', w: '#ffffff', b: '#5aa8ec' }),
+    shield: sprite(SHIELD, { k: '#1c1c22', f: '#c8ccd4', h: '#ffffff', e: '#8a8e96' }),
+    halfShield: sprite(HALF_SHIELD, { k: '#1c1c22', f: '#c8ccd4', h: '#ffffff', e: '#34343c' }),
+  };
+  return icons;
+}
+
+export class Hud {
+  root: HTMLElement;
+  private slots: HTMLElement[] = [];
+  private hearts: HTMLImageElement[] = [];
+  private loaves: HTMLImageElement[] = [];
+  private bubbles: HTMLElement;
+  private armorEl: HTMLElement;
+  private xpBar: HTMLElement;
+  private xpText: HTMLElement;
+  private lastArmor = -1;
+  private stats: HTMLElement;
+  private heldName: HTMLElement;
+  private nameTimer = 0;
+  private lastSel = -1;
+  private lastKey = '';
+
+  constructor(parent: HTMLElement) {
+    const ic = hudIcons();
+    this.root = document.createElement('div');
+    this.root.id = 'hud';
+    this.root.innerHTML = `
+      <div class="crosshair"></div>
+      <div class="hotbar-wrap">
+        <div class="held-name fade"></div>
+        <div class="stats top"><div class="meter armor"></div><div class="air"></div></div>
+        <div class="stats"><div class="meter hearts"></div><div class="meter food"></div></div>
+        <div class="xp"><i></i><span></span></div>
+        <div class="hotbar"></div>
+      </div>`;
+    parent.appendChild(this.root);
+    const hb = this.root.querySelector('.hotbar')!;
+    for (let i = 0; i < 9; i++) {
+      const s = document.createElement('div');
+      s.className = 'hslot';
+      hb.appendChild(s);
+      this.slots.push(s);
+    }
+    const h = this.root.querySelector('.hearts')!, f = this.root.querySelector('.food')!;
+    for (let i = 0; i < 10; i++) {
+      const a = new Image(); a.src = ic.heart; a.alt = ''; h.appendChild(a); this.hearts.push(a);
+      const b = new Image(); b.src = ic.loaf; b.alt = ''; f.appendChild(b); this.loaves.push(b);
+    }
+    this.bubbles = this.root.querySelector('.air')!;
+    this.armorEl = this.root.querySelector('.armor')!;
+    this.xpBar = this.root.querySelector('.xp > i')!;
+    this.xpText = this.root.querySelector('.xp > span')!;
+    this.stats = this.root.querySelector('.stats')!;
+    this.heldName = this.root.querySelector('.held-name')!;
+  }
+
+  setVisible(v: boolean): void {
+    this.root.classList.toggle('hidden', !v);
+  }
+
+  update(p: Player, dt: number): void {
+    const ic = hudIcons();
+    // Hotbar contents (only touch the DOM when something changed).
+    const key = p.inv.slots.slice(0, 9).map((s) => (s ? `${s.id}:${s.count}:${s.damage ?? ''}:${s.ench?.length ?? 0}` : '-')).join('|') + '#' + p.selected;
+    if (key !== this.lastKey) {
+      this.lastKey = key;
+      for (let i = 0; i < 9; i++) {
+        const s = p.inv.slots[i];
+        const el = this.slots[i];
+        el.classList.toggle('sel', i === p.selected);
+        el.innerHTML = s ? slotHTML(s.id, s.count, s.damage, !!s.ench?.length) : '';
+      }
+    }
+    if (p.selected !== this.lastSel) {
+      this.lastSel = p.selected;
+      const s = p.held;
+      this.heldName.textContent = s ? itemDef(s.id)?.name ?? '' : '';
+      this.heldName.classList.remove('fade');
+      this.nameTimer = 2;
+    }
+    if (this.nameTimer > 0) {
+      this.nameTimer -= dt;
+      if (this.nameTimer <= 0) this.heldName.classList.add('fade');
+    }
+    this.stats.style.visibility = p.creative ? 'hidden' : 'visible';
+    if (!p.creative) {
+      const hp = Math.ceil(p.health);
+      this.hearts.forEach((img, i) => {
+        const want = hp >= (i + 1) * 2 ? ic.heart : hp === i * 2 + 1 ? ic.halfHeart : ic.emptyHeart;
+        if (img.src !== want) img.src = want;
+        img.style.transform = p.health <= 4 && Math.random() < 0.3 ? `translateY(${Math.random() < 0.5 ? -2 : 2}px)` : '';
+      });
+      this.loaves.forEach((img, i) => {
+        const want = p.food >= (i + 1) * 2 ? ic.loaf : p.food === i * 2 + 1 ? ic.halfLoaf : ic.emptyLoaf;
+        if (img.src !== want) img.src = want;
+      });
+    }
+    const armor = p.creative ? 0 : p.armorPoints;
+    if (armor !== this.lastArmor) {
+      this.lastArmor = armor;
+      this.armorEl.innerHTML = '';
+      if (armor > 0) for (let i = 0; i < 10; i++) {
+        const img = new Image();
+        img.alt = '';
+        img.src = armor >= (i + 1) * 2 ? ic.shield : armor === i * 2 + 1 ? ic.halfShield : ic.shield;
+        if (armor < i * 2 + 1) img.style.opacity = '0.25';
+        this.armorEl.appendChild(img);
+      }
+    }
+    (this.xpBar.parentElement as HTMLElement).style.visibility = p.creative ? 'hidden' : 'visible';
+    this.xpBar.style.width = `${Math.round(p.xpProgress * 100)}%`;
+    this.xpText.textContent = p.xpLevel > 0 ? String(p.xpLevel) : '';
+    const bubbles = p.air < 300 && !p.creative ? Math.max(0, Math.ceil((p.air / 300) * 10)) : 0;
+    if (this.bubbles.childElementCount !== bubbles) {
+      this.bubbles.innerHTML = '';
+      for (let i = 0; i < bubbles; i++) { const b = new Image(); b.src = ic.bubble; b.alt = ''; this.bubbles.appendChild(b); }
+    }
+  }
+}
+
+export function slotHTML(id: number, count: number, damage?: number, enchanted = false): string {
+  let html = `<img src="${iconURL(id)}" alt=""${enchanted ? ' class="glint"' : ''}>`;
+  if (count > 1) html += `<span class="count">${count}</span>`;
+  const max = maxDurability(id);
+  if (max && damage !== undefined && damage > 0) {
+    const f = 1 - damage / max;
+    const col = `hsl(${Math.round(f * 120)}, 80%, 50%)`;
+    html += `<span class="dura"><i style="width:${Math.round(f * 100)}%;background:${col}"></i></span>`;
+  }
+  return html;
+}

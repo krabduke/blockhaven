@@ -1,0 +1,30 @@
+{
+  "name": "blockhaven",
+  "version": "0.1.0",
+  "description": "An open-source blocky survival sandbox that runs in the browser.",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "test": "vitest run",
+    "screenshots": "node scripts/screenshots.mjs"
+  },
+  "license": "MIT",
+  "type": "module",
+  "dependencies": {
+    "@fontsource/pixelify-sans": "^5.3.0",
+    "three": "^0.186.1"
+  },
+  "devDependencies": {
+    "@types/three": "^0.186.0",
+    "playwright": "^1.63.0",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.1",
+    "vitest": "^5.0.2"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/krabduke/blockhaven.git"
+  },
+  "homepage": "https://krabduke.github.io/blockhaven/"
+}
