@@ -9,7 +9,7 @@ import { WorldGen } from './worldgen';
 export type WorkerRequest =
   | { type: 'init'; seed: number; dimension: 'overworld' | 'ember' }
   | { type: 'gen'; id: number; cx: number; cz: number; saved?: { blocks: Uint8Array; meta: Uint8Array } }
-  | { type: 'mesh'; id: number; blocks: Uint8Array; meta: Uint8Array; light: Uint8Array; biomes: Uint8Array };
+  | { type: 'mesh'; id: number; blocks: Uint8Array; meta: Uint8Array; light: Uint8Array; biomes: Uint8Array; ox: number; oy: number; oz: number };
 
 let gen: WorldGen | EmberGen | null = null;
 const ctx = self as unknown as DedicatedWorkerGlobalScope;

@@ -44,7 +44,7 @@ const DIRS6: [number, number, number][] = [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0,
 /** Blocks a fluid washes away (dropping them). */
 function washable(id: number): boolean {
   const d = BLOCKS[id];
-  return id === 0 || (!d.solid && !d.fluid && (d.shape === 'cross' || d.shape === 'torch'));
+  return id === 0 || (!d.solid && !d.fluid && !d.waterlogged && (d.shape === 'cross' || d.shape === 'torch'));
 }
 
 export class World implements ChunkSource {
@@ -204,7 +204,11 @@ export class World implements ChunkSource {
           if (below !== B.grass && below !== B.dirt && below !== B.sand) return false;
           return HORIZ.some(([dx, dz]) => this.getBlock(x + dx, y - 1, z + dz) === B.water);
         }
-        return below === B.grass || below === B.dirt || below === B.snowy_grass || below === B.farmland;
+        if (id === B.red_mushroom || id === B.brown_mushroom) return SOLID[below] === 1;
+        if (id === B.dry_grass) return below === B.sand || below === B.red_sand || below === B.coarse_dirt || below === B.grass || below === B.dirt;
+        if (id === B.bamboo) return below === B.bamboo || below === B.grass || below === B.dirt || below === B.sand || below === B.loam;
+        if (id === B.cattail) return below === B.grass || below === B.dirt || below === B.mud || below === B.sand || below === B.clay;
+        return below === B.grass || below === B.dirt || below === B.snowy_grass || below === B.farmland || below === B.moss_block || below === B.loam || below === B.coarse_dirt || below === B.mud;
       case 'cactus':
         return below === B.cactus || below === B.sand;
       case 'torch': {
@@ -235,6 +239,8 @@ export class World implements ChunkSource {
       }
       case 'flat':
         return below === B.water;
+      case 'layer':
+        return SOLID[below] === 1 && BLOCKS[below].shape === 'cube';
       default:
         return true;
     }
@@ -482,6 +488,11 @@ export class World implements ChunkSource {
       const oy = meta & 8 ? y - 1 : y + 1;
       this.setBlock(x, y, z, 0);
       if (this.getBlock(x, oy, z) === B.door) this.setBlock(x, oy, z, 0);
+      return;
+    }
+    if (BLOCKS[id].waterlogged) {
+      // Underwater plants leave water behind.
+      this.setBlock(x, y, z, B.water, 0);
       return;
     }
     if (id === B.bed) {
@@ -1020,9 +1031,8 @@ export class World implements ChunkSource {
         }
       }
     }
-    void x0; void z0;
     this.meshInFlight++;
-    this.pool.mesh(blocks, meta, light, c.biomes.slice()).then(({ mesh }) => {
+    this.pool.mesh(blocks, meta, light, c.biomes.slice(), [x0, y0, z0]).then(({ mesh }) => {
       this.meshInFlight--;
       if (this.meshSeq.get(key) !== seq || this.disposed) return;
       if (!this.chunks.has(chunkKey(c.cx, c.cz))) return;

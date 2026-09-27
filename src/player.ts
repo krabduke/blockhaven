@@ -46,6 +46,8 @@ export class Player {
   portalCooldown = 0;
   portalTime = 0;
   regenTicks = 0;
+  /** Movement multiplier set with /speed (walking and flying). */
+  speed = 1;
   onDeath: (source: string) => void = () => {};
   onHurt: () => void = () => {};
 

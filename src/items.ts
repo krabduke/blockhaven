@@ -103,6 +103,8 @@ item(412, 'melon_slice', 'Melon Slice', { food: { hunger: 2, saturation: 1.2 } }
 item(413, 'spark_dust', 'Spark Dust', { places: B.wire });
 item(414, 'fire_charge', 'Fire Charge', { use: 'firecharge' });
 item(415, 'golden_apple', 'Golden Apple', { food: { hunger: 4, saturation: 9.6 }, effect: 'regen' });
+item(416, 'red_berries', 'Red Berries', { food: { hunger: 2, saturation: 0.4 } });
+item(417, 'crystal_shard', 'Crystal Shard');
 
 // Planks, logs and wooden things burn too.
 for (const k of ['planks', 'log', 'birch_log', 'spruce_log', 'crafting_table', 'bookshelf', 'chest', 'plank_slab', 'ladder', 'sapling']) {
@@ -166,7 +168,7 @@ export function allItemIds(): number[] {
 
 /** Items shown in the creative inventory (skips technical blocks). */
 export function creativeItems(): number[] {
-  const hidden = new Set([B.furnace_lit, B.lamp_on, B.farmland, B.wheat, B.carrots, B.water, B.lava, B.bedrock, B.portal, B.fire, B.wire]);
+  const hidden = new Set([B.furnace_lit, B.lamp_on, B.farmland, B.wheat, B.carrots, B.water, B.lava, B.bedrock, B.portal, B.fire, B.wire, B.seagrass, B.kelp]);
   return allItemIds().filter((id) => !hidden.has(id));
 }
 

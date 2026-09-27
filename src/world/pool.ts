@@ -59,9 +59,9 @@ export class WorkerPool {
     return this.send<GenResult>({ type: 'gen', id, cx, cz, saved }, transfer as Transferable[]);
   }
 
-  mesh(blocks: Uint8Array, meta: Uint8Array, light: Uint8Array, biomes: Uint8Array): Promise<{ mesh: SubMesh }> {
+  mesh(blocks: Uint8Array, meta: Uint8Array, light: Uint8Array, biomes: Uint8Array, origin: [number, number, number]): Promise<{ mesh: SubMesh }> {
     const id = this.nextId++;
-    return this.send({ type: 'mesh', id, blocks, meta, light, biomes }, [blocks.buffer, meta.buffer, light.buffer, biomes.buffer] as Transferable[]);
+    return this.send({ type: 'mesh', id, blocks, meta, light, biomes, ox: origin[0], oy: origin[1], oz: origin[2] }, [blocks.buffer, meta.buffer, light.buffer, biomes.buffer] as Transferable[]);
   }
 
   dispose(): void {

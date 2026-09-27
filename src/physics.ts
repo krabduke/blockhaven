@@ -330,7 +330,7 @@ export function updateContacts(w: BlockReader, body: Body, eyeHeight: number): v
   const z0 = Math.floor(a.min[2] + 0.001), z1 = Math.floor(a.max[2] - 0.001);
   for (let y = y0; y <= y1; y++) for (let z = z0; z <= z1; z++) for (let x = x0; x <= x1; x++) {
     const id = w.getBlock(x, y, z);
-    if (id === B.water) body.inWater = true;
+    if (id === B.water || BLOCKS[id].waterlogged) body.inWater = true;
     else if (id === B.lava) body.inLava = true;
     else if (id === B.cobweb) body.inWeb = true;
     else if (id === B.portal) body.inPortal = true;
@@ -342,7 +342,8 @@ export function updateContacts(w: BlockReader, body: Body, eyeHeight: number): v
   body.onLadder = BLOCKS[feet].climbable || BLOCKS[head].climbable;
   const ey = body.pos[1] + eyeHeight;
   const eid = w.getBlock(fx, Math.floor(ey), fz);
-  if (eid === B.water) {
+  if (eid !== B.water && BLOCKS[eid].waterlogged) body.eyeInWater = true;
+  else if (eid === B.water) {
     const meta = w.getMeta(fx, Math.floor(ey), fz);
     const above = w.getBlock(fx, Math.floor(ey) + 1, fz);
     const h = above === B.water ? 1 : (meta & 8) ? 1 : (meta & 7) === 0 ? 14 / 16 : (8 - (meta & 7)) / 9;
@@ -376,7 +377,7 @@ export function stepBody(w: BlockReader, body: Body, input: MoveInput, flying: b
 
   if (flying) {
     accelVec((input.sprint ? 0.1 : 0.05) * speedMul);
-    body.vel[1] = (input.jump ? 0.375 : 0) - (input.sneak ? 0.375 : 0);
+    body.vel[1] = ((input.jump ? 0.375 : 0) - (input.sneak ? 0.375 : 0)) * Math.max(1, Math.sqrt(speedMul));
     moveBody(w, body, body.vel[0], body.vel[1], body.vel[2], 0, false);
     body.vel[0] *= 0.91; body.vel[2] *= 0.91; body.vel[1] *= 0.6;
     body.fallDistance = 0;

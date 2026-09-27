@@ -9,7 +9,7 @@ import { rleDecode, rleEncode } from '../src/storage';
 import { missingPainters } from '../src/textures';
 import { CH, idx } from '../src/world/chunk';
 import { computeChunkLight } from '../src/world/light';
-import { WorldGen } from '../src/world/worldgen';
+import { BIOME, WorldGen } from '../src/world/worldgen';
 
 /** A tiny in-memory world for physics tests. */
 class TestWorld implements BlockReader {
@@ -350,5 +350,34 @@ describe('batch 3 recipes', () => {
     expect(craft([g, g, g, g, g, g, null, null, null], 3)).toEqual({ id: B.glass_pane, count: 16 });
     const au = s(I.gold_ingot);
     expect(craft([au, au, au, au, s(I.apple), au, au, au, au], 3)?.id).toBe(I.golden_apple);
+  });
+});
+
+describe('natural variety', () => {
+  it('mixes granite, limestone and deepstone into the rock', () => {
+    const gen = new WorldGen(77);
+    const counts: Record<number, number> = {};
+    for (let cx = 0; cx < 3; cx++) for (let cz = 0; cz < 3; cz++) {
+      const { blocks } = gen.generate(cx, cz);
+      for (const b of blocks) counts[b] = (counts[b] ?? 0) + 1;
+    }
+    expect(counts[B.granite] ?? 0).toBeGreaterThan(50);
+    expect(counts[B.limestone] ?? 0).toBeGreaterThan(50);
+    expect(counts[B.deepstone] ?? 0).toBeGreaterThan(500);
+  });
+  it('has rivers, badlands, jungles and blossom groves somewhere', () => {
+    const gen = new WorldGen(2026);
+    const found = new Set<number>();
+    for (let x = -6000; x <= 6000; x += 48) for (let z = -6000; z <= 6000; z += 48) found.add(gen.column(x, z).biome);
+    for (const b of [BIOME.river, BIOME.badlands, BIOME.jungle, BIOME.blossom]) expect(found.has(b)).toBe(true);
+  });
+  it('grows seagrass on sea floors', () => {
+    const gen = new WorldGen(1);
+    let seagrass = 0;
+    for (let cx = -8; cx < 8 && seagrass === 0; cx++) for (let cz = -8; cz < 8; cz++) {
+      const { blocks } = gen.generate(cx, cz);
+      for (const b of blocks) if (b === B.seagrass || b === B.kelp) seagrass++;
+    }
+    expect(seagrass).toBeGreaterThan(0);
   });
 });

@@ -7,7 +7,10 @@
 import { chromium } from 'playwright';
 
 const url = process.argv[2] ?? 'http://localhost:5199/';
-const browser = await chromium.launch({ args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'] });
+// Use the real GPU (Metal on macOS); set SOFTWARE_GL=1 to force software rendering.
+const browser = await chromium.launch({
+  args: process.env.SOFTWARE_GL ? ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'] : ['--use-angle=metal', '--enable-gpu', '--ignore-gpu-blocklist'],
+});
 const page = await browser.newPage({ viewport: { width: 1000, height: 640 } });
 const errors = [];
 page.on('pageerror', (e) => errors.push(e.message));

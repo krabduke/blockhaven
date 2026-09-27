@@ -11,8 +11,9 @@ const url = process.argv[2] ?? 'http://localhost:5199/';
 const out = process.argv[3] ?? 'docs/screenshots';
 mkdirSync(out, { recursive: true });
 
+// Use the real GPU (Metal on macOS); set SOFTWARE_GL=1 to force software rendering.
 const browser = await chromium.launch({
-  args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'],
+  args: process.env.SOFTWARE_GL ? ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'] : ['--use-angle=metal', '--enable-gpu', '--ignore-gpu-blocklist'],
 });
 const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
 const errors = [];
@@ -57,8 +58,9 @@ await clearUi();
 await game(() => window.blockhaven.runCommand('/give stone_pickaxe'));
 await view('survival-day', { yaw: 0.6, pitch: -0.12, time: 2000, settle: 12000 });
 await view('looking-around', { yaw: 2.4, pitch: -0.05, time: 5000 });
-await view('sunset', { yaw: -1.57, pitch: 0.05, time: 12200 });
-await view('night', { yaw: 1.2, pitch: 0.1, time: 18000 });
+await game(() => { const g = window.blockhaven; const [x, , z] = g.player.body.pos; g.player.creative = true; g.player.flying = true; g.player.body.pos[1] = Math.max(78, g.world.groundY(Math.floor(x), Math.floor(z)) + 14); });
+await view('sunset', { yaw: Math.PI / 2 - 0.15, pitch: -0.06, time: 11300 });
+await view('night', { yaw: -Math.PI / 2 + 0.3, pitch: 0.08, time: 16800 });
 
 // Animals near the player.
 await game(() => {
@@ -204,6 +206,8 @@ const flyTo = async (name, biomeIds, yaw, lift = 14, back = 20, pitch = -0.3) =>
 await flyTo('mountains', [5], 0, 45, 60, -0.28);
 await flyTo('desert', [3], 0);
 await flyTo('snowy-taiga', [4], 0);
+await flyTo('jungle', [13], 0, 18, 20, -0.3);
+await flyTo('badlands', [12], 0, 16, 22, -0.25);
 
 // A village from above, then the Emberdeep.
 const vloc = await game(() => {

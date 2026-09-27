@@ -30,19 +30,22 @@ Worlds save automatically to your browser's storage (IndexedDB) every 30 seconds
 | | |
 |---|---|
 | ![A village seen from above: houses, farms, a well and paths](docs/screenshots/village.png) | ![A village well with a villager and the Stonewarden guardian](docs/screenshots/village-street.png) |
-| ![Inside the Emberdeep: cinderstone caverns with glowstone hanging from the ceiling](docs/screenshots/emberdeep-2.png) | ![A snowy taiga](docs/screenshots/snowy-taiga.png) |
+| ![Inside the Emberdeep: cinderstone caverns with glowstone hanging from the ceiling](docs/screenshots/emberdeep-2.png) | ![A golden-hour sunset with sun glow and haze](docs/screenshots/sunset.png) |
+| ![A dense jungle](docs/screenshots/jungle.png) | ![Terraced badlands with banded terracotta cliffs](docs/screenshots/badlands.png) |
 | ![A homestead with a fenced pen, wheat and animals](docs/screenshots/homestead.png) | ![The same homestead in the rain](docs/screenshots/rain.png) |
 | ![A torch-lit cave full of ore, with lava](docs/screenshots/cave.png) | ![A Mirewalker approaching at night](docs/screenshots/night-raid.png) |
 | ![Desert with cacti next to hills and mountains](docs/screenshots/desert.png) | ![Snowy mountain peaks](docs/screenshots/mountains.png) |
 | ![The crafting table screen](docs/screenshots/crafting.png) | ![The enchanting table screen](docs/screenshots/enchanting.png) |
-| ![Sunset](docs/screenshots/sunset.png) | ![Animals grazing](docs/screenshots/animals.png) |
+| ![A moonlit night](docs/screenshots/night.png) | ![Animals grazing](docs/screenshots/animals.png) |
 
 ## Features
 
 **World**
 - Endless, seeded terrain in 16×16×256 chunks, streamed around you by background workers
-- Biomes: plains, forest, birch forest, snowy taiga, desert, savanna, swamp, beach, ocean and mountains, each with its own grass and foliage tint
-- **Villages** of houses, farms, a smithy, a library, lamp posts and a well with a bell, joined by dirt paths. Villagers trade with you in amber, and a Stonewarden guards each village. Find the nearest one with `/locate village`
+- Biomes: plains, forest, birch forest, snowy taiga, desert, savanna, swamp, jungle, blossom grove, badlands with banded terracotta terraces, winding rivers, beach, ocean and mountains with icy peaks, each with its own grass and foliage tint
+- Varied rock: granite, limestone, chalk and basalt veins through the stone, turning into dark deepstone near the bottom of the world
+- Caves with dripstone regions, moss caves lit by hanging glowmoss, crystal geodes and long ravines; seagrass and kelp on the sea floor; boulders, fallen logs, bushes, ferns, berry bushes, cattails, bamboo and snow on cold ground
+- **Villages** of timber-framed houses with gable roofs, chimneys and furnished interiors, farms, a smithy, a library, lamp posts and a well with a bell, joined by dirt paths. Villagers trade with you in amber, and a Stonewarden guards each village. Find the nearest one with `/locate village`
 - **The Emberdeep**, a second dimension beneath the world: cinderstone caverns over a lava sea, glowstone hanging from the ceiling, ashsand that slows you down, magma rock, emberquartz, eternal fires and ruined cinder keeps with loot. Build a 4×5 obsidian frame, light it with flint and steel, and stand in the gate. Distances there are one-eighth of the overworld's
 - Winding tunnel caves and large caverns, lava lakes deep down, and coal, iron, gold and diamond ore at their usual depths
 - Oak, birch and spruce trees, cacti, sugar cane, flowers, tall grass and pumpkins
@@ -50,7 +53,7 @@ Worlds save automatically to your browser's storage (IndexedDB) every 30 seconds
 - Day and night on a 20-minute cycle, with sun, moon, stars, drifting clouds, and rain, snow and thunderstorms
 
 **Blocks and building**
-- 115 blocks, including stairs, slabs, fences, fence gates, doors, trapdoors, ladders, glass and glass panes, iron bars, lanterns, signs you can write on, carpets, six colours of wool, slate, marble, terracotta, hay bales, cake, bookshelves, TNT and lamps
+- 159 blocks, including stairs, slabs, fences, fence gates, doors, trapdoors, ladders, glass and glass panes, iron bars, lanterns, signs you can write on, carpets, six colours of wool, slate, marble, terracotta, hay bales, cake, bookshelves, TNT and lamps
 - Power: buttons, pressure plates and levers send power along spark dust wire to light lamps, open doors, trapdoors and gates, and set off TNT
 - Fire that spreads through wood, wool and leaves and burns out on its own, and puts itself out in the rain
 - Smooth lighting with ambient occlusion; sunlight and torchlight both flood-fill through the world
@@ -69,8 +72,8 @@ Worlds save automatically to your browser's storage (IndexedDB) every 30 seconds
 - Achievements for the classic milestones
 
 **Graphics**
-- Sun shadows from a shadow map, directional sunlight on every face, a gradient sky with a sun glow and a warm band at dawn and dusk, water that reflects the sky and catches the sun, flickering torchlight and filmic colour grading. Switch between Fancy and Fast in Settings
-- Procedurally painted textures with bevelled stones, wood grain, bark ridges and layered foliage
+- Shaders: soft sun shadows, warm directional sunlight with cool shade, bloom around bright and glowing blocks, god rays through trees and clouds, planar water reflections with a sun-glitter path, puffy procedural clouds that cast moving shadows, moonlit blue nights, warm haze toward the sun and valley mist, a wet look in the rain, flickering torchlight and filmic tone mapping. Settings switch between Fancy and Fast graphics and turn the heavier effects off
+- Procedurally painted textures with bevelled stones, wood grain, bark ridges and layered foliage, with several random variants per natural block and randomly rotated tops so large areas don't look tiled
 - Blocks crack apart into shards as you mine them
 
 **Creatures (all original designs)**
@@ -111,7 +114,7 @@ In inventories: click to pick up or place a stack, right-click to split or place
 
 ## Commands
 
-`/gamemode survival|creative`, `/time set day|noon|sunset|night|midnight|<ticks>`, `/weather clear|rain|thunder`, `/give <item> [count]`, `/xp <amount>`, `/tp <x> <y> <z>`, `/spawn <mob>`, `/locate village`, `/dimension overworld|ember`, `/seed`, `/kill`, `/help`
+`/gamemode survival|creative`, `/speed <multiplier>` (walk and fly faster; `/speed 1` resets), `/time set day|noon|sunset|night|midnight|<ticks>`, `/weather clear|rain|thunder`, `/give <item> [count]`, `/xp <amount>`, `/tp <x> <y> <z>`, `/spawn <mob>`, `/locate village`, `/dimension overworld|ember`, `/seed`, `/kill`, `/help`
 
 Item names for `/give` are the lowercase names with underscores, for example `/give diamond_pickaxe` or `/give oak_stairs 64`.
 

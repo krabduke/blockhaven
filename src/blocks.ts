@@ -2,7 +2,7 @@
 // lighting, mining and world generation all read from it.
 
 export type RenderShape = 'none' | 'cube' | 'cross' | 'liquid' | 'torch' | 'door' | 'bed' | 'cactus' | 'ladder' | 'slabBottom' | 'stairs' | 'fence' | 'gate' | 'table'
-  | 'pane' | 'trapdoor' | 'lantern' | 'wire' | 'button' | 'plate' | 'sign' | 'flat' | 'vine' | 'cake' | 'carpet' | 'portal' | 'fire';
+  | 'pane' | 'trapdoor' | 'lantern' | 'wire' | 'button' | 'plate' | 'sign' | 'flat' | 'vine' | 'cake' | 'carpet' | 'portal' | 'fire' | 'layer';
 export type Layer = 'opaque' | 'cutout' | 'translucent';
 export type Tool = 'pickaxe' | 'axe' | 'shovel' | 'sword' | null;
 export type SoundKind = 'stone' | 'wood' | 'gravel' | 'grass' | 'sand' | 'glass' | 'wool' | 'snow' | 'none';
@@ -36,6 +36,8 @@ export interface BlockDef {
   flammable: boolean;
   /** Movement multiplier while inside (cobweb) or standing on (ashsand). 1 = normal. */
   slow: number;
+  /** Underwater plants: the cell also counts as water. */
+  waterlogged: boolean;
   /** Tile used for the item icon when it differs from a cube render. */
   icon?: string;
 }
@@ -63,6 +65,7 @@ interface Opts {
   icon?: string;
   flammable?: boolean;
   slow?: number;
+  waterlogged?: boolean;
 }
 
 function def(id: number, key: string, name: string, o: Opts = {}): void {
@@ -98,6 +101,7 @@ function def(id: number, key: string, name: string, o: Opts = {}): void {
     icon: o.icon,
     flammable: o.flammable ?? (o.sound === 'wood' || o.sound === 'wool' || o.sound === 'grass'),
     slow: o.slow ?? 1,
+    waterlogged: o.waterlogged ?? false,
   };
   defs[id] = d;
   B[key] = id;
@@ -224,6 +228,52 @@ def(111, 'spark_ore', 'Sparkstone Ore', { hardness: 3, tool: 'pickaxe', harvestT
 def(112, 'blue_flower', 'Blue Flower', { ...plant, tiles: 'blue_flower' });
 def(113, 'sunwood_log', 'Sunwood Log', { tiles: { top: 'sunwood_top', side: 'sunwood_side' }, hardness: 2, tool: 'axe', sound: 'wood' });
 def(114, 'sunwood_leaves', 'Sunwood Leaves', { layer: 'cutout', opaque: false, lightOpacity: 1, hardness: 0.2, sound: 'grass', drop: (r) => r < 0.05 ? [B.sapling, 1] : null });
+// ---- Natural variety ----
+const rock = (extra: Opts = {}): Opts => ({ hardness: 1.5, tool: 'pickaxe', harvestTier: 0, ...extra });
+def(116, 'granite', 'Granite', rock());
+def(117, 'polished_granite', 'Polished Granite', rock());
+def(118, 'limestone', 'Limestone', rock({ hardness: 1.2 }));
+def(119, 'basalt', 'Basalt', rock({ tiles: { top: 'basalt_top', side: 'basalt_side' }, hardness: 1.25 }));
+def(120, 'deepstone', 'Deepstone', rock({ hardness: 3, drop: () => [121, 1] }));
+def(121, 'cobbled_deepstone', 'Cobbled Deepstone', rock({ hardness: 3.5 }));
+def(122, 'chalk', 'Chalk', rock({ hardness: 0.75 }));
+def(123, 'mud', 'Mud', { hardness: 0.5, tool: 'shovel', sound: 'gravel', slow: 0.8 });
+def(124, 'moss_block', 'Moss Block', { hardness: 0.1, tool: 'hoe' as Tool, sound: 'grass' });
+def(125, 'coarse_dirt', 'Coarse Dirt', { hardness: 0.5, tool: 'shovel', sound: 'gravel' });
+def(126, 'loam', 'Forest Floor', { tiles: { top: 'loam_top', side: 'loam_side', bottom: 'dirt' }, hardness: 0.5, tool: 'shovel', sound: 'gravel', drop: () => [B.dirt, 1] });
+def(127, 'red_sand', 'Red Sand', { hardness: 0.5, tool: 'shovel', sound: 'sand' });
+def(128, 'red_sandstone', 'Red Sandstone', rock({ tiles: { top: 'red_sandstone_top', side: 'red_sandstone' }, hardness: 0.8 }));
+def(129, 'terracotta_orange', 'Orange Terracotta', rock({ hardness: 1.25 }));
+def(130, 'terracotta_yellow', 'Yellow Terracotta', rock({ hardness: 1.25 }));
+def(131, 'terracotta_white', 'White Terracotta', rock({ hardness: 1.25 }));
+def(132, 'terracotta_brown', 'Brown Terracotta', rock({ hardness: 1.25 }));
+def(133, 'terracotta_red', 'Red Terracotta', rock({ hardness: 1.25 }));
+def(134, 'packed_ice', 'Packed Ice', { hardness: 0.5, tool: 'pickaxe', sound: 'glass', drop: 'none' });
+def(135, 'snow_layer', 'Snow', { shape: 'layer', layer: 'cutout', opaque: false, lightOpacity: 0, tiles: 'snow', hardness: 0.1, tool: 'shovel', sound: 'snow', needsSupport: true, replaceable: true, drop: () => [287, 1] });
+def(136, 'dripstone', 'Dripstone', rock({ hardness: 1.5 }));
+def(137, 'pointed_dripstone', 'Pointed Dripstone', { shape: 'cross', layer: 'cutout', solid: false, opaque: false, tiles: 'pointed_dripstone', hardness: 1.5, tool: 'pickaxe', sound: 'stone' });
+def(138, 'glowmoss', 'Glowmoss', { shape: 'cross', layer: 'cutout', solid: false, opaque: false, emit: 10, tiles: 'glowmoss', hardness: 0.2, sound: 'grass', climbable: true });
+def(139, 'crystal_block', 'Crystal Block', { emit: 4, hardness: 1.5, tool: 'pickaxe', sound: 'glass', drop: () => [417, 4] });
+def(140, 'crystal_cluster', 'Crystal Cluster', { shape: 'cross', layer: 'cutout', solid: false, opaque: false, emit: 6, tiles: 'crystal_cluster', hardness: 1.5, tool: 'pickaxe', sound: 'glass', drop: () => [417, 2] });
+def(141, 'fern', 'Fern', { ...plant, tiles: 'fern', replaceable: true, drop: (r) => r < 0.125 ? [277, 1] : null });
+def(142, 'bush', 'Bush', { ...plant, tiles: 'bush', replaceable: true, drop: (r) => r < 0.1 ? [256, 1] : null });
+def(143, 'berry_bush', 'Berry Bush', { ...plant, tiles: 'berry_bush', drop: (r) => [416, 1 + Math.floor(r * 2)] });
+def(144, 'cattail', 'Cattail', { ...plant, tiles: 'cattail' });
+def(145, 'seagrass', 'Seagrass', { shape: 'cross', layer: 'cutout', solid: false, opaque: false, lightOpacity: 2, tiles: 'seagrass', hardness: 0, sound: 'grass', waterlogged: true, drop: 'none' });
+def(146, 'kelp', 'Kelp', { shape: 'cross', layer: 'cutout', solid: false, opaque: false, lightOpacity: 2, tiles: 'kelp', hardness: 0, sound: 'grass', waterlogged: true });
+def(147, 'blossom_log', 'Blossom Log', { tiles: { top: 'blossom_log_top', side: 'blossom_log_side' }, hardness: 2, tool: 'axe', sound: 'wood' });
+def(148, 'blossom_leaves', 'Blossom Leaves', { layer: 'cutout', opaque: false, lightOpacity: 1, hardness: 0.2, sound: 'grass', drop: (r) => r < 0.05 ? [B.sapling, 1] : null });
+def(149, 'jungle_log', 'Jungle Log', { tiles: { top: 'jungle_log_top', side: 'jungle_log_side' }, hardness: 2, tool: 'axe', sound: 'wood' });
+def(150, 'jungle_leaves', 'Jungle Leaves', { layer: 'cutout', opaque: false, lightOpacity: 1, hardness: 0.2, sound: 'grass', drop: (r) => r < 0.03 ? [B.sapling, 1] : null });
+def(151, 'bamboo', 'Bamboo', { ...plant, tiles: 'bamboo', hardness: 0.5, drop: () => [256, 1] });
+def(152, 'dry_grass', 'Dry Grass', { ...plant, tiles: 'dry_grass', replaceable: true, drop: 'none' });
+def(153, 'mossy_stone', 'Mossy Stone', rock({ tiles: { top: 'mossy_stone_top', side: 'mossy_stone_side', bottom: 'stone' }, drop: () => [B.cobblestone, 1] }));
+def(154, 'white_flower', 'Daisy', { ...plant, tiles: 'white_flower' });
+def(155, 'purple_flower', 'Lavender', { ...plant, tiles: 'purple_flower' });
+def(156, 'geode_shell', 'Geode Shell', rock({ hardness: 2.5 }));
+def(157, 'mud_bricks', 'Mud Bricks', rock({ hardness: 1.5 }));
+def(158, 'polished_limestone', 'Polished Limestone', rock({ hardness: 1.2 }));
+def(159, 'deepstone_bricks', 'Deepstone Bricks', rock({ hardness: 3.5 }));
 def(115, 'bell', 'Village Bell', { shape: 'lantern', layer: 'cutout', opaque: false, hardness: 5, tool: 'pickaxe', tiles: 'bell', icon: 'bell_item', sound: 'stone' });
 
 // Fill gaps so lookups never return undefined.
@@ -246,7 +296,11 @@ for (const d of defs) {
 }
 
 export function isLeaves(id: number): boolean {
-  return id === B.leaves || id === B.birch_leaves || id === B.spruce_leaves || id === B.sunwood_leaves;
+  return id === B.leaves || id === B.birch_leaves || id === B.spruce_leaves || id === B.sunwood_leaves || id === B.blossom_leaves || id === B.jungle_leaves;
+}
+/** Water plus underwater plants that sit in water. */
+export function isWaterlike(id: number): boolean {
+  return id === B.water || BLOCKS[id].waterlogged;
 }
 export function isStairs(id: number): boolean {
   return BLOCKS[id].shape === 'stairs';
@@ -257,6 +311,6 @@ export function connectsFence(id: number): boolean {
   return d.shape === 'fence' || d.shape === 'gate' || d.shape === 'pane' || (d.shape === 'cube' && d.solid && d.layer !== 'cutout');
 }
 export function isLog(id: number): boolean {
-  return id === B.log || id === B.birch_log || id === B.spruce_log || id === B.sunwood_log;
+  return id === B.log || id === B.birch_log || id === B.spruce_log || id === B.sunwood_log || id === B.blossom_log || id === B.jungle_log;
 }
 export const WOOL_COLORS = ['wool', 'wool_red', 'wool_orange', 'wool_yellow', 'wool_green', 'wool_blue', 'wool_black'] as const;

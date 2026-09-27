@@ -183,6 +183,7 @@ export class Game {
     this.renderer.renderDistance = s.renderDistance;
     this.renderer.fancy = s.fancy;
     this.renderer.shadows = s.shadows;
+    this.renderer.post = s.post;
     this.renderer.uniforms.uGamma.value = s.brightness;
     setVolume(s.volume);
   }
@@ -590,7 +591,7 @@ export class Game {
     const findItem = (name: string) => ITEMS.find((it) => it && (it.key === name || it.name.toLowerCase() === name.replace(/_/g, ' ')));
     switch (cmd) {
       case 'help':
-        this.say('Commands: /gamemode survival|creative, /time set day|night|<ticks>, /weather clear|rain|thunder, /give <item> [count], /xp <n>, /tp <x> <y> <z>, /spawn <mob>, /locate village, /dimension overworld|ember, /seed, /kill');
+        this.say('Commands: /gamemode survival|creative, /time set day|night|<ticks>, /weather clear|rain|thunder, /give <item> [count], /xp <n>, /tp <x> <y> <z>, /spawn <mob>, /speed <n>, /locate village, /dimension overworld|ember, /seed, /kill');
         break;
       case 'gamemode': case 'gm': {
         const m = parts[1]?.toLowerCase();
@@ -634,6 +635,13 @@ export class Game {
         break;
       }
       case 'seed': this.say(`Seed: ${this.meta?.seedText ?? w.seed}`); break;
+      case 'speed': {
+        const v = parts[1] === undefined ? NaN : Number(parts[1]);
+        if (!Number.isFinite(v) || v < 0.1 || v > 20) { this.say(`Usage: /speed <0.1-20> (now ${p.speed}x). /speed 1 resets it.`); break; }
+        p.speed = v;
+        this.say(`Speed set to ${v}x`);
+        break;
+      }
       case 'weather': {
         const v = parts[1]?.toLowerCase();
         if (v === 'clear' || v === 'rain' || v === 'thunder') { w.weather = v; w.weatherTimer = 12000 + Math.floor(Math.random() * 12000); this.say(`Weather set to ${v}`); }
@@ -1016,6 +1024,8 @@ export class Game {
     } else if (BLOCKS[blockId].shape === 'stairs') {
       const upper = n[1] === -1 || (n[1] === 0 && hit.point[1] - Math.floor(hit.point[1]) > 0.5);
       meta = q | (upper ? 4 : 0);
+    } else if (isLog(blockId) || blockId === B.basalt || blockId === B.hay_bale) {
+      meta = n[0] !== 0 ? 1 : n[2] !== 0 ? 2 : 0; // lie along the axis of the face you clicked
     } else if (blockId === B.fence_gate) {
       meta = q === 0 || q === 2 ? 0 : 1;
     } else if (blockId === B.trapdoor) {
@@ -1422,7 +1432,7 @@ export class Game {
     const wasOnGround = p.body.onGround;
     const jump = k('Space');
     if (p.alive) {
-      stepBody(w, p.body, { forward, strafe, jump, sneak: p.sneaking, sprint: p.sprinting, yaw: p.yaw }, p.flying);
+      stepBody(w, p.body, { forward, strafe, jump, sneak: p.sneaking, sprint: p.sprinting, yaw: p.yaw }, p.flying, p.speed);
     }
     if (p.flying && p.body.onGround) p.flying = false;
     // Landing.

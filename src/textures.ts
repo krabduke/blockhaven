@@ -2,7 +2,7 @@
 // there are no image assets.
 
 import { hashString, mulberry32 } from './noise';
-import { TILE_NAMES, TINTED } from './tiles';
+import { TILE_NAMES, TINTED, baseTile } from './tiles';
 import { BIOME_TINT } from './world/worldgen';
 
 type RGB = [number, number, number];
@@ -218,7 +218,7 @@ tile('dirt', (p) => {
   for (let i = 0; i < 6; i++) { const x = Math.floor(p.rand() * 15), y = Math.floor(p.rand() * 15); p.set(x, y, hex('#a88a6a')); p.set(x + 1, y + 1, hex('#5a3c24')); }
 });
 tile('grass_top', (p) => {
-  p.ramp(p.field(4, 2), [hex('#9ea396'), hex('#b4b8ab'), hex('#c8ccbf'), hex('#dcdfd4')], 0.25);
+  p.ramp(p.field(4, 2), [hex('#868a7e'), hex('#9a9e92'), hex('#aeb2a6'), hex('#c2c6ba')], 0.25);
   // Individual blades: short vertical strokes with a lit tip.
   for (let i = 0; i < 22; i++) { const x = Math.floor(p.rand() * S), y = Math.floor(p.rand() * S); p.set(x, y, hex('#eceee6')); p.shade(x, (y + 1) % S, 0.8); }
 });
@@ -847,6 +847,97 @@ tile('melon_slice', (p) => { p.transparent(); p.sprite(['gggggggggg', '.rrrrrrrr
 tile('fire_charge', (p) => { p.transparent(); for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) { const d = Math.hypot(x - 7.5, y - 7.5); if (d < 5.5) p.set(x, y, p.jit(d < 2.5 ? hex('#ffb030') : hex('#3a2a22'), 0.12)); } });
 tile('golden_apple', (p) => { painters.apple(p); for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) if (p.alpha(x, y) && !(x >= 6 && x <= 8 && y <= 4)) { const c = p.get(x, y); const l = (c[0] + c[1] + c[2]) / 3 / 255; p.set(x, y, [255 * Math.min(1, l * 1.6 + 0.2), 200 * Math.min(1, l * 1.5 + 0.15), 60 * l]); } });
 
+// ---------- Batch 4: natural variety ----------
+const rockTile = (colors: RGB[], cells: number, extra?: (p: Painter) => void) => (p: Painter) => {
+  p.ramp(p.field(cells, 3), colors, 0.14);
+  extra?.(p);
+};
+tile('granite', rockTile([hex('#8a5e4e'), hex('#9c6c58'), hex('#b07c66'), hex('#c4917a')], 4, (p) => { p.speckle(hex('#e0c0b0'), 0.06); p.speckle(hex('#4a2e26'), 0.05); }));
+tile('polished_granite', (p) => { painters.granite(p); p.border(hex('#7a4e40')); for (let i = 1; i < 15; i++) p.shade(i, 1, 1.12); });
+tile('limestone', (p) => {
+  p.ramp(p.field(3, 2), [hex('#b8b0a0'), hex('#c8c0ae'), hex('#d6cebc'), hex('#e2dccb')], 0.08);
+  for (let y = 3; y < S; y += 5) for (let x = 0; x < S; x++) if (p.rand() < 0.7) p.shade(x, y, 0.88);
+  for (let i = 0; i < 4; i++) p.set(Math.floor(p.rand() * S), Math.floor(p.rand() * S), hex('#9a9282'));
+});
+tile('polished_limestone', (p) => { p.fill(hex('#d8d0be'), 0.02); p.border(hex('#b4ac9a')); });
+tile('basalt_side', (p) => {
+  for (let x = 0; x < S; x++) {
+    const col = x % 4 === 0 ? 0.7 : x % 4 === 3 ? 0.85 : 1;
+    for (let y = 0; y < S; y++) p.set(x, y, p.jit([58 * col, 58 * col, 64 * col], 0.08));
+  }
+});
+tile('basalt_top', (p) => { p.bevelStones([hex('#3e3e44'), hex('#46464c'), hex('#505056')], hex('#2a2a2e'), 5, 0.05); });
+tile('deepstone', rockTile([hex('#3c3c42'), hex('#46464c'), hex('#505058'), hex('#5a5a62')], 4, (p) => { for (let y = 0; y < S; y += 2) for (let x = 0; x < S; x++) if (p.rand() < 0.15) p.shade(x, y, 0.8); }));
+tile('cobbled_deepstone', (p) => p.bevelStones([hex('#3a3a40'), hex('#45454b'), hex('#505056'), hex('#5a5a60')], hex('#222226'), 9));
+tile('deepstone_bricks', (p) => {
+  for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) {
+    const off = (y >> 2) % 2 ? 4 : 0;
+    const gap = y % 4 === 3 || (x + off) % 8 === 7;
+    p.set(x, y, gap ? p.jit(hex('#26262a'), 0.05) : p.jit(hex('#4a4a52'), 0.06));
+    if (!gap && y % 4 === 0) p.shade(x, y, 1.15);
+  }
+});
+tile('chalk', rockTile([hex('#dcdad4'), hex('#e6e4de'), hex('#eeece8'), hex('#f6f5f2')], 3));
+tile('mud', (p) => { p.ramp(p.field(4, 2), [hex('#3a2e2a'), hex('#453632'), hex('#4e3e38'), hex('#5a4840')], 0.15); for (let i = 0; i < 6; i++) { const x = Math.floor(p.rand() * 15), y = Math.floor(p.rand() * 15); p.set(x, y, hex('#6a5850')); } });
+tile('mud_bricks', (p) => {
+  for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) {
+    const off = (y >> 2) % 2 ? 4 : 0;
+    const gap = y % 4 === 3 || (x + off) % 8 === 7;
+    p.set(x, y, gap ? p.jit(hex('#6a5846'), 0.05) : p.jit(hex('#9a8466'), 0.06));
+  }
+});
+tile('moss_block', (p) => { p.ramp(p.field(5, 2), [hex('#8a8e82'), hex('#a0a498'), hex('#b4b8ac'), hex('#c6cabe')], 0.3); for (let i = 0; i < 20; i++) p.set(Math.floor(p.rand() * S), Math.floor(p.rand() * S), hex('#d4d8cc')); });
+tile('mossy_stone_top', (p) => { painters.moss_block(p); });
+tile('mossy_stone_side', (p) => {
+  painters.stone(p);
+  for (let x = 0; x < S; x++) { const d = 2 + Math.floor(p.rand() * 3) + (p.rand() < 0.2 ? 3 : 0); for (let y = 0; y < d; y++) p.set(x, y, p.jit(hex('#5a7a32'), 0.12)); }
+});
+tile('coarse_dirt', (p) => { painters.dirt(p); p.speckle(hex('#8a8078'), 0.18, 0.1); p.speckle(hex('#4a3a2a'), 0.08); });
+tile('loam_top', (p) => {
+  p.ramp(p.field(4, 2), [hex('#4a3620'), hex('#5a4228'), hex('#6a4e30'), hex('#7a5c3a')], 0.2);
+  for (let i = 0; i < 18; i++) { const x = Math.floor(p.rand() * S), y = Math.floor(p.rand() * S); p.set(x, y, p.rand() < 0.5 ? hex('#8a6a30') : hex('#6a7a30')); }
+});
+tile('loam_side', (p) => { painters.dirt(p); for (let x = 0; x < S; x++) { const d = 2 + Math.floor(p.rand() * 2); for (let y = 0; y < d; y++) p.set(x, y, p.jit(hex('#5a4228'), 0.1)); } });
+tile('red_sand', (p) => { const f = p.field(2, 3); for (let i = 0; i < S * S; i++) f[i] = f[i] * 0.6 + (Math.sin((i % S) * 0.5 + Math.floor(i / S) * 1.1 + f[i] * 4) * 0.5 + 0.5) * 0.4; p.ramp(f, [hex('#a8582a'), hex('#b86432'), hex('#c8723c'), hex('#d68248')], 0.15); });
+tile('red_sandstone', (p) => { for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) p.set(x, y, p.jit(y < 3 || y === 9 ? hex('#a8582a') : hex('#c06a34'), 0.04)); for (let x = 0; x < S; x++) p.set(x, 3, hex('#8a4a22')); });
+tile('red_sandstone_top', (p) => { p.fill(hex('#c46e38'), 0.03); });
+const terra = (c: RGB) => (p: Painter) => { p.ramp(p.field(3, 2), [[c[0] * 0.9, c[1] * 0.9, c[2] * 0.9], c, [Math.min(255, c[0] * 1.07), Math.min(255, c[1] * 1.07), Math.min(255, c[2] * 1.07)]], 0.1); };
+tile('terracotta_orange', terra(hex('#a8582e')));
+tile('terracotta_yellow', terra(hex('#b88a34')));
+tile('terracotta_white', terra(hex('#d2b4a0')));
+tile('terracotta_brown', terra(hex('#6e4430')));
+tile('terracotta_red', terra(hex('#8e3a2e')));
+tile('packed_ice', (p) => { p.ramp(p.field(3, 2), [hex('#7aa8e0'), hex('#8cb6e8'), hex('#a0c4ee'), hex('#b8d6f6')], 0.06); for (let i = 0; i < 3; i++) { let x = Math.floor(p.rand() * S); for (let y = 0; y < S; y++) { p.set(x, y, hex('#d0e6ff')); if (p.rand() < 0.3) x = (x + 1) % S; } } });
+tile('dripstone', (p) => { for (let x = 0; x < S; x++) for (let y = 0; y < S; y++) p.set(x, y, p.jit(Math.sin(x * 0.9 + y * 0.15) > 0.2 ? hex('#8a6e5a') : hex('#7a604e'), 0.06)); });
+tile('pointed_dripstone', (p) => { p.transparent(); for (let y = 0; y < S; y++) { const w = Math.max(0, Math.floor((S - y) / 3)); for (let x = 8 - w; x <= 7 + w; x++) p.set(x, y, p.jit(x < 8 ? hex('#8a6e5a') : hex('#6e5646'), 0.05)); } });
+tile('glowmoss', (p) => { p.transparent(); for (let b = 0; b < 5; b++) { let x = 2 + b * 3; for (let y = 0; y < 12 + Math.floor(p.rand() * 4); y++) { p.set(x, y, p.jit(hex('#4f7a3e'), 0.1)); if (p.rand() < 0.25) p.set(x, y, hex('#e8f070')); if (p.rand() < 0.2) x = Math.max(0, Math.min(15, x + (p.rand() < 0.5 ? -1 : 1))); } } });
+tile('crystal_block', (p) => { p.bevelStones([hex('#7a4ab8'), hex('#8e5ccc'), hex('#a472de'), hex('#bc8cf0')], hex('#4a2a7a'), 6, 0.05); p.speckle(hex('#e8d0ff'), 0.05); });
+tile('crystal_cluster', (p) => { p.transparent(); for (const [x0, h] of [[4, 10], [7, 14], [10, 9], [12, 6]]) for (let y = S - 1; y > S - h; y--) { p.set(x0, y, hex('#b88cf0')); p.set(x0 + 1, y, hex('#8e5ccc')); } p.set(7, S - 14, hex('#f0e0ff')); });
+tile('fern', (p) => { p.transparent(); for (const [cx, dir] of [[8, 0], [5, -1], [11, 1]]) for (let y = 15; y > 3; y--) { const x = Math.round(cx + dir * (15 - y) * 0.35); p.set(x, y, p.jit(hex('#b8bcb0'), 0.1)); if (y % 2 === 0) { p.set(x - 1, y, hex('#a4a89c')); p.set(x + 1, y - 1, hex('#a4a89c')); } } });
+tile('bush', (p) => { p.transparent(); const f = p.field(4, 2); for (let y = 4; y < S; y++) for (let x = 1; x < 15; x++) { const d = Math.hypot(x - 7.5, (y - 10) * 1.3); if (d < 7 && f[x + y * S] > 0.3) p.set(x, y, p.jit(f[x + y * S] > 0.6 ? hex('#c8ccbf') : hex('#9ea296'), 0.08)); } });
+tile('berry_bush', (p) => { p.transparent(); for (let y = 5; y < S; y++) for (let x = 1; x < 15; x++) if (Math.hypot(x - 7.5, (y - 10) * 1.3) < 7 && p.rand() < 0.75) p.set(x, y, p.jit(hex('#3e6a2a'), 0.12)); for (let i = 0; i < 7; i++) { const x = 3 + Math.floor(p.rand() * 10), y = 7 + Math.floor(p.rand() * 7); p.set(x, y, hex('#d8283a')); p.set(x + 1, y, hex('#a01a2a')); } });
+tile('cattail', (p) => { p.transparent(); for (const x of [4, 8, 11]) { for (let y = 15; y > 2; y--) p.set(x, y, hex('#5a8a3a')); p.rect(x, 3 + (x % 3), 1, 4, hex('#6a4028')); } p.set(6, 8, hex('#6a9a3a')); p.set(9, 6, hex('#6a9a3a')); });
+tile('seagrass', (p) => { p.transparent(); for (let b = 0; b < 6; b++) { let x = 1 + b * 2.6; for (let y = 15; y > 3 + (b % 3) * 2; y--) { p.set(Math.round(x), y, p.jit(hex('#3a8a4a'), 0.1)); x += Math.sin(y * 0.8 + b) * 0.4; } } });
+tile('kelp', (p) => { p.transparent(); for (let y = 0; y < S; y++) { const x = 7 + Math.round(Math.sin(y * 0.6) * 1.5); p.set(x, y, hex('#4a7a2a')); p.set(x + 1, y, hex('#3a6a22')); if (y % 4 === 0) { p.set(x + 2, y, hex('#5a8a32')); p.set(x + 3, y + 1, hex('#5a8a32')); } if (y % 4 === 2) { p.set(x - 1, y, hex('#5a8a32')); p.set(x - 2, y + 1, hex('#5a8a32')); } } });
+tile('blossom_log_side', (p) => { for (let x = 0; x < S; x++) for (let y = 0; y < S; y++) p.set(x, y, p.jit(x % 5 === 0 ? hex('#3a2230') : hex('#4e3040'), 0.08)); });
+tile('blossom_log_top', (p) => rings(p, hex('#4e3040'), hex('#d8a8a0'), hex('#c48c88')));
+tile('blossom_leaves', (p) => {
+  const f = p.field(4, 2);
+  p.ramp(f, [hex('#d886a8'), hex('#e89ab8'), hex('#f2b0c8'), hex('#fac8d8')], 0.3);
+  for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) if ((f[x + y * S] < 0.3 && p.rand() < 0.5) || p.rand() < 0.08) p.clear(x, y);
+  for (let i = 0; i < 10; i++) p.set(Math.floor(p.rand() * S), Math.floor(p.rand() * S), hex('#fff0f4'));
+});
+tile('jungle_log_side', (p) => { for (let x = 0; x < S; x++) for (let y = 0; y < S; y++) p.set(x, y, p.jit((x + Math.floor(y / 3)) % 4 === 0 ? hex('#4a3a1a') : hex('#62502a'), 0.08)); for (let i = 0; i < 6; i++) p.set(Math.floor(p.rand() * S), Math.floor(p.rand() * S), hex('#5a7a2a')); });
+tile('jungle_log_top', (p) => rings(p, hex('#62502a'), hex('#b88a50'), hex('#a07640')));
+tile('jungle_leaves', (p) => leaves(p, hex('#b4bca8'), 0.1));
+tile('bamboo', (p) => { p.transparent(); for (let y = 0; y < S; y++) { p.set(7, y, hex('#6a9a2a')); p.set(8, y, hex('#5a8a22')); if (y % 5 === 0) { p.set(7, y, hex('#8ab84a')); p.set(8, y, hex('#8ab84a')); } } p.set(9, 3, hex('#6aa02a')); p.set(10, 2, hex('#6aa02a')); p.set(6, 9, hex('#6aa02a')); p.set(5, 8, hex('#6aa02a')); });
+tile('dry_grass', (p) => { p.transparent(); for (let b = 0; b < 8; b++) { let x = 1 + Math.floor(p.rand() * 14); const top = 5 + Math.floor(p.rand() * 7); for (let y = 15; y >= top; y--) { p.set(x, y, p.jit(hex('#c8a85a'), 0.12)); if (p.rand() < 0.25) x += p.rand() < 0.5 ? -1 : 1; } } });
+tile('white_flower', flower(hex('#f4f4f0'), hex('#f0c830')));
+tile('purple_flower', (p) => { p.transparent(); for (const x of [5, 8, 11]) { for (let y = 15; y > 6; y--) p.set(x, y, hex('#4f7a3a')); for (let y = 3; y < 8; y++) p.set(x + (y % 2), y, p.jit(hex('#9a6ad8'), 0.1)); } });
+tile('geode_shell', rockTile([hex('#4a4a4e'), hex('#56565a'), hex('#626266')], 5, (p) => p.speckle(hex('#8a7aa0'), 0.08)));
+tile('red_berries', (p) => { p.transparent(); for (const [x, y] of [[5, 7], [9, 6], [7, 10], [10, 10], [4, 11]]) p.sprite(['rr', 'rd'], { r: hex('#d8283a'), d: hex('#9a1a2a') }, 0.05, x, y); p.set(8, 4, hex('#3e6a2a')); p.set(9, 5, hex('#3e6a2a')); });
+tile('crystal_shard', (p) => { p.transparent(); p.sprite(['....h', '...hc', '..hcd', '.hcd.', 'hcd..', 'cd...'], { h: hex('#f0e0ff'), c: hex('#b88cf0'), d: hex('#6a3ab0') }, 0.04, 5, 5); });
+
 // Armor: original silhouettes per piece, coloured by material.
 const ARMOR_SHAPES: Record<string, string[]> = {
   helmet: ['................', '................', '................', '...mmmmmmmmmm...', '..mhhhhhhhhhhm..', '..mhmmmmmmmmhm..', '..mhm......mhm..', '..mhm......mhm..', '..mmm......mmm..'],
@@ -924,8 +1015,9 @@ export function buildAtlas(): Atlas {
   const layers = new Uint8Array(count * S * S * 4);
   const canvases: HTMLCanvasElement[] = [];
   TILE_NAMES.forEach((name, i) => {
+    // Variants ("stone~2") reuse the base painter with their own random seed.
     const p = new Painter(name);
-    const fn = painters[name];
+    const fn = painters[name] ?? painters[baseTile(name)];
     if (fn) fn(p);
     else { p.fill(hex('#ff00ff')); p.rect(0, 0, 8, 8, C.black); p.rect(8, 8, 8, 8, C.black); }
     layers.set(p.data, i * S * S * 4);
@@ -944,5 +1036,5 @@ export function buildAtlas(): Atlas {
 
 /** Names of tiles that are drawn but have no painter (for tests / debugging). */
 export function missingPainters(): string[] {
-  return TILE_NAMES.filter((n) => !painters[n]);
+  return TILE_NAMES.filter((n) => !painters[n] && !painters[baseTile(n)]);
 }

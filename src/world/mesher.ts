@@ -4,13 +4,13 @@
 //
 // Vertex format (packed to keep GPU memory low):
 //   position  Int16 x4   (block coords * 16; w unused)
-//   uv        Uint8 x4   (u*16, v*16, texture layer, flags: 1 = waving, 2 = liquid)
+//   uv        Uint16 x4  (u*16, v*16, texture layer, flags: 1 = waving, 2 = water, 3 = glowing, 4 = lava)
 //   light     Uint8 x4   (sky*16, block*16, ao/face brightness 0-255, unused)
 //   tint      Uint8 x4   (rgb multiplier, unused)
 
-import { B, BLOCKS, OPAQUE, SHAPE_CUBE, connectsFence, isLeaves } from '../blocks';
+import { B, BLOCKS, EMIT, OPAQUE, SHAPE_CUBE, connectsFence, isLeaves, isLog } from '../blocks';
 import { gateBox, stairBoxes } from '../physics';
-import { TINTED, tileIndex } from '../tiles';
+import { ROTATABLE, TILE_NAMES, TINTED, VARIANT_LAYERS, baseTile, tileIndex } from '../tiles';
 import { BIOME_TINT } from './worldgen';
 
 export const P = 18;
@@ -21,11 +21,31 @@ export interface MeshInput {
   meta: Uint8Array; // P^3
   light: Uint8Array; // P^3, sky << 4 | block
   biomes: Uint8Array; // 16*16
+  /** World position of the subchunk's (0,0,0) block, for picking texture variants. */
+  ox?: number;
+  oy?: number;
+  oz?: number;
+}
+
+let OX = 0, OY = 0, OZ = 0;
+const ROTATE_LAYER = new Uint8Array(TILE_NAMES.length);
+TILE_NAMES.forEach((n, i) => { if (ROTATABLE.has(baseTile(n))) ROTATE_LAYER[i] = 1; });
+
+function posHash(x: number, y: number, z: number, salt: number): number {
+  let h = Math.imul(x + OX, 73856093) ^ Math.imul(y + OY, 19349663) ^ Math.imul(z + OZ, 83492791) ^ Math.imul(salt, 2654435761);
+  h = Math.imul(h ^ (h >>> 13), 1274126177);
+  return (h ^ (h >>> 16)) >>> 0;
+}
+
+/** Pick one of a tile's random variants for the block at (x, y, z). */
+function variant(layer: number, x: number, y: number, z: number, salt: number): number {
+  const v = VARIANT_LAYERS[layer];
+  return v ? v[posHash(x, y, z, salt) % v.length] : layer;
 }
 
 export interface LayerMesh {
   pos: Int16Array;
-  uv: Uint8Array;
+  uv: Uint16Array;
   light: Uint8Array;
   tint: Uint8Array;
   index: Uint16Array | Uint32Array;
@@ -68,7 +88,7 @@ class Builder {
     if (this.verts === 0) return null;
     return {
       pos: new Int16Array(this.pos),
-      uv: new Uint8Array(this.uv),
+      uv: new Uint16Array(this.uv),
       light: new Uint8Array(this.light),
       tint: new Uint8Array(this.tint),
       index: this.verts > 65535 ? new Uint32Array(this.index) : new Uint16Array(this.index),
@@ -120,6 +140,8 @@ const TILE_LAYERS: Int16Array = (() => {
 const TINTED_LAYER = new Uint8Array(1024);
 for (const n of TINTED) TINTED_LAYER[tileIndex(n)] = 1;
 
+const WATERLOGGED = new Uint8Array(256);
+for (const b of BLOCKS) if (b.waterlogged) WATERLOGGED[b.id] = 1;
 const WAVING = new Uint8Array(256);
 for (const b of BLOCKS) if (b.shape === 'cross' || isLeaves(b.id)) WAVING[b.id] = 1;
 const LAYER_OF = new Uint8Array(256); // 0 opaque, 1 cutout, 2 translucent
@@ -132,6 +154,7 @@ export function facingToFaceIndex(facing: number): number {
 
 export function meshSubchunk(input: MeshInput): SubMesh {
   const { blocks, meta, light, biomes } = input;
+  OX = input.ox ?? 0; OY = input.oy ?? 0; OZ = input.oz ?? 0;
   const layers = [new Builder(), new Builder(), new Builder()];
 
   const skyAt = (i: number) => light[i] >> 4;
@@ -152,6 +175,7 @@ export function meshSubchunk(input: MeshInput): SubMesh {
         if (SHAPE_CUBE[id]) {
           // Directional front face.
           const directional = id === B.furnace || id === B.furnace_lit || id === B.crafting_table || id === B.pumpkin || id === B.chest;
+          const axis = isLog(id) || id === B.basalt || id === B.hay_bale ? m & 3 : 0; // 1 = along x, 2 = along z
           const front = directional ? facingToFaceIndex(m) : -1;
           for (let f = 0; f < 6; f++) {
             const fd = FACES[f];
@@ -164,16 +188,23 @@ export function meshSubchunk(input: MeshInput): SubMesh {
               const tiles = def.tiles;
               const name = f === front ? tiles[4] : f === 2 ? tiles[2] : f === 3 ? tiles[3] : tiles[0];
               layer = tileIndex(name);
+            } else if (axis) {
+              // Lying logs: the end-grain faces point along the axis.
+              const end = axis === 1 ? f < 2 : f >= 4;
+              layer = TILE_LAYERS[id * 6 + (end ? 2 : 0)];
             } else layer = TILE_LAYERS[id * 6 + f];
             if (id === B.chest) { box(bld, x, y, z, 1 / 16, 0, 1 / 16, 15 / 16, 14 / 16, 15 / 16, f, layer, WHITE, light[i], 0, true); continue; }
-            emitCubeFace(bld, blocks, light, x, y, z, f, layer, TINTED_LAYER[layer] ? tint : WHITE, WAVING[id]);
+            // Bark on lying logs runs along the log.
+            const barkRot = axis === 1 ? (f >= 2 ? 1 : 0) : axis === 2 ? (f < 2 ? 1 : 0) : 0;
+            emitCubeFace(bld, blocks, light, x, y, z, f, layer, TINTED_LAYER[layer] ? tint : WHITE, EMIT[id] >= 9 ? 3 : WAVING[id], barkRot);
           }
           continue;
         }
 
         switch (def.shape) {
           case 'cross': {
-            let layer = TILE_LAYERS[id * 6];
+            let layer = variant(TILE_LAYERS[id * 6], x, y, z, 5);
+            if (BLOCKS[id].waterlogged) emitLiquid(layers[2], blocks, meta, light, x, y, z, B.water);
             if (id === B.wheat) layer = tileIndex('wheat_' + Math.min(7, m));
             if (id === B.carrots) layer = tileIndex('carrots_' + Math.min(3, m >> 1));
             const t = TINTED_LAYER[layer] ? tint : WHITE;
@@ -349,6 +380,9 @@ export function meshSubchunk(input: MeshInput): SubMesh {
           case 'plate':
             emitBox(bld, blocks, light, x, y, z, [1 / 16, 0, 1 / 16], [15 / 16, m & 1 ? 0.5 / 16 : 1 / 16, 15 / 16], TILE_LAYERS[id * 6], i);
             break;
+          case 'layer':
+            emitBox(bld, blocks, light, x, y, z, [0, 0, 0], [1, 2 / 16, 1], TILE_LAYERS[id * 6], i);
+            break;
           case 'carpet':
             emitBox(bld, blocks, light, x, y, z, [0, 0, 0], [1, 1 / 16, 1], TILE_LAYERS[id * 6], i);
             break;
@@ -406,7 +440,7 @@ export function meshSubchunk(input: MeshInput): SubMesh {
             for (let f = 0; f < 6; f++) {
               const fd = FACES[f];
               if (blocks[pidx(x + fd.n[0], y + fd.n[1], z + fd.n[2])] === B.portal) continue;
-              box(bld, x, y, z, mn[0], mn[1], mn[2], mx[0], mx[1], mx[2], f, layer, WHITE, (light[i] & 0xf0) | 15, 2);
+              box(bld, x, y, z, mn[0], mn[1], mn[2], mx[0], mx[1], mx[2], f, layer, WHITE, (light[i] & 0xf0) | 15, 3);
             }
             break;
           }
@@ -415,10 +449,10 @@ export function meshSubchunk(input: MeshInput): SubMesh {
             const s = skyAt(i), o = 1 / 16;
             const quads: [number, number, number, number][] = [[o, 0, o, 1], [1 - o, 1, 1 - o, 0], [0, o, 1, o], [1, 1 - o, 0, 1 - o]];
             for (const [ax, az, bx, bz] of quads) {
-              bld.vert(x + ax, y, z + az, 0, 1, layer, 0, s, 15, 1, WHITE);
-              bld.vert(x + bx, y, z + bz, 1, 1, layer, 0, s, 15, 1, WHITE);
-              bld.vert(x + bx, y + 1.2, z + bz, 1, 0, layer, 0, s, 15, 1, WHITE);
-              bld.vert(x + ax, y + 1.2, z + az, 0, 0, layer, 0, s, 15, 1, WHITE);
+              bld.vert(x + ax, y, z + az, 0, 1, layer, 3, s, 15, 1, WHITE);
+              bld.vert(x + bx, y, z + bz, 1, 1, layer, 3, s, 15, 1, WHITE);
+              bld.vert(x + bx, y + 1.2, z + bz, 1, 0, layer, 3, s, 15, 1, WHITE);
+              bld.vert(x + ax, y + 1.2, z + az, 0, 0, layer, 3, s, 15, 1, WHITE);
               bld.quad(false, true);
             }
             break;
@@ -441,8 +475,11 @@ export function meshSubchunk(input: MeshInput): SubMesh {
   return { opaque: layers[0].build(), cutout: layers[1].build(), translucent: layers[2].build() };
 }
 
-function emitCubeFace(bld: Builder, blocks: Uint8Array, light: Uint8Array, x: number, y: number, z: number, f: number, layer: number, tint: readonly number[], waving: number): void {
+function emitCubeFace(bld: Builder, blocks: Uint8Array, light: Uint8Array, x: number, y: number, z: number, f: number, layer: number, tint: readonly number[], waving: number, forceRot = 0): void {
   const fd = FACES[f];
+  // Sides of a block share a variant so its faces match; tops pick their own and may rotate.
+  layer = variant(layer, x, y, z, f === 2 ? 7 : f === 3 ? 11 : 3);
+  const rot = forceRot || ((f === 2 || f === 3) && ROTATE_LAYER[layer] ? posHash(x, y, z, 99) & 3 : 0);
   const [nx, ny, nz] = fd.n;
   // Two in-plane axes.
   const ua: [number, number, number] = nx !== 0 ? [0, 1, 0] : [1, 0, 0];
@@ -471,8 +508,9 @@ function emitCubeFace(bld: Builder, blocks: Uint8Array, light: Uint8Array, x: nu
   }
   for (let k = 0; k < 4; k++) {
     const c = fd.corners[k];
-    const [u, v] = faceUV(f, c[0], c[1], c[2]);
-    const flags = waving && c[1] === 1 ? 1 : 0;
+    let [u, v] = faceUV(f, c[0], c[1], c[2]);
+    for (let r = 0; r < rot; r++) { const t = u; u = 1 - v; v = t; }
+    const flags = waving === 3 ? 3 : waving && c[1] === 1 ? 1 : 0;
     bld.vert(x + c[0], y + c[1], z + c[2], u, v, layer, flags, skies[k], blks[k], fd.shade * AO_CURVE[aos[k]], tint, f);
   }
   // Flip the triangulation so AO interpolates without a visible seam.
@@ -533,7 +571,7 @@ function emitTorch(bld: Builder, x: number, y: number, z: number, m: number, lay
       if (f === 2 || f === 3) { u = 7 / 16 + (c[0] ? 2 / 16 : 0); v = 6 / 16 + (c[2] ? 2 / 16 : 0); }
       else { u = 7 / 16 + ((f < 2 ? c[2] : c[0]) ? 2 / 16 : 0); v = c[1] ? 16 / 16 - h : 1; }
       const [vx, vy, vz] = pt(px, py, pz);
-      bld.vert(vx, vy, vz, u, v, layer, 0, s, bl, fd.shade, WHITE);
+      bld.vert(vx, vy, vz, u, v, layer, lever ? 0 : 3, s, bl, fd.shade, WHITE);
     }
     bld.quad(false);
   }
@@ -569,8 +607,10 @@ function emitBed(bld: Builder, blocks: Uint8Array, x: number, y: number, z: numb
 /** Fluid height (0..1) of the cell for smooth surfaces. */
 function fluidHeight(blocks: Uint8Array, meta: Uint8Array, x: number, y: number, z: number, id: number): number {
   const i = pidx(x, y, z);
-  if (blocks[i] !== id) return -1;
-  if (blocks[pidx(x, y + 1, z)] === id) return 1;
+  const same = (b: number) => b === id || (id === B.water && WATERLOGGED[b] === 1);
+  if (!same(blocks[i])) return -1;
+  if (same(blocks[pidx(x, y + 1, z)])) return 1;
+  if (blocks[i] !== id) return 14 / 16;
   const level = meta[i] & 7;
   return level === 0 ? 14 / 16 : Math.max(0.1, (8 - level) / 9);
 }
@@ -580,7 +620,7 @@ function emitLiquid(bld: Builder, blocks: Uint8Array, meta: Uint8Array, light: U
   const flowLayer = id === B.water ? tileIndex('water_flow') : layer;
   const i = pidx(x, y, z);
   const s = light[i] >> 4, bl = Math.max(light[i] & 15, id === B.lava ? 15 : 0);
-  const flags = 2;
+  const flags = id === B.lava ? 4 : 2;
   // Corner heights: average of the up to 4 cells sharing the corner.
   const corner = (cx: number, cz: number) => {
     let sum = 0, n = 0;
@@ -599,7 +639,7 @@ function emitLiquid(bld: Builder, blocks: Uint8Array, meta: Uint8Array, light: U
     const fd = FACES[f];
     const ni = pidx(x + fd.n[0], y + fd.n[1], z + fd.n[2]);
     const nid = blocks[ni];
-    if (nid === id) continue;
+    if (nid === id || (id === B.water && WATERLOGGED[nid])) continue;
     if (f !== 2 && OPAQUE[nid]) continue;
     if (f === 2 && blocks[pidx(x, y + 1, z)] === id) continue;
     const nl = f === 2 ? light[i] : light[ni];

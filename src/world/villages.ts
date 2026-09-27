@@ -18,7 +18,7 @@ interface Piece { type: PieceType; x0: number; z0: number; x1: number; z1: numbe
 interface Rect { x0: number; z0: number; x1: number; z1: number }
 export interface Village { cx: number; cz: number; style: Style; pieces: Piece[]; roads: Rect[]; bounds: Rect }
 
-const SIZES: Record<PieceType, [number, number]> = { well: [5, 5], hut: [5, 5], house: [7, 7], farm: [7, 9], smith: [7, 7], library: [7, 7], lamp: [1, 1] };
+const SIZES: Record<PieceType, [number, number]> = { well: [5, 5], hut: [5, 5], house: [9, 7], farm: [7, 9], smith: [7, 7], library: [9, 7], lamp: [1, 1] };
 
 function overlaps(a: Rect, b: Rect, pad = 0): boolean {
   return a.x0 - pad <= b.x1 && a.x1 + pad >= b.x0 && a.z0 - pad <= b.z1 && a.z1 + pad >= b.z0;
@@ -182,9 +182,6 @@ export function buildVillage(gen: WorldGen, v: Village, blocks: Uint8Array, meta
       }
     };
     const put = (u: number, dy: number, vv: number, id: number, m = 0) => { const [x, z] = at(u, vv); set(x, y + dy, z, id, m); };
-    const frontMeta = [2, 3, 0, 1][p.rot]; // directional block facing the road
-    const doorMeta = p.rot;
-    const bedMeta = [3, 0, 1, 2][p.rot]; // head toward +u
     // Foundation and clearing.
     for (let vv = 0; vv < d; vv++) for (let u = 0; u < w; u++) {
       const [x, z] = at(u, vv);
@@ -225,48 +222,95 @@ export function buildVillage(gen: WorldGen, v: Village, blocks: Uint8Array, meta
         break;
       }
       default: {
-        // Walls with log corners, a door facing the road, windows, a roof.
         const H = p.type === 'hut' ? 3 : 4;
-        for (let vv = 0; vv < d; vv++) for (let u = 0; u < w; u++) {
-          const edge = u === 0 || u === w - 1 || vv === 0 || vv === d - 1;
-          const corner = (u === 0 || u === w - 1) && (vv === 0 || vv === d - 1);
-          put(u, -1, vv, p.type === 'smith' ? B.cobblestone : edge ? floorB : wall);
-          if (!edge) continue;
-          for (let dy = 0; dy < H; dy++) {
-            const window = dy === 1 && !corner && ((u === Math.floor(w / 2) && vv === d - 1) || ((u === 0 || u === w - 1) && vv === Math.floor(d / 2)));
-            const id = corner ? frame : window ? B.glass_pane : p.type === 'smith' && dy === 0 ? B.cobblestone : wall;
-            put(u, dy, vv, id);
-          }
-        }
+        const upV = [2, 1, 0, 3][p.rot], downV = [0, 3, 2, 1][p.rot]; // stairs facing local +v / -v
+        const axisU = p.rot % 2 === 0 ? 1 : 2, axisV = axisU === 1 ? 2 : 1; // log lying along local u / v
+        const stair = S === 'spruce' ? B.cobble_stairs : S === 'sand' ? 0 : B.oak_stairs;
+        const beam = S === 'sand' ? B.sandstone : S === 'spruce' ? B.spruce_log : B.log;
         const du = Math.floor(w / 2);
-        put(du, 0, 0, B.door, doorMeta);
-        put(du, 1, 0, B.door, doorMeta | 8);
-        put(du, -1, 0, S === 'sand' ? B.sandstone : B.cobblestone);
-        // Roof: stepped pyramid.
-        const roof = S === 'sand' ? B.sandstone : S === 'spruce' ? B.spruce_log : B.planks;
-        for (let k = 0; k <= Math.floor(Math.min(w, d) / 2); k++) {
-          for (let vv = k - 1; vv <= d - k; vv++) for (let u = k - 1; u <= w - k; u++) {
-            if (vv < -1 || u < -1 || vv > d || u > w) continue;
-            if (vv === k - 1 || vv === d - k || u === k - 1 || u === w - k) put(u, H + k, vv, roof);
+        // Floor and walls: timber frame with corner posts, a beam round the top, windows between.
+        for (let vv = 0; vv < d; vv++) for (let u = 0; u < w; u++) {
+          const edgeU = u === 0 || u === w - 1, edgeV = vv === 0 || vv === d - 1;
+          const edge = edgeU || edgeV;
+          put(u, -1, vv, edge ? floorB : p.type === 'smith' ? B.cobblestone : S === 'sand' ? B.sandstone : B.planks);
+          if (!edge) continue;
+          const corner = edgeU && edgeV;
+          for (let dy = 0; dy < H; dy++) {
+            let id = p.type === 'smith' && dy === 0 ? B.cobblestone : wall, m = 0;
+            if (corner) id = frame;
+            else if (dy === H - 1 && S !== 'sand') { id = beam; m = edgeV ? axisU : axisV; }
+            else if (dy === 1 || (dy === 2 && H > 3)) {
+              const alongFront = edgeV && u % 2 === 0 && u !== du && u > 0 && u < w - 1;
+              const alongSide = edgeU && vv % 2 === 0 && vv > 0 && vv < d - 1;
+              if ((alongFront || alongSide) && dy === 1) id = B.glass_pane;
+              if ((alongFront || alongSide) && dy === 2 && H > 3) id = B.glass_pane;
+            }
+            put(u, dy, vv, id, m);
           }
         }
+        put(du, 0, 0, B.door, [0, 1, 2, 3][p.rot]);
+        put(du, 1, 0, B.door, [0, 1, 2, 3][p.rot] | 8);
+        // Attic ceiling.
+        for (let vv = 1; vv < d - 1; vv++) for (let u = 1; u < w - 1; u++) put(u, H, vv, S === 'sand' ? B.sandstone : B.planks);
+        let ridgeTop = H;
+        if (S === 'sand') {
+          // Desert houses: flat roof with a low parapet.
+          for (let vv = 0; vv < d; vv++) for (let u = 0; u < w; u++) {
+            put(u, H, vv, B.sandstone);
+            if (u === 0 || u === w - 1 || vv === 0 || vv === d - 1) put(u, H + 1, vv, (u + vv) % 2 ? B.sandstone : 0);
+          }
+        } else {
+          // Gable roof: stair rows climbing from front and back to a ridge, overhanging by one.
+          for (let k = 0; ; k++) {
+            const fv = k - 1, bv = d - k, y2 = H + k;
+            if (fv > bv) break;
+            for (let u = -1; u <= w; u++) {
+              if (fv === bv) put(u, y2, fv, S === 'spruce' ? B.cobblestone : B.planks);
+              else { put(u, y2, fv, stair, upV); put(u, y2, bv, stair, downV); }
+            }
+            // Fill the triangular gable ends under this row.
+            for (let vv = fv + 1; vv < bv; vv++) { put(0, y2, vv, wall); put(w - 1, y2, vv, wall); }
+            ridgeTop = y2;
+            if (fv === bv || fv + 1 === bv) break;
+          }
+        }
+        // Chimney through the roof on bigger buildings.
+        if (p.type === 'house' || p.type === 'smith') {
+          for (let dy = 0; dy <= ridgeTop + 1; dy++) put(w - 2, dy, d - 2, B.cobblestone);
+          put(w - 2, 0, d - 3, 0);
+        }
+        // Porch light under the front eave, and one inside.
+        if (S !== 'sand') put(du + 1, H - 1, -1, B.lantern, 1);
+        put(du, H - 1, Math.floor(d / 2), B.lantern, 1);
         // Furnishings.
-        put(Math.floor(w / 2), H - 1, Math.floor(d / 2), B.lantern, 1);
-        if (p.type === 'house' || p.type === 'hut') {
-          put(1, 0, d - 2, B.bed, bedMeta);
-          put(2, 0, d - 2, B.bed, bedMeta | 8);
-          if (p.type === 'house') { put(w - 2, 0, d - 2, B.crafting_table, frontMeta); put(w - 2, 0, 1, B.chest, frontMeta); put(1, 0, 1, B.carpet); }
+        const fm = [2, 3, 0, 1][p.rot]; // directional blocks face the door side
+        const bedMeta = [3, 0, 1, 2][p.rot];
+        if (p.type === 'hut') {
+          put(1, 0, d - 2, B.bed, bedMeta); put(2, 0, d - 2, B.bed, bedMeta | 8);
+          put(w - 2, 0, d - 2, B.chest, fm);
+          put(w - 2, 0, 1, B.crafting_table, fm);
+        } else if (p.type === 'house') {
+          put(1, 0, d - 2, B.bed, bedMeta); put(2, 0, d - 2, B.bed, bedMeta | 8);
+          put(1, 0, d - 3, B.bed, bedMeta); put(2, 0, d - 3, B.bed, bedMeta | 8);
+          put(w - 2, 0, 1, B.crafting_table, fm);
+          put(w - 3, 0, 1, B.furnace, fm);
+          put(1, 0, 1, B.chest, fm);
+          put(1, 0, 2, B.bookshelf);
+          for (let u = 3; u < w - 3; u++) for (let vv = 2; vv < d - 2; vv++) put(u, 0, vv, B.carpet);
         } else if (p.type === 'smith') {
-          put(1, 0, d - 2, B.furnace, frontMeta);
-          put(2, 0, d - 2, B.furnace, frontMeta);
-          put(w - 2, 0, d - 2, B.chest, frontMeta | 16);
-          put(w - 2, 0, 1, B.iron_block);
-          put(3, 0, 3, B.lava);
+          put(1, 0, d - 2, B.furnace, fm);
+          put(2, 0, d - 2, B.furnace, fm);
+          put(w - 2, 0, 1, B.chest, fm | 16);
+          put(1, 0, 1, B.iron_block);
           put(3, -1, 3, B.cobblestone);
+          put(3, 0, 3, B.lava);
+          put(2, 0, 3, B.iron_bars); put(4, 0, 3, B.iron_bars);
         } else if (p.type === 'library') {
-          for (let u = 1; u < w - 1; u++) { put(u, 0, d - 2, B.bookshelf); put(u, 1, d - 2, B.bookshelf); }
-          put(1, 0, 1, B.crafting_table, frontMeta);
-          put(w - 2, 0, 2, B.carpet);
+          for (let u = 1; u < w - 1; u++) { if (u === w - 2) continue; put(u, 0, d - 2, B.bookshelf); put(u, 1, d - 2, B.bookshelf); }
+          for (let vv = 1; vv < d - 2; vv++) { put(1, 0, vv, B.bookshelf); put(1, 1, vv, B.bookshelf); }
+          put(w - 2, 0, 1, B.crafting_table, fm);
+          put(w - 2, 0, d - 2, B.chest, fm);
+          for (let u = 3; u < w - 2; u++) for (let vv = 2; vv < d - 2; vv++) put(u, 0, vv, B.carpet);
         }
         if (inChunk) {
           const choices = PROFESSIONS[p.type];

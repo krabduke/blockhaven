@@ -11,7 +11,7 @@ interface Shapeless { ingredients: (number | number[])[]; result: [number, numbe
 const shaped: Shaped[] = [];
 const shapeless: Shapeless[] = [];
 
-const LOGS = [B.log, B.birch_log, B.spruce_log];
+const LOGS = [B.log, B.birch_log, B.spruce_log, B.sunwood_log, B.jungle_log, B.blossom_log];
 const PLANKS = B.planks;
 
 function r(pattern: string[], key: Record<string, number | number[]>, result: number, count = 1) {
@@ -92,6 +92,16 @@ r(['SS', 'SS'], { S: B.slate }, B.polished_slate, 4);
 r(['MM', 'MM'], { M: B.marble }, B.polished_marble, 4);
 s([B.stone_bricks, B.vine], B.mossy_stone_bricks);
 s([B.melon], I.melon_slice, 9);
+
+r(['GG', 'GG'], { G: B.granite }, B.polished_granite, 4);
+r(['LL', 'LL'], { L: B.limestone }, B.polished_limestone, 4);
+r(['DD', 'DD'], { D: B.cobbled_deepstone }, B.deepstone_bricks, 4);
+r(['MM', 'MM'], { M: B.mud }, B.mud_bricks, 4);
+r(['SS', 'SS'], { S: B.red_sand }, B.red_sandstone);
+r(['CC', 'CC'], { C: I.crystal_shard }, B.crystal_block);
+s([B.cobblestone, B.moss_block], B.mossy_cobblestone);
+s([B.stone_bricks, B.moss_block], B.mossy_stone_bricks);
+s([B.dirt, B.gravel], B.coarse_dirt, 2);
 
 const ARMOR_MAT: Record<string, number> = { leather: I.leather, golden: I.gold_ingot, iron: I.iron_ingot, diamond: I.diamond };
 const ARMOR_PATTERNS = [['MMM', 'M M'], ['M M', 'MMM', 'MMM'], ['MMM', 'M M', 'M M'], ['M M', 'M M']];
@@ -176,6 +186,8 @@ export const SMELTING: Record<number, number> = {
   [B.sand]: B.glass,
   [B.cobblestone]: B.stone,
   [B.clay]: B.terracotta,
+  [B.red_sand]: B.glass,
+  [B.cobbled_deepstone]: B.deepstone,
   [B.cinderstone]: I.cinder_brick,
   [B.cactus]: I.dye_green,
   [B.stone_bricks]: B.cracked_stone_bricks,
