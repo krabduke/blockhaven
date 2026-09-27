@@ -319,10 +319,19 @@ const fire = await g(async ({ x, y, z }) => {
   const bx = x - 30, by = y + 20, bz = z;
   for (let dx = -1; dx <= 5; dx++) for (let dz = -1; dz <= 1; dz++) w.setBlock(bx + dx, by - 1, bz + dz, 1);
   for (let dx = 1; dx <= 4; dx++) w.setBlock(bx + dx, by, bz, 5);
+  // Rain puts fire out, and the weather changes on its own timer: keep it clear for this check.
+  w.weather = 'clear'; w.weatherTimer = 100000;
   w.setBlock(bx, by, bz, 70, 0);
-  // Wait for game time, not wall time: headless rendering can run below 20 ticks/s.
+  // Wait for game time, not wall time: headless rendering can run below 20 ticks/s. Fire can die
+  // down before it catches (it's random), so relight it, as a player would, if it goes out early.
   const t0 = w.tickCount;
-  while (w.tickCount - t0 < 300) await sleep(500);
+  let relights = 0;
+  while (w.tickCount - t0 < 300) {
+    await sleep(500);
+    const burning = [0, 1, 2, 3, 4].some((dx) => w.getBlock(bx + dx, by, bz) === 70);
+    const intact = [1, 2, 3, 4].every((dx) => w.getBlock(bx + dx, by, bz) === 5);
+    if (!burning && intact && relights < 3) { w.setBlock(bx, by, bz, 70, 0); relights++; }
+  }
   let planks = 0;
   for (let dx = 1; dx <= 4; dx++) if (w.getBlock(bx + dx, by, bz) === 5) planks++;
   return { planksLeft: planks };
@@ -1005,6 +1014,84 @@ await wait(300);
   check('a mossback tames with food, takes a saddle, and can be ridden', tame.mbTamed && tame.saddled && tame.riding && tame.moved > 3, JSON.stringify(tame));
   check('a tamed fox sits when told and follows you when it stands', tame.foxTamed && tame.sat && tame.stood && tame.follow < 5, JSON.stringify(tame));
   await g(() => { const G = window.blockhaven; delete G.input.locked; G.riding = null; const p = G.player; window.__invSnap.forEach((s, i) => { p.inv.slots[i] = s; }); });
+}
+
+// --- Power components: repeater, pistons, hopper, watcher.
+{
+  const pw = await g(async () => {
+    const G = window.blockhaven, p = G.player, w = G.world, B = G.ids, It = G.items;
+    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+    const out = {};
+    const [x0, , z0] = p.body.pos.map(Math.floor);
+    const y = Math.floor(p.body.pos[1]) + 20;
+    for (let dx = -2; dx <= 20; dx++) for (let dz = -2; dz <= 10; dz++) { w.setBlock(x0 + dx, y - 1, z0 + dz, B.stone); for (let dy = 0; dy <= 5; dy++) w.setBlock(x0 + dx, y + dy, z0 + dz, 0); }
+    await sleep(100);
+    // Repeater: lever -> wire -> repeater (facing east, delay 4 = 8 ticks) -> lamp.
+    const x = x0, z = z0;
+    w.setBlock(x, y, z, B.lever, 0);
+    w.setBlock(x + 1, y, z, B.wire);
+    w.setBlock(x + 2, y, z, B.repeater, 3 | (3 << 2));
+    w.setBlock(x + 3, y, z, B.lamp);
+    await sleep(100);
+    w.toggleLever(x, y, z);
+    await sleep(150);
+    out.repeaterWaits = w.getBlock(x + 3, y, z) === B.lamp;
+    await sleep(700);
+    out.repeaterLit = w.getBlock(x + 3, y, z) === B.lamp_on;
+    // Piston (facing east) pushes three stone blocks; the lever beside it drives it.
+    const px = x0 + 6, pz = z0 + 3;
+    w.setBlock(px, y, pz, B.piston, 5);
+    for (let i = 1; i <= 3; i++) w.setBlock(px + i, y, pz, B.cobblestone);
+    w.setBlock(px, y, pz - 1, B.lever, 0);
+    await sleep(100);
+    w.toggleLever(px, y, pz - 1);
+    await sleep(300);
+    out.pushed = w.getBlock(px + 1, y, pz) === B.piston_head && [2, 3, 4].every((i) => w.getBlock(px + i, y, pz) === B.cobblestone) && (w.getMeta(px, y, pz) & 8) !== 0;
+    w.toggleLever(px, y, pz - 1);
+    await sleep(300);
+    out.retracted = w.getBlock(px + 1, y, pz) === 0 && (w.getMeta(px, y, pz) & 8) === 0;
+    // Sticky piston pulls the block back.
+    const sx = x0 + 6, sz = z0 + 7;
+    w.setBlock(sx, y, sz, B.sticky_piston, 5);
+    w.setBlock(sx + 1, y, sz, B.gold_block);
+    w.setBlock(sx, y, sz - 1, B.lever, 0);
+    await sleep(100);
+    w.toggleLever(sx, y, sz - 1); await sleep(300);
+    const outward = w.getBlock(sx + 2, y, sz) === B.gold_block;
+    w.toggleLever(sx, y, sz - 1); await sleep(300);
+    out.sticky = outward && w.getBlock(sx + 1, y, sz) === B.gold_block && w.getBlock(sx + 2, y, sz) === 0;
+    // Hopper: a chest above feeds it, it feeds the chest below; an item dropped on top is collected.
+    const hx = x0 + 14, hz = z0 + 3;
+    w.setBlock(hx, y, hz, B.chest);
+    w.setBlock(hx, y + 1, hz, B.hopper, 0);
+    w.setBlock(hx, y + 2, hz, B.chest);
+    const top = w.getBlockEntity(hx, y + 2, hz), bottom = w.getBlockEntity(hx, y, hz);
+    w.getBlockEntity(hx, y + 1, hz);
+    top.inv.slots[0] = { id: It.coal, count: 3 };
+    await sleep(2200);
+    out.hopperMoved = bottom.inv.count(It.coal);
+    w.setBlock(hx, y + 2, hz, 0);
+    G.entities.dropItem(hx + 0.5, y + 2.1, hz + 0.5, { id: It.diamond, count: 1 }, 0, [0, 0, 0]);
+    await sleep(2200);
+    out.hopperCollected = bottom.inv.count(It.diamond) + (w.getBlockEntity(hx, y + 1, hz)?.inv.count(It.diamond) ?? 0);
+    // Watcher (looking north at a block) pulses the lamp behind it when the block changes.
+    const wx = x0 + 17, wz = z0 + 5;
+    w.setBlock(wx, y, wz - 1, B.dirt);
+    w.setBlock(wx, y, wz, B.watcher, 2);
+    w.setBlock(wx, y, wz + 1, B.lamp);
+    await sleep(300);
+    const before = w.getBlock(wx, y, wz + 1);
+    let lit = false;
+    w.setBlock(wx, y, wz - 1, B.stone);
+    for (let i = 0; i < 20 && !lit; i++) { await sleep(15); lit = w.getBlock(wx, y, wz + 1) === B.lamp_on; }
+    await sleep(600);
+    out.watcher = before === B.lamp && lit && w.getBlock(wx, y, wz + 1) === B.lamp;
+    return out;
+  });
+  check('a repeater passes power on after its delay', pw.repeaterWaits && pw.repeaterLit, JSON.stringify(pw));
+  check('a piston pushes a row of blocks and pulls its head back; a sticky one brings the block back', pw.pushed && pw.retracted && pw.sticky, JSON.stringify(pw));
+  check('a hopper carries items from a chest above to one below and picks up dropped items', pw.hopperMoved === 3 && pw.hopperCollected === 1, JSON.stringify(pw));
+  check('a watcher pulses when the block it looks at changes', pw.watcher, JSON.stringify(pw));
 }
 
 // --- Save, quit, reload, and check a block change persisted.

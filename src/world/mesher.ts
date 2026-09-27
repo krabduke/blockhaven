@@ -8,7 +8,7 @@
 //   light     Uint8 x4   (sky*16, block*16, ao/face brightness 0-255, unused)
 //   tint      Uint8 x4   (rgb multiplier, unused)
 
-import { B, BLOCKS, EMIT, OPAQUE, SHAPE_CUBE, connectsFence, isLeaves, isLog } from '../blocks';
+import { B, BLOCKS, DIR6, DIR6_FACE, EMIT, OPAQUE, SHAPE_CUBE, connectsFence, isLeaves, isLog } from '../blocks';
 import { gateBox, stairBoxes } from '../physics';
 import { ROTATABLE, TILE_NAMES, TINTED, VARIANT_LAYERS, baseTile, tileIndex } from '../tiles';
 import { BIOME_TINT } from './worldgen';
@@ -407,6 +407,54 @@ export function meshSubchunk(input: MeshInput): SubMesh {
           case 'carpet':
             emitBox(bld, blocks, light, x, y, z, [0, 0, 0], [1, 1 / 16, 1], metaLayer(id, m), i);
             break;
+          case 'facing6': {
+            // A cube with a front, a back and sides, turned to face any of six ways (watchers).
+            const f = m & 7, front = DIR6_FACE[f], back = DIR6_FACE[f ^ 1];
+            const t = def.tiles;
+            const lit = (m & 8) !== 0;
+            emitBoxFaces(bld, blocks, light, x, y, z, [0, 0, 0], [1, 1, 1], (fi) => tileIndex(fi === front ? t[2] : fi === back ? (lit ? t[3] + '_on' : t[3]) : t[0]), i);
+            break;
+          }
+          case 'piston': {
+            const f = m & 7, ext = (m & 8) !== 0, front = DIR6_FACE[f], back = DIR6_FACE[f ^ 1];
+            const t = def.tiles;
+            const layerFor = (fi: number) => tileIndex(fi === front ? (ext ? 'piston_inner' : t[2]) : fi === back ? t[3] : t[0]);
+            if (!ext) emitBoxFaces(bld, blocks, light, x, y, z, [0, 0, 0], [1, 1, 1], layerFor, i);
+            else { const [mn, mx] = facingBox(f, 0, 0, 0, 1, 1, 12 / 16); emitBoxFaces(bld, blocks, light, x, y, z, mn, mx, layerFor, i); }
+            break;
+          }
+          case 'piston_head': {
+            const f = m & 7, front = DIR6_FACE[f];
+            const plate = tileIndex((m & 8) ? 'piston_top_sticky' : 'piston_top'), side = tileIndex('piston_side');
+            const [pmn, pmx] = facingBox(f, 0, 0, 12 / 16, 1, 1, 1);
+            emitBoxFaces(bld, blocks, light, x, y, z, pmn, pmx, (fi) => (fi === front ? plate : side), i);
+            const [rmn, rmx] = facingBox(f, 6 / 16, 6 / 16, -4 / 16, 10 / 16, 10 / 16, 12 / 16);
+            emitBoxFaces(bld, blocks, light, x, y, z, rmn, rmx, () => side, i);
+            break;
+          }
+          case 'hopper': {
+            // A wide rim, a narrowing body, and a spout pointing where items go.
+            const top = tileIndex('hopper_top'), side = tileIndex('hopper_side');
+            emitBoxFaces(bld, blocks, light, x, y, z, [0, 10 / 16, 0], [1, 1, 1], (fi) => (fi === 2 ? top : side), i);
+            emitBox(bld, blocks, light, x, y, z, [4 / 16, 4 / 16, 4 / 16], [12 / 16, 10 / 16, 12 / 16], side, i);
+            const d = DIR6[m & 7];
+            const c = [0.5 + d[0] * 0.375, d[1] === -1 ? 2 / 16 : 6 / 16, 0.5 + d[2] * 0.375];
+            emitBox(bld, blocks, light, x, y, z, [c[0] - 2 / 16, c[1] - 2 / 16, c[2] - 2 / 16], [c[0] + 2 / 16, c[1] + 2 / 16, c[2] + 2 / 16], side, i);
+            break;
+          }
+          case 'repeater': {
+            // A stone slab with a spark track, a fixed torch at the back and a sliding one set by the delay.
+            const on = (m & 16) !== 0, f = m & 3, delay = (m >> 2) & 3;
+            emitBoxFaces(bld, blocks, light, x, y, z, [0, 0, 0], [1, 2 / 16, 1], (fi) => (fi === 2 ? tileIndex(on ? 'repeater_on' : 'repeater') : tileIndex('stone')), i);
+            const hv = [[0, 1], [-1, 0], [0, -1], [1, 0]][f];
+            const post = (along: number) => {
+              const cx = 0.5 + hv[0] * along, cz = 0.5 + hv[1] * along;
+              emitBox(bld, blocks, light, x, y, z, [cx - 1 / 16, 2 / 16, cz - 1 / 16], [cx + 1 / 16, 7 / 16, cz + 1 / 16], tileIndex(on ? 'repeater_torch_on' : 'repeater_torch'), i);
+            };
+            post(-5 / 16);
+            post(-1 / 16 + delay * 2 / 16);
+            break;
+          }
           case 'rail': {
             // Flat track (rotated and curved to shape) or a slope climbing one block.
             const shape = id === B.powered_rail ? m & 7 : m & 15;
@@ -616,6 +664,31 @@ function emitBox(bld: Builder, blocks: Uint8Array, light: Uint8Array, x: number,
     if (onEdge && OPAQUE[blocks[ni]]) continue;
     const pl = onEdge ? light[ni] : light[selfIdx];
     box(bld, x, y, z, mn[0], mn[1], mn[2], mx[0], mx[1], mx[2], f, layer, WHITE, pl || light[selfIdx], 0);
+  }
+}
+
+/** Like emitBox, but each face picks its own texture layer. */
+function emitBoxFaces(bld: Builder, blocks: Uint8Array, light: Uint8Array, x: number, y: number, z: number, mn: number[], mx: number[], layerFor: (f: number) => number, selfIdx: number): void {
+  for (let f = 0; f < 6; f++) {
+    const fd = FACES[f];
+    const onEdge = (fd.n[0] === 1 && mx[0] === 1) || (fd.n[0] === -1 && mn[0] === 0) || (fd.n[1] === 1 && mx[1] === 1) || (fd.n[1] === -1 && mn[1] === 0) || (fd.n[2] === 1 && mx[2] === 1) || (fd.n[2] === -1 && mn[2] === 0);
+    const ni = pidx(x + fd.n[0], y + fd.n[1], z + fd.n[2]);
+    if (onEdge && OPAQUE[blocks[ni]]) continue;
+    const pl = onEdge ? light[ni] : light[selfIdx];
+    box(bld, x, y, z, mn[0], mn[1], mn[2], mx[0], mx[1], mx[2], f, layerFor(f), WHITE, pl || light[selfIdx], 0);
+  }
+}
+
+/** A box given in "facing space" (front = the facing direction, depth measured from the back), turned to face DIR6 `f`. */
+function facingBox(f: number, x0: number, y0: number, d0: number, x1: number, y1: number, d1: number): [number[], number[]] {
+  // (x, y) span the face; d runs from the back (0) to the front (1).
+  switch (f) {
+    case 0: return [[x0, 1 - d1, y0], [x1, 1 - d0, y1]];   // down
+    case 1: return [[x0, d0, y0], [x1, d1, y1]];           // up
+    case 2: return [[x0, y0, 1 - d1], [x1, y1, 1 - d0]];   // north (-z)
+    case 3: return [[x0, y0, d0], [x1, y1, d1]];           // south (+z)
+    case 4: return [[1 - d1, y0, x0], [1 - d0, y1, x1]];   // west (-x)
+    default: return [[d0, y0, x0], [d1, y1, x1]];           // east (+x)
   }
 }
 

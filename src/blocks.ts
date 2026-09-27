@@ -3,7 +3,7 @@
 
 export type RenderShape = 'none' | 'cube' | 'cross' | 'liquid' | 'torch' | 'door' | 'bed' | 'cactus' | 'ladder' | 'slabBottom' | 'stairs' | 'fence' | 'gate' | 'table'
   | 'pane' | 'trapdoor' | 'lantern' | 'wire' | 'button' | 'plate' | 'sign' | 'flat' | 'vine' | 'cake' | 'carpet' | 'portal' | 'fire' | 'layer'
-  | 'banner' | 'painting' | 'rail';
+  | 'banner' | 'painting' | 'rail' | 'repeater' | 'piston' | 'piston_head' | 'hopper' | 'facing6';
 export type Layer = 'opaque' | 'cutout' | 'translucent';
 export type Tool = 'pickaxe' | 'axe' | 'shovel' | 'sword' | null;
 export type SoundKind = 'stone' | 'wood' | 'gravel' | 'grass' | 'sand' | 'glass' | 'wool' | 'snow' | 'none';
@@ -310,6 +310,18 @@ def(172, 'painting', 'Painting', { shape: 'painting', layer: 'cutout', solid: fa
 // Rails: meta is the track shape (see RAIL_EXITS); powered rails add 8 when powered.
 def(173, 'rail', 'Rail', { shape: 'rail', layer: 'cutout', solid: false, opaque: false, hardness: 0.7, tool: 'pickaxe', sound: 'stone', needsSupport: true, tiles: 'rail', icon: 'rail', metaTiles: ['rail', 'rail', 'rail', 'rail', 'rail', 'rail', 'rail_curve', 'rail_curve', 'rail_curve', 'rail_curve', 'rail', 'rail', 'rail', 'rail', 'rail', 'rail'] });
 def(174, 'powered_rail', 'Powered Rail', { shape: 'rail', layer: 'cutout', solid: false, opaque: false, hardness: 0.7, tool: 'pickaxe', sound: 'stone', needsSupport: true, tiles: 'powered_rail', icon: 'powered_rail', metaTiles: ['powered_rail', 'powered_rail', 'powered_rail', 'powered_rail', 'powered_rail', 'powered_rail', 'powered_rail', 'powered_rail', 'powered_rail_on', 'powered_rail_on', 'powered_rail_on', 'powered_rail_on', 'powered_rail_on', 'powered_rail_on', 'powered_rail_on', 'powered_rail_on'] });
+// Power components. Six-way facing (DIR6): 0 down, 1 up, 2 north, 3 south, 4 west, 5 east.
+// Repeater meta: facing (0-3 horizontal as for furnaces) | delay-1 << 2 | on << 4.
+def(175, 'repeater', 'Repeater', { shape: 'repeater', layer: 'cutout', solid: false, opaque: false, hardness: 0, sound: 'stone', needsSupport: true, tiles: 'repeater', icon: 'repeater_item', metaTiles: ['repeater', 'repeater', 'repeater', 'repeater', 'repeater', 'repeater', 'repeater', 'repeater', 'repeater', 'repeater', 'repeater', 'repeater', 'repeater', 'repeater', 'repeater', 'repeater'] });
+// Pistons: facing (DIR6) | extended << 3.
+def(176, 'piston', 'Piston', { shape: 'piston', opaque: false, lightOpacity: 15, hardness: 1.5, tool: 'pickaxe', tiles: { top: 'piston_top', side: 'piston_side', bottom: 'piston_bottom' } });
+def(177, 'sticky_piston', 'Sticky Piston', { shape: 'piston', opaque: false, lightOpacity: 15, hardness: 1.5, tool: 'pickaxe', tiles: { top: 'piston_top_sticky', side: 'piston_side', bottom: 'piston_bottom' } });
+// The moving head: facing | sticky << 3.
+def(178, 'piston_head', 'Piston Head', { shape: 'piston_head', opaque: false, lightOpacity: 0, hardness: 1.5, tool: 'pickaxe', drop: 'none', tiles: { top: 'piston_top', side: 'piston_side' } });
+// Hopper: output facing (DIR6, never up) | disabled (powered) << 3.
+def(179, 'hopper', 'Hopper', { shape: 'hopper', opaque: false, lightOpacity: 0, hardness: 3, tool: 'pickaxe', harvestTier: 0, tiles: { top: 'hopper_top', side: 'hopper_side', bottom: 'hopper_side' }, icon: 'hopper_item' });
+// Watcher: facing (DIR6, the face that watches) | pulsing << 3.
+def(180, 'watcher', 'Watcher', { shape: 'facing6', hardness: 3, tool: 'pickaxe', harvestTier: 0, tiles: { top: 'watcher_face', side: 'watcher_side', bottom: 'watcher_back' } });
 def(160, 'brewing_stand', 'Brewing Stand', { shape: 'table', opaque: false, lightOpacity: 0, emit: 3, tiles: { top: 'brewing_top', side: 'brewing_side', bottom: 'cobblestone' }, hardness: 0.5, tool: 'pickaxe', harvestTier: 0, icon: 'brewing_item' });
 def(115, 'bell', 'Village Bell', { shape: 'lantern', layer: 'cutout', opaque: false, hardness: 5, tool: 'pickaxe', tiles: 'bell', icon: 'bell_item', sound: 'stone' });
 
@@ -367,4 +379,13 @@ export const RAIL_EXITS: { a: RailDir; b: RailDir; up?: RailDir }[] = [
 ];
 export function isRail(id: number): boolean {
   return id === B.rail || id === B.powered_rail;
+}
+
+// ---------- Six-way facing ----------
+/** Unit vectors for DIR6 facings: down, up, north, south, west, east. */
+export const DIR6: [number, number, number][] = [[0, -1, 0], [0, 1, 0], [0, 0, -1], [0, 0, 1], [-1, 0, 0], [1, 0, 0]];
+/** Mesh face index (0 +x, 1 -x, 2 +y, 3 -y, 4 +z, 5 -z) for each DIR6 facing. */
+export const DIR6_FACE = [3, 2, 5, 4, 1, 0];
+export function isPiston(id: number): boolean {
+  return id === B.piston || id === B.sticky_piston;
 }

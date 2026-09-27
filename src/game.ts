@@ -269,6 +269,7 @@ export class Game {
         const p = this.player.body.pos;
         const sp = spatial(p[0], p[1] + 1.6, p[2], this.player.yaw, x + 0.5, y + 0.5, z + 0.5);
         if (kind === 'fizz') sfx.fizz(sp);
+        else if (kind === 'piston') sfx.piston(id === 1, sp);
         else if (kind === 'brewed') { sfx.brewed(sp); if (Math.hypot(x - p[0], z - p[2]) < 12) this.player.achieve('brew'); }
         else if (kind === 'break' && this.mode === 'playing') {
           this.entities?.blockBreakParticles(x, y, z, id, 16);
@@ -284,6 +285,17 @@ export class Game {
         for (const s of spawns) if (MOBS[s.kind]) ents.spawnMob(s.kind, s.x, s.y, s.z, s.profession);
       };
       world.onIgnite = (x, y, z) => { ents.add(new TntEntity(x, y, z, this.renderer)); };
+      // Pistons shove whatever stands where the blocks moved; hoppers take items dropped on them.
+      world.onPush = (min, max, d) => {
+        const bodies = [this.player.body, ...ents.mobs().map((m) => m.body), ...ents.vehicles().map((v) => v.body)];
+        for (const b of bodies) {
+          const a = b.aabb();
+          if (a.max[0] > min[0] && a.min[0] < max[0] && a.max[1] > min[1] && a.min[1] < max[1] && a.max[2] > min[2] && a.min[2] < max[2]) {
+            b.pos[0] += d[0] * 1.01; b.pos[1] += d[1] * 1.01 + (d[1] === 0 ? 0 : 0.01); b.pos[2] += d[2] * 1.01;
+          }
+        }
+      };
+      world.collectItems = (x, y, z, take) => ents.collectInto(x, y, z, take);
       ents.onMobKilled = (mob, byPlayer) => { if (byPlayer && mob.spec.hostile) this.player.achieve('hunter'); };
       ents.onBred = () => this.player.achieve('rancher');
       ents.onProjectileHit = (proj, mob) => {

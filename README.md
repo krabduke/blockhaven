@@ -55,8 +55,8 @@ All taken in-game at render distance 16 with the default Fancy graphics.
 - Day and night on a 20-minute cycle, with sun, moon, stars, drifting clouds, and rain, snow and thunderstorms
 
 **Blocks and building**
-- 174 blocks, including stairs, slabs, fences, fence gates, doors, trapdoors, ladders, glass and glass panes, iron bars, lanterns, signs you can write on, wool, carpets, stained glass and banners in all sixteen dye colours (mix dyes: red and white make pink, blue and green make cyan), sixteen original paintings to hang, slate, marble, terracotta, hay bales, cake, bookshelves, TNT and lamps
-- Power: buttons, pressure plates and levers send power along spark dust wire to light lamps, open doors, trapdoors and gates, and set off TNT
+- 180 blocks, including stairs, slabs, fences, fence gates, doors, trapdoors, ladders, glass and glass panes, iron bars, lanterns, signs you can write on, wool, carpets, stained glass and banners in all sixteen dye colours (mix dyes: red and white make pink, blue and green make cyan), sixteen original paintings to hang, slate, marble, terracotta, hay bales, cake, bookshelves, TNT and lamps
+- Power: buttons, pressure plates and levers send power along spark dust wire to light lamps, open doors, trapdoors and gates, and set off TNT. Repeaters pass power one way after a delay you set by right-clicking them (they also boost it back to full strength); pistons push up to twelve blocks (and anything standing there), and sticky pistons pull a block back; hoppers move items from containers above into whatever they point at and pick up items dropped on them (a powered hopper pauses); and the Watcher, an original sensor block, sends a short pulse out of its back whenever the block in front of it changes
 - Fire that spreads through wood, wool and leaves and burns out on its own, and puts itself out in the rain
 - Smooth lighting with ambient occlusion; sunlight and torchlight both flood-fill through the world
 - Flowing water and lava (water plus lava makes obsidian or cobblestone), sand and gravel that fall, leaves that decay when their tree is cut down

@@ -744,6 +744,27 @@ tile('boat', (p) => { p.transparent(); p.sprite(['p............p', 'pp..........
 tile('minecart', (p) => { p.transparent(); p.sprite(['mmmmmmmmmmmm', 'mhhhhhhhhhhm', 'm..........m', 'mmmmmmmmmmmm', '.w.......w..', 'www.....www.', '.w.......w..'], { m: hex('#8a8a90'), h: hex('#b8b8be'), w: hex('#3a3a3e') }, 0.05, 2, 5); });
 tile('saddle', (p) => { p.transparent(); p.sprite(['....llll....', '..llllllll..', '.lllgllllll.', 'lllllllllldl', 'l.dllllld..l', 'i..l....l..i', 'i..l....l..i'], { l: hex('#7a4a28'), d: hex('#5a3418'), g: hex('#c8a048'), i: hex('#9a9aa0') }, 0.05, 2, 4); });
 
+// ---------- Power components ----------
+const machineSide = (p: Painter) => { p.fill(hex('#7a7a7e'), 0.08); p.border(hex('#4a4a4e')); };
+tile('piston_side', (p) => { p.fill(hex('#7a7a7e'), 0.08); p.rect(0, 0, 16, 4, C.plank, 0.05); p.rect(0, 4, 16, 1, C.plankDark); p.rect(7, 5, 2, 11, hex('#9a9aa0')); p.border(hex('#4a4a4e')); });
+tile('piston_top', (p) => { p.fill(C.plank, 0.05); for (let y = 0; y < S; y += 4) p.rect(0, y, 16, 1, C.plankDark); p.rect(6, 6, 4, 4, hex('#9a9aa0')); p.border(hex('#5a4020')); });
+tile('piston_top_sticky', (p) => { painters['piston_top'](p); for (let i = 0; i < 40; i++) p.set(2 + Math.floor(p.rand() * 12), 2 + Math.floor(p.rand() * 12), hex(p.rand() < 0.5 ? '#6a9a3a' : '#8ac050')); });
+tile('piston_bottom', (p) => { machineSide(p); p.rect(5, 5, 6, 6, hex('#5a5a5e')); });
+tile('piston_inner', (p) => { machineSide(p); p.rect(4, 4, 8, 8, hex('#3a3a3e')); p.rect(6, 6, 4, 4, hex('#9a9aa0')); });
+tile('hopper_top', (p) => { p.fill(hex('#4a4a50'), 0.06); p.rect(2, 2, 12, 12, hex('#2a2a2e')); p.border(hex('#7a7a80')); });
+tile('hopper_side', (p) => { p.fill(hex('#5a5a60'), 0.08); p.border(hex('#3a3a3e')); p.rect(2, 7, 12, 1, hex('#7a7a80')); });
+tile('hopper_item', (p) => { p.transparent(); p.sprite(['mmmmmmmmmmmm', 'mddddddddddm', '.mmmmmmmmmm.', '..mddddddm..', '...mddddm...', '....mddm....', '.....mm.....'], { m: hex('#7a7a80'), d: hex('#3a3a3e') }, 0.04, 2, 4); });
+tile('watcher_face', (p) => { p.fill(hex('#5a5a60'), 0.06); p.border(hex('#3a3a3e')); p.rect(3, 5, 10, 6, hex('#1a1a1e')); p.rect(5, 6, 6, 4, hex('#3ac8c0')); p.rect(7, 7, 2, 2, hex('#0a2a28')); p.set(6, 6, hex('#c8fff8')); });
+tile('watcher_side', (p) => { p.fill(hex('#6a6a70'), 0.08); p.border(hex('#3a3a3e')); for (let y = 3; y < 13; y += 3) p.rect(2, y, 12, 1, hex('#4a4a50')); });
+tile('watcher_back', (p) => { p.fill(hex('#6a6a70'), 0.08); p.border(hex('#3a3a3e')); p.rect(6, 6, 4, 4, hex('#5a1a14')); });
+tile('watcher_back_on', (p) => { p.fill(hex('#6a6a70'), 0.08); p.border(hex('#3a3a3e')); p.rect(6, 6, 4, 4, hex('#ff5a3a')); p.set(7, 7, hex('#ffd0a0')); });
+const repeaterTop = (on: boolean) => (p: Painter) => { p.fill(hex('#9a9a98'), 0.05); p.border(hex('#7a7a78')); for (let y = 1; y < 15; y++) { p.set(7, y, hex(on ? '#ff5a3a' : '#6a1a14')); p.set(8, y, hex(on ? '#e84a2a' : '#5a1410')); } p.rect(6, 12, 4, 2, hex('#6a6a68')); };
+tile('repeater', repeaterTop(false));
+tile('repeater_on', repeaterTop(true));
+tile('repeater_torch', (p) => { p.fill(hex('#5a1410')); p.rect(0, 0, 16, 4, hex('#8a2a1e')); });
+tile('repeater_torch_on', (p) => { p.fill(hex('#c83a24')); p.rect(0, 0, 16, 4, hex('#ffb08a')); });
+tile('repeater_item', (p) => { p.transparent(); p.rect(1, 9, 14, 4, hex('#9a9a98'), 0.05); p.rect(1, 9, 14, 1, hex('#b8b8b6')); for (const x of [4, 10]) { p.rect(x, 4, 2, 5, hex('#8a2a1e')); p.rect(x, 3, 2, 2, hex('#ff5a3a')); } });
+
 // ---------- Brewing, potions, shield, crossbow ----------
 const bottle = (liquid: RGB | null, splash: boolean) => (p: Painter) => {
   p.transparent();

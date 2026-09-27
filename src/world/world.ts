@@ -2,11 +2,11 @@
 // side effects (light, fluids, falling blocks, support), random ticks,
 // block entities, and scheduling chunk generation and meshing.
 
-import { B, BLOCKS, EMIT, LIGHT_OPACITY, RAIL_DIRS, RAIL_EXITS, SOLID, isLeaves, isLog, isRail, type RailDir } from '../blocks';
+import { B, BLOCKS, DIR6, EMIT, LIGHT_OPACITY, RAIL_DIRS, RAIL_EXITS, SOLID, isLeaves, isLog, isRail, type RailDir } from '../blocks';
 import { SMELTING } from '../crafting';
 import { BREW_TICKS, brewFuel, brewResult } from '../brewing';
 import { Inventory, type Slot } from '../inventory';
-import { coloredItem, itemDef, type ItemStack } from '../items';
+import { I, coloredItem, itemDef, type ItemStack } from '../items';
 import { mulberry32 } from '../noise';
 import { loadChunk, saveChunk } from '../storage';
 import { CH, CS, Chunk, SUBS, VOLUME, chunkKey, idx } from './chunk';
@@ -20,7 +20,11 @@ export interface FurnaceBE { kind: 'furnace'; inv: Inventory; burn: number; burn
 export interface SignBE { kind: 'sign'; lines: string[] }
 /** Slots: 0 ingredient, 1 fuel, 2-4 bottles. */
 export interface BrewingBE { kind: 'brewing'; inv: Inventory; fuel: number; brew: number }
-export type BlockEntity = ChestBE | FurnaceBE | SignBE | BrewingBE;
+export interface HopperBE { kind: 'hopper'; inv: Inventory; cooldown: number }
+export type BlockEntity = ChestBE | FurnaceBE | SignBE | BrewingBE | HopperBE;
+
+/** Horizontal facings used by furnaces, chests and repeaters: 0 south, 1 west, 2 north, 3 east. */
+const HVEC: [number, number, number][] = [[0, 0, 1], [-1, 0, 0], [0, 0, -1], [1, 0, 0]];
 
 const HORIZ: [number, number][] = [[1, 0], [-1, 0], [0, 1], [0, -1]];
 
@@ -66,7 +70,7 @@ export class World implements ChunkSource {
   onSubMesh: (cx: number, sy: number, cz: number, mesh: SubMesh | null) => void = () => {};
   onChunkUnload: (cx: number, cz: number) => void = () => {};
   onDrop: (x: number, y: number, z: number, stack: ItemStack) => void = () => {};
-  onEvent: (kind: 'fizz' | 'break' | 'brewed', x: number, y: number, z: number, id: number) => void = () => {};
+  onEvent: (kind: 'fizz' | 'break' | 'brewed' | 'piston', x: number, y: number, z: number, id: number) => void = () => {};
   /** Creatures a freshly generated chunk wants spawned (villagers, guardians). */
   onSpawns: (spawns: Spawn[]) => void = () => {};
   /** TNT set off by power. */
@@ -135,7 +139,9 @@ export class World implements ChunkSource {
     if (!c || y < 0 || y >= CH) return;
     c.meta[idx(x & 15, y, z & 15)] = m;
     c.modified = true;
+    c.version++;
     this.markDirty(x, y, z);
+    this.notifyWatchers(x, y, z);
   }
 
   /** While true, setBlock skips neighbour reactions (used to place multi-block structures in one go). */
@@ -157,7 +163,7 @@ export class World implements ChunkSource {
     if (id === B.spawner) this.spawners.add(`${x},${y},${z}`);
     if (old !== id) {
       const key = `${x},${y},${z}`;
-      if (this.blockEntities.has(key) && id !== B.furnace && id !== B.furnace_lit && id !== B.chest && id !== B.sign && id !== B.brewing_stand) {
+      if (this.blockEntities.has(key) && id !== B.furnace && id !== B.furnace_lit && id !== B.chest && id !== B.sign && id !== B.brewing_stand && id !== B.hopper) {
         const be = this.blockEntities.get(key)!;
         if (be.kind !== 'sign') for (const s of be.inv.slots) if (s) this.onDrop(x + 0.5, y + 0.5, z + 0.5, s);
         this.blockEntities.delete(key);
@@ -165,6 +171,7 @@ export class World implements ChunkSource {
       if (LIGHT_OPACITY[old] !== LIGHT_OPACITY[id] || EMIT[old] !== EMIT[id]) this.light.update(x, y, z);
     }
     this.markDirty(x, y, z);
+    this.notifyWatchers(x, y, z);
     if (this.quiet) return true;
     this.schedule(x, y, z, 1);
     for (const [dx, dy, dz] of DIRS6) this.neighborChanged(x + dx, y + dy, z + dz);
@@ -313,6 +320,134 @@ export class World implements ChunkSource {
     }
   }
 
+  // ---------- Power components: repeaters, watchers, pistons, hoppers ----------
+  /** Is a repeater's input (the block behind it) powered? */
+  private repeaterInput(x: number, y: number, z: number): boolean {
+    const v = HVEC[this.getMeta(x, y, z) & 3];
+    const bx = x - v[0], bz = z - v[2];
+    const bid = this.getBlock(bx, y, bz);
+    if (bid === B.wire) return (this.getMeta(bx, y, bz) & 15) > 0;
+    if (this.sourcePowerInto(bx, y, bz, x, y, z) > 0) return true;
+    return SOLID[bid] === 1 && BLOCKS[bid].shape === 'cube' && this.isPowered(bx, y, bz);
+  }
+
+  /** A block changed: any watcher looking at it sends a pulse. */
+  private notifyWatchers(x: number, y: number, z: number): void {
+    for (let f = 0; f < 6; f++) {
+      const d = DIR6[f];
+      const wx = x - d[0], wy = y - d[1], wz = z - d[2];
+      if (this.getBlock(wx, wy, wz) !== B.watcher) continue;
+      const m = this.getMeta(wx, wy, wz);
+      if ((m & 7) === f && !(m & 8)) this.schedule(wx, wy, wz, 1);
+    }
+  }
+
+  /** Blocks a piston can't move. */
+  private immovable(id: number, x: number, y: number, z: number): boolean {
+    if (BLOCKS[id].hardness < 0 || id === B.obsidian || id === B.portal || id === B.piston_head || id === B.spawner) return true;
+    if ((id === B.piston || id === B.sticky_piston) && (this.getMeta(x, y, z) & 8)) return true;
+    return this.blockEntities.has(`${x},${y},${z}`);
+  }
+
+  /** Called with the space a piston push swept, so creatures and the player get shoved along. */
+  onPush: (min: [number, number, number], max: [number, number, number], dir: [number, number, number]) => void = () => {};
+
+  /** Push the line of blocks in front (up to 12) forward one step and put out the head. */
+  private extendPiston(x: number, y: number, z: number): boolean {
+    const m = this.getMeta(x, y, z), f = m & 7, d = DIR6[f];
+    const line: { id: number; meta: number }[] = [];
+    let k = 1;
+    for (; k <= 13; k++) {
+      const px = x + d[0] * k, py = y + d[1] * k, pz = z + d[2] * k;
+      if (py < 0 || py >= CH || !this.isLoaded(px, pz)) return false;
+      const id = this.getBlock(px, py, pz);
+      if (id === 0 || BLOCKS[id].replaceable || BLOCKS[id].fluid) break;
+      if (this.immovable(id, px, py, pz) || k > 12) return false;
+      line.push({ id, meta: this.getMeta(px, py, pz) });
+    }
+    const end = [x + d[0] * k, y + d[1] * k, z + d[2] * k];
+    const endId = this.getBlock(end[0], end[1], end[2]);
+    if (endId !== 0 && !BLOCKS[endId].fluid) this.breakBlock(end[0], end[1], end[2], true);
+    for (let i = line.length; i >= 1; i--) this.setBlock(x + d[0] * (i + 1), y + d[1] * (i + 1), z + d[2] * (i + 1), line[i - 1].id, line[i - 1].meta);
+    this.setMetaQuiet(x, y, z, f | 8);
+    this.setBlock(x + d[0], y + d[1], z + d[2], B.piston_head, f | (this.getBlock(x, y, z) === B.sticky_piston ? 8 : 0));
+    const a = [x + d[0], y + d[1], z + d[2]], b = [x + d[0] * (line.length + 1), y + d[1] * (line.length + 1), z + d[2] * (line.length + 1)];
+    this.onPush([Math.min(a[0], b[0]), Math.min(a[1], b[1]), Math.min(a[2], b[2])], [Math.max(a[0], b[0]) + 1, Math.max(a[1], b[1]) + 1, Math.max(a[2], b[2]) + 1], d);
+    this.onEvent('piston', x, y, z, 1);
+    return true;
+  }
+
+  /** Pull the head back in; a sticky piston brings the block in front back with it. */
+  private retractPiston(x: number, y: number, z: number): void {
+    const m = this.getMeta(x, y, z), f = m & 7, d = DIR6[f];
+    const sticky = this.getBlock(x, y, z) === B.sticky_piston;
+    this.setMetaQuiet(x, y, z, f);
+    const hx = x + d[0], hy = y + d[1], hz = z + d[2];
+    if (this.getBlock(hx, hy, hz) === B.piston_head) this.setBlock(hx, hy, hz, 0);
+    if (sticky) {
+      const px = x + d[0] * 2, py = y + d[1] * 2, pz = z + d[2] * 2;
+      const id = this.getBlock(px, py, pz);
+      if (id !== 0 && !BLOCKS[id].fluid && !BLOCKS[id].replaceable && !this.immovable(id, px, py, pz)) {
+        const meta = this.getMeta(px, py, pz);
+        this.setBlock(px, py, pz, 0);
+        this.setBlock(hx, hy, hz, id, meta);
+      }
+    }
+    this.onEvent('piston', x, y, z, 0);
+  }
+
+  /** Items dropped on a hopper get sucked in (the entity manager answers with what it takes). */
+  collectItems: (x: number, y: number, z: number, take: (s: ItemStack) => ItemStack | null) => void = () => {};
+
+  /** Hoppers: every 8 ticks, pull one item from above and push one item where they point. */
+  private tickHoppers(): void {
+    for (const [key, be] of this.blockEntities) {
+      if (be.kind !== 'hopper') continue;
+      if (be.cooldown > 0) { be.cooldown--; continue; }
+      const [x, y, z] = key.split(',').map(Number);
+      if (!this.isLoaded(x, z)) continue;
+      const m = this.getMeta(x, y, z);
+      if (m & 8) continue;
+      be.cooldown = 8;
+      // Push one item out.
+      const d = DIR6[m & 7];
+      const target = this.blockEntities.get(`${x + d[0]},${y + d[1]},${z + d[2]}`);
+      const from = be.inv.slots.findIndex((s) => s);
+      if (from >= 0 && target && target.kind !== 'sign') {
+        const one = { ...be.inv.slots[from]!, count: 1 };
+        if (this.insertInto(target, one, d[1] === -1)) be.inv.removeOne(from);
+      }
+      // Pull one item in from the container above, or pick up items lying on top.
+      const above = this.blockEntities.get(`${x},${y + 1},${z}`);
+      if (above && above.kind !== 'sign') {
+        const slots = above.kind === 'furnace' ? [2] : above.kind === 'brewing' ? [2, 3, 4] : above.inv.slots.map((_, i) => i);
+        for (const i of slots) {
+          const s = above.inv.slots[i];
+          if (!s) continue;
+          if (above.kind === 'brewing' && s.id === I.water_bottle) continue;
+          if (!be.inv.add({ ...s, count: 1 })) { above.inv.removeOne(i); break; }
+        }
+      } else this.collectItems(x, y + 1, z, (s) => be.inv.add(s));
+    }
+  }
+
+  /** Put an item into a container the way a hopper would (fuel into a furnace's side, and so on). */
+  private insertInto(be: Exclude<BlockEntity, SignBE>, s: ItemStack, fromAbove: boolean): boolean {
+    const slot = (i: number): boolean => {
+      const cur = be.inv.slots[i];
+      if (!cur) { be.inv.slots[i] = s; return true; }
+      if (cur.id === s.id && cur.count < (itemDef(s.id)?.maxStack ?? 64)) { cur.count++; return true; }
+      return false;
+    };
+    if (be.kind === 'furnace') return fromAbove ? slot(0) : !!itemDef(s.id)?.fuelTicks && slot(1);
+    if (be.kind === 'brewing') {
+      if (brewFuel(s.id) && !fromAbove) return slot(1);
+      if (s.id === I.water_bottle || itemDef(s.id)?.potion) return [2, 3, 4].some((i) => !be.inv.slots[i] && slot(i));
+      return slot(0);
+    }
+    return be.inv.add(s) === null;
+  }
+
   // ---------- Power (spark dust wiring) ----------
   /** Strength a block emits into its neighbours (levers, buttons, plates). */
   private sourcePower(x: number, y: number, z: number): number {
@@ -322,11 +457,33 @@ export class World implements ChunkSource {
     return 0;
   }
 
+  /**
+   * Power a block at (sx,sy,sz) sends into its neighbour (tx,ty,tz). Levers, buttons and plates
+   * power every neighbour; a lit repeater only the block in front of it; a pulsing watcher only
+   * the block behind it.
+   */
+  private sourcePowerInto(sx: number, sy: number, sz: number, tx: number, ty: number, tz: number): number {
+    const id = this.getBlock(sx, sy, sz);
+    if (id === B.repeater) {
+      const m = this.getMeta(sx, sy, sz);
+      if (!(m & 16)) return 0;
+      const v = HVEC[m & 3];
+      return sx + v[0] === tx && sy === ty && sz + v[2] === tz ? 15 : 0;
+    }
+    if (id === B.watcher) {
+      const m = this.getMeta(sx, sy, sz);
+      if (!(m & 8)) return 0;
+      const v = DIR6[m & 7];
+      return sx - v[0] === tx && sy - v[1] === ty && sz - v[2] === tz ? 15 : 0;
+    }
+    return this.sourcePower(sx, sy, sz);
+  }
+
   /** Is the block at (x,y,z) receiving power from a source, a solid block a source is attached to, or live wire? */
   isPowered(x: number, y: number, z: number): boolean {
     for (const [dx, dy, dz] of DIRS6) {
       const nx = x + dx, ny = y + dy, nz = z + dz;
-      if (this.sourcePower(nx, ny, nz) > 0) return true;
+      if (this.sourcePowerInto(nx, ny, nz, x, y, z) > 0) return true;
       const nid = this.getBlock(nx, ny, nz);
       if (nid === B.wire && (this.getMeta(nx, ny, nz) & 15) > 0) return true;
       // Power passes through a solid block from a lever/button attached to it or a plate on top.
@@ -341,6 +498,8 @@ export class World implements ChunkSource {
             if ((m & 8) && sx + off[0] === nx && sy + off[1] === ny && sz + off[2] === nz) return true;
           }
           if (sid === B.pressure_plate && ey === 1 && (this.getMeta(sx, sy, sz) & 1)) return true;
+          // A repeater or watcher pointed into the block powers it through.
+          if ((sid === B.repeater || sid === B.watcher) && this.sourcePowerInto(sx, sy, sz, nx, ny, nz) > 0) return true;
         }
       }
     }
@@ -366,7 +525,7 @@ export class World implements ChunkSource {
     const frontier: [string, number][] = [];
     for (const [k, [a, b, c]] of wires) {
       let s = 0;
-      for (const [dx, dy, dz] of DIRS6) s = Math.max(s, this.sourcePower(a + dx, b + dy, c + dz));
+      for (const [dx, dy, dz] of DIRS6) s = Math.max(s, this.sourcePowerInto(a + dx, b + dy, c + dz, a, b, c));
       // A source attached to the block under the wire powers it too.
       if (this.isPoweredBlockBelow(a, b, c)) s = 15;
       if (s > 0) { level.set(k, s); frontier.push([k, s]); }
@@ -399,6 +558,16 @@ export class World implements ChunkSource {
       if (id === B.lamp || id === B.lamp_on) {
         const want = this.isPowered(a, b, c) ? B.lamp_on : B.lamp;
         if (want !== id) this.setBlock(a, b, c, want);
+      } else if (id === B.repeater) {
+        // Its input changed: flip after the delay (2, 4, 6 or 8 ticks).
+        const m = this.getMeta(a, b, c);
+        if (this.repeaterInput(a, b, c) !== ((m & 16) !== 0)) this.schedule(a, b, c, (((m >> 2) & 3) + 1) * 2);
+      } else if (id === B.piston || id === B.sticky_piston) {
+        const m = this.getMeta(a, b, c);
+        if (this.isPowered(a, b, c) !== ((m & 8) !== 0)) this.schedule(a, b, c, 1);
+      } else if (id === B.hopper) {
+        const m = this.getMeta(a, b, c), off = this.isPowered(a, b, c);
+        if (((m & 8) !== 0) !== off) this.setMetaQuiet(a, b, c, (m & 7) | (off ? 8 : 0));
       } else if (id === B.powered_rail) {
         const m = this.getMeta(a, b, c), on = this.isPowered(a, b, c) || this.isPowered(a, b - 1, c);
         if (((m & 8) !== 0) !== on) this.setMetaQuiet(a, b, c, (m & 7) | (on ? 8 : 0));
@@ -555,6 +724,21 @@ export class World implements ChunkSource {
       }
       if (id === B.carrots) this.onDrop(x + 0.5, y + 0.5, z + 0.5, { id: 293, count: meta >= 7 ? 2 + Math.floor(this.rand() * 3) : 1 });
     }
+    // An extended piston and its head come apart together.
+    if ((id === B.piston || id === B.sticky_piston) && (meta & 8)) {
+      const d = DIR6[meta & 7];
+      this.setBlock(x, y, z, 0);
+      if (this.getBlock(x + d[0], y + d[1], z + d[2]) === B.piston_head) this.setBlock(x + d[0], y + d[1], z + d[2], 0);
+      return;
+    }
+    if (id === B.piston_head) {
+      const d = DIR6[meta & 7];
+      const bx = x - d[0], by = y - d[1], bz = z - d[2];
+      this.setBlock(x, y, z, 0);
+      const base = this.getBlock(bx, by, bz);
+      if (base === B.piston || base === B.sticky_piston) { this.setBlock(bx, by, bz, 0); if (drop) this.onDrop(bx + 0.5, by + 0.5, bz + 0.5, { id: base, count: 1 }); }
+      return;
+    }
     // Two-block structures remove their other half.
     if (id === B.door) {
       const oy = meta & 8 ? y - 1 : y + 1;
@@ -595,7 +779,7 @@ export class World implements ChunkSource {
     if (id === B.sand || id === B.gravel) this.schedule(x, y, z, 2);
     if (id === B.portal && !this.portalIntact(x, y, z)) { this.setBlock(x, y, z, 0); return; }
     if (id === B.fire) this.schedule(x, y, z, 30 + Math.floor(this.rand() * 10));
-    if (id === B.wire || id === B.lamp || id === B.lamp_on || id === B.door || id === B.trapdoor || id === B.tnt || id === B.fence_gate || id === B.powered_rail) this.schedule(x, y, z, 1);
+    if (id === B.wire || id === B.lamp || id === B.lamp_on || id === B.door || id === B.trapdoor || id === B.tnt || id === B.fence_gate || id === B.powered_rail || id === B.piston || id === B.sticky_piston || id === B.hopper) this.schedule(x, y, z, 1);
   }
 
   private portalIntact(x: number, y: number, z: number): boolean {
@@ -623,7 +807,32 @@ export class World implements ChunkSource {
       return;
     }
     if (id === B.fire) { this.fireTick(x, y, z); return; }
-    if (id === B.wire || id === B.lamp || id === B.lamp_on || id === B.door || id === B.trapdoor || id === B.tnt || id === B.fence_gate || id === B.powered_rail) { this.updatePower(x, y, z); return; }
+    if (id === B.repeater) {
+      const m = this.getMeta(x, y, z), on = this.repeaterInput(x, y, z);
+      if (on !== ((m & 16) !== 0)) {
+        this.setMetaQuiet(x, y, z, (m & 15) | (on ? 16 : 0));
+        const v = HVEC[m & 3];
+        this.updatePower(x + v[0], y, z + v[2]);
+        this.updatePower(x, y, z);
+      }
+      return;
+    }
+    if (id === B.piston || id === B.sticky_piston) {
+      const m = this.getMeta(x, y, z), want = this.isPowered(x, y, z);
+      if (want && !(m & 8)) this.extendPiston(x, y, z);
+      else if (!want && (m & 8)) this.retractPiston(x, y, z);
+      return;
+    }
+    if (id === B.watcher) {
+      // A pulse: on for two ticks, then off.
+      const m = this.getMeta(x, y, z);
+      this.setMetaQuiet(x, y, z, m ^ 8);
+      const v = DIR6[m & 7];
+      this.updatePower(x - v[0], y - v[1], z - v[2]);
+      if (!(m & 8)) this.schedule(x, y, z, 2);
+      return;
+    }
+    if (id === B.wire || id === B.lamp || id === B.lamp_on || id === B.door || id === B.trapdoor || id === B.tnt || id === B.fence_gate || id === B.powered_rail || id === B.hopper) { this.updatePower(x, y, z); return; }
     if (id === B.water && this.dimension === 'ember') { this.setBlock(x, y, z, 0); this.onEvent('fizz', x, y, z, id); return; }
     if (id === 0) {
       // A block was removed: wires next to it may lose power.
@@ -755,6 +964,7 @@ export class World implements ChunkSource {
       else if (id === B.furnace || id === B.furnace_lit) be = { kind: 'furnace', inv: new Inventory(3), burn: 0, burnMax: 0, cook: 0 };
       else if (id === B.sign) be = { kind: 'sign', lines: ['', '', '', ''] };
       else if (id === B.brewing_stand) be = { kind: 'brewing', inv: new Inventory(5), fuel: 0, brew: 0 };
+      else if (id === B.hopper) be = { kind: 'hopper', inv: new Inventory(5), cooldown: 0 };
       if (be) this.blockEntities.set(key, be);
     }
     return be;
@@ -845,6 +1055,7 @@ export class World implements ChunkSource {
     }
     this.tickFurnaces();
     this.tickBrewing();
+    this.tickHoppers();
     if (randomTicks) this.randomTicks(px, py, pz);
   }
 
@@ -1149,6 +1360,7 @@ export class World implements ChunkSource {
       out[k] = be.kind === 'sign' ? { kind: 'sign', lines: be.lines }
         : be.kind === 'chest' ? { kind: 'chest', slots: be.inv.toJSON() }
           : be.kind === 'brewing' ? { kind: 'brewing', slots: be.inv.toJSON(), fuel: be.fuel, brew: be.brew }
+            : be.kind === 'hopper' ? { kind: 'hopper', slots: be.inv.toJSON() }
             : { kind: 'furnace', slots: be.inv.toJSON(), burn: be.burn, burnMax: be.burnMax, cook: be.cook };
     }
     return out;
@@ -1158,6 +1370,7 @@ export class World implements ChunkSource {
     if (!data || typeof data !== 'object') return;
     for (const [k, v] of Object.entries(data as Record<string, { kind: string; slots: Slot[]; burn?: number; burnMax?: number; cook?: number; lines?: string[]; fuel?: number; brew?: number }>)) {
       if (v.kind === 'brewing') { const inv = new Inventory(5); inv.load(v.slots); this.blockEntities.set(k, { kind: 'brewing', inv, fuel: v.fuel ?? 0, brew: v.brew ?? 0 }); continue; }
+      if (v.kind === 'hopper') { const inv = new Inventory(5); inv.load(v.slots); this.blockEntities.set(k, { kind: 'hopper', inv, cooldown: 0 }); continue; }
       if (v.kind === 'sign') { this.blockEntities.set(k, { kind: 'sign', lines: (v.lines ?? []).slice(0, 4).map(String) }); continue; }
       if (v.kind === 'chest') {
         const inv = new Inventory(27); inv.load(v.slots);

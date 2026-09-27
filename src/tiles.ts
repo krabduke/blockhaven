@@ -25,6 +25,7 @@ for (let i = 0; i <= 7; i++) add('wheat_' + i);
 for (let i = 0; i <= 3; i++) add('carrots_' + i);
 add('bow_pull');
 add('crossbow_loaded');
+for (const t of ['piston_inner', 'watcher_back_on', 'repeater_on', 'repeater_torch', 'repeater_torch_on']) add(t);
 add('door_top');
 add('bed_foot');
 add('water_flow');

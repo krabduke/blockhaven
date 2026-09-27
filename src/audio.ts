@@ -110,6 +110,8 @@ export const sfx = {
   },
   fuse(s: Spatial) { noise(5000, 0.5, 0.6, 'highpass', 0.25 * s.gain, 0, s.pan); },
   door(open: boolean) { noise(open ? 500 : 350, 2, 0.18, 'bandpass', 0.8); tone(open ? 180 : 140, 0.12, 'triangle', 0.05); },
+  /** A piston's hiss and clunk (out or in). */
+  piston(out: boolean, s: Spatial = { gain: 1, pan: 0 }) { noise(out ? 700 : 500, 1.2, 0.18, 'bandpass', 0.35 * s.gain, 0, s.pan); tone(out ? 150 : 110, 0.08, 'square', 0.05 * s.gain); },
   /** A soft bubbling chime when a brew finishes. */
   brewed(s: Spatial = { gain: 1, pan: 0 }) { [392, 523, 659].forEach((f, i) => tone(f, 0.18, 'sine', 0.05 * s.gain, f * 1.02, i * 0.07)); noise(900, 1, 0.3, 'bandpass', 0.15 * s.gain, 0.05, s.pan); },
   /** A dull wooden thunk when a shield takes a hit. */

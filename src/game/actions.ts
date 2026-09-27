@@ -352,6 +352,13 @@ export class Actions {
         return;
       }
       if (id === B.crafting_table) { this.openScreen('crafting'); return; }
+      if (id === B.repeater) {
+        const m = w.getMeta(x, y, z);
+        w.setMeta(x, y, z, (m & ~12) | ((((m >> 2) & 3) + 1) % 4 << 2));
+        sfx.click();
+        return;
+      }
+      if (id === B.hopper) { const be = w.getBlockEntity(x, y, z); if (be?.kind === 'hopper') { document.exitPointerLock(); this.containers.show('hopper', { hopper: be }); } return; }
       if (id === B.brewing_stand) { const be = w.getBlockEntity(x, y, z); if (be?.kind === 'brewing') { document.exitPointerLock(); this.containers.show('brewing', { brewing: be }); } return; }
       if (id === B.furnace || id === B.furnace_lit) { const be = w.getBlockEntity(x, y, z); if (be?.kind === 'furnace') { document.exitPointerLock(); this.containers.show('furnace', { furnace: be }); } return; }
       if (id === B.chest) { const be = w.getBlockEntity(x, y, z); if (be?.kind === 'chest') { document.exitPointerLock(); this.containers.show('chest', { chest: be.inv }); } return; }
@@ -546,6 +553,17 @@ export class Actions {
     } else if (blockId === B.sign) {
       if (n[1] === -1) return;
       meta = n[1] === 1 ? [0, 3, 2, 1][q] : (n[2] === 1 ? 0 : n[2] === -1 ? 2 : n[0] === 1 ? 3 : 1) | 4;
+    } else if (blockId === B.repeater) {
+      if (n[1] !== 1) return;
+      meta = [2, 1, 0, 3][q];
+    } else if (blockId === B.piston || blockId === B.sticky_piston || blockId === B.watcher) {
+      // Pistons face you (so they push away from where you stand); watchers look where you look.
+      const d = p.lookDir();
+      const look = Math.abs(d[1]) > 0.72 ? (d[1] > 0 ? 1 : 0) : [2, 4, 3, 5][q];
+      meta = blockId === B.watcher ? look : look ^ 1;
+    } else if (blockId === B.hopper) {
+      // It points into the block you clicked (down when placed on top of something).
+      meta = n[1] === 1 ? 0 : n[1] === -1 ? 0 : n[2] === 1 ? 2 : n[2] === -1 ? 3 : n[0] === 1 ? 4 : 5;
     } else if (blockId === B.rail || blockId === B.powered_rail) {
       if (n[1] === -1) return;
       meta = q === 0 || q === 2 ? 0 : 1;

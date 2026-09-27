@@ -1385,6 +1385,19 @@ export class EntityManager {
     return [...mobs, ...vehicles];
   }
 
+  /** Hand items lying in a block's space to `take` (a hopper); whatever it can't hold stays. */
+  collectInto(x: number, y: number, z: number, take: (s: ItemStack) => ItemStack | null): void {
+    for (const e of this.list) {
+      if (!(e instanceof ItemEntity) || e.dead) continue;
+      const p = e.body.pos;
+      if (p[0] < x || p[0] > x + 1 || p[1] < y - 0.1 || p[1] > y + 1 || p[2] < z || p[2] > z + 1) continue;
+      const left = take({ ...e.stack });
+      if (!left) e.dead = true;
+      else e.stack.count = left.count;
+      return;
+    }
+  }
+
   vehicles(): Vehicle[] {
     return this.list.filter((e): e is Vehicle => e instanceof Vehicle && !e.dead);
   }

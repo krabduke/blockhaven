@@ -11,10 +11,10 @@ const TABS: [CreativeTab, string][] = [['all', 'All'], ['building', 'Building'],
 import { offers, roman } from '../enchanting';
 import { PROFESSION_NAMES, type TradeOffer } from '../trading';
 import type { Player } from '../player';
-import type { BrewingBE, FurnaceBE } from '../world/world';
+import type { BrewingBE, FurnaceBE, HopperBE } from '../world/world';
 import { slotHTML } from './hud';
 
-export type ContainerKind = 'player' | 'crafting' | 'furnace' | 'chest' | 'creative' | 'enchant' | 'trade' | 'brewing';
+export type ContainerKind = 'player' | 'crafting' | 'furnace' | 'chest' | 'creative' | 'enchant' | 'trade' | 'brewing' | 'hopper';
 
 interface SlotRef {
   get(): Slot;
@@ -37,6 +37,7 @@ export class ContainerScreen {
   private craftW = 2;
   private furnace: FurnaceBE | null = null;
   private brewing: BrewingBE | null = null;
+  private hopper: HopperBE | null = null;
   private chest: Inventory | null = null;
   private cursorEl: HTMLElement;
   private tooltip: HTMLElement;
@@ -99,8 +100,9 @@ export class ContainerScreen {
   private villager: { offers: TradeOffer[]; profession: string } | null = null;
   onTraded: () => void = () => {};
 
-  show(kind: ContainerKind, opts: { furnace?: FurnaceBE; chest?: Inventory; bookshelves?: number; villager?: { offers: TradeOffer[]; profession: string }; brewing?: BrewingBE } = {}): void {
+  show(kind: ContainerKind, opts: { furnace?: FurnaceBE; chest?: Inventory; bookshelves?: number; villager?: { offers: TradeOffer[]; profession: string }; brewing?: BrewingBE; hopper?: HopperBE } = {}): void {
     this.brewing = opts.brewing ?? null;
+    this.hopper = opts.hopper ?? null;
     this.kind = kind;
     this.villager = opts.villager ?? null;
     this.bookshelves = opts.bookshelves ?? 0;
@@ -346,6 +348,12 @@ export class ContainerScreen {
       stand.append(head, top2, row);
       top.appendChild(stand);
       this.progressEls = { cook: bubbles.firstElementChild as HTMLElement, burn: fuelBar.firstElementChild as HTMLElement };
+    } else if (this.kind === 'hopper' && this.hopper) {
+      const inv = this.hopper.inv;
+      const t = document.createElement('div');
+      const h = document.createElement('h3'); h.textContent = 'Hopper';
+      t.append(h, this.grid(5, Array.from({ length: 5 }, (_, i) => this.invRef(inv, i, 'container'))));
+      top.appendChild(t);
     } else if (this.kind === 'chest' && this.chest) {
       const chest = this.chest;
       const t = document.createElement('div');
@@ -634,6 +642,8 @@ export class ContainerScreen {
       left = inv.add(stack, 0, 36);
     } else if (this.kind === 'chest' && this.chest) {
       left = this.chest.add(stack);
+    } else if (this.kind === 'hopper' && this.hopper) {
+      left = this.hopper.inv.add(stack);
     } else if (this.kind === 'brewing' && this.brewing) {
       const bw = this.brewing.inv;
       const target = brewFuel(stack.id) > 0 && !isBrewIngredient(stack.id) ? [1] : isBrewIngredient(stack.id) ? [0] : stack.id === I.water_bottle || itemDef(stack.id)?.potion ? [2, 3, 4] : [];
