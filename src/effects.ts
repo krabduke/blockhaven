@@ -4,7 +4,7 @@
 
 export type EffectId =
   | 'swiftness' | 'slowness' | 'healing' | 'regeneration' | 'fire_resistance' | 'night_vision'
-  | 'water_breathing' | 'strength' | 'leaping' | 'slow_falling' | 'poison';
+  | 'water_breathing' | 'strength' | 'leaping' | 'slow_falling' | 'poison' | 'hero';
 
 export interface EffectDef {
   name: string;
@@ -27,6 +27,8 @@ export const EFFECTS: Record<EffectId, EffectDef> = {
   leaping: { name: 'Leaping', color: '#9ae04a', good: true },
   slow_falling: { name: 'Slow Falling', color: '#f0ecd8', good: true },
   poison: { name: 'Poison', color: '#5a8a2a', good: false },
+  /** Earned by beating a raid: villagers trade for less. */
+  hero: { name: 'Village Hero', color: '#e8c040', good: true },
 };
 
 export interface ActiveEffect { level: number; ticks: number }

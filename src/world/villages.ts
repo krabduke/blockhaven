@@ -215,7 +215,7 @@ export function buildVillage(gen: WorldGen, v: Village, blocks: Uint8Array, meta
           if (edge) { put(u, -1, vv, frame); continue; }
           if (u === 3) { put(u, -1, vv, B.water); continue; }
           put(u, -1, vv, B.farmland);
-          const crop = (vv + u) % 3 === 0 ? B.carrots : B.wheat;
+          const crop = (vv + u) % 4 === 0 ? B.carrots : (vv + u) % 4 === 2 ? B.potatoes : B.wheat;
           put(u, 0, vv, crop, 3 + ((u * 7 + vv * 3) % 5));
         }
         if (inChunk) spawns.push({ kind: 'villager', x: mx + 0.5, y: y, z: mz + 0.5, profession: 'farmer' });

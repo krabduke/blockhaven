@@ -208,6 +208,24 @@ function mossback(): MobModel {
   return build('mossback', parts, 1.7);
 }
 
+// ---------------------------------------------------------------- Bee
+// A round, fuzzy bee in amber and brown bands, with big dark eyes, curled antennae,
+// see-through wings and a tiny stinger.
+function bee(): MobModel {
+  const body = faces(bands([['#e8b030', 2], ['#4a3020', 1], ['#e8b030', 2], ['#4a3020', 1], ['#e8b030', 1]]), {
+    [FRONT]: (g, w, h) => { px(g, '#2a1a10', 0, 1, 2, 2); px(g, '#2a1a10', w - 2, 1, 2, 2); px(g, 'rgba(255,255,255,0.8)', 0, 1); px(g, 'rgba(255,255,255,0.8)', w - 2, 1); px(g, '#c8902a', 2, h - 2, w - 4, 1); },
+    [TOP]: (g, w, h) => { for (let y = 0; y < h; y += 3) px(g, '#4a3020', 0, y, w, 1); },
+  });
+  const wing = faces(tone('#dceef8', { top: '#f0f8ff' }), { [TOP]: (g, w, h) => { px(g, 'rgba(120,150,180,0.5)', 0, Math.floor(h / 2), w, 1); } });
+  return build('bee', [
+    { name: 'torso', size: [6, 6, 8], pivot: [0, 4, 0], offset: [0, 0, 0], paint: body, extra: [{ size: [1, 1, 2], offset: [0, -0.5, 4.8], paint: tone('#2a1a10') }] },
+    { name: 'antennaL', size: [1, 3, 1], pivot: [-1.5, 7, -4], offset: [0, 1.5, 0], paint: tone('#2a1a10'), parent: 'torso', rot: [-0.5, 0, 0.3], extra: [{ size: [1, 1, 1.5], offset: [0, 3, -0.5], paint: tone('#2a1a10') }] },
+    { name: 'antennaR', size: [1, 3, 1], pivot: [1.5, 7, -4], offset: [0, 1.5, 0], paint: tone('#2a1a10'), parent: 'torso', rot: [-0.5, 0, -0.3], extra: [{ size: [1, 1, 1.5], offset: [0, 3, -0.5], paint: tone('#2a1a10') }] },
+    { name: 'wingL', size: [5, 0.5, 4], pivot: [-1, 7, -1], offset: [-2.5, 0, 1], paint: wing, parent: 'torso' },
+    { name: 'wingR', size: [5, 0.5, 4], pivot: [1, 7, -1], offset: [2.5, 0, 1], paint: wing, parent: 'torso' },
+  ], 0.4);
+}
+
 // ---------------------------------------------------------------- Bogfrog
 // A squat mottled frog with bulging golden eyes and a pale, pulsing throat.
 function bogfrog(): MobModel {
@@ -431,6 +449,6 @@ function stonewarden(): MobModel {
 }
 
 export const PASSIVE_MODELS: Record<string, (variant?: string) => MobModel> = {
-  boar, hen, woolback, burrowfox, bogfrog, cavemoth, streamfish, villager, stonewarden, mossback,
+  boar, hen, woolback, burrowfox, bogfrog, cavemoth, streamfish, villager, stonewarden, mossback, bee,
 };
 

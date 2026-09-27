@@ -118,6 +118,9 @@ r(['PPP', 'PPP', ' S '], { P: PLANKS, S: I.stick }, B.sign, 3);
 r(['WWW', 'SES', 'WWW'], { W: I.wheat_item, S: I.sugar, E: I.egg }, B.cake);
 r(['P P', ' P '], { P: PLANKS }, I.bowl, 4);
 s([I.bowl, B.red_mushroom, B.brown_mushroom], I.mushroom_stew);
+s([I.bowl, I.redroot, I.redroot, I.redroot, I.redroot, I.redroot, I.redroot], I.redroot_stew);
+s([I.redroot], I.dye_red);
+r(['PPP', 'HHH', 'PPP'], { P: PLANKS, H: I.honeycomb }, B.beehive);
 r(['GGG', 'GAG', 'GGG'], { G: I.gold_ingot, A: I.apple }, I.golden_apple);
 s([I.gunpowder, I.ember_core, I.coal], I.fire_charge, 3);
 r(['SS', 'SS'], { S: B.slate }, B.polished_slate, 4);
@@ -222,6 +225,8 @@ export const SMELTING: Record<number, number> = {
   [B.cobbled_deepstone]: B.deepstone,
   [B.cinderstone]: I.cinder_brick,
   [B.cactus]: I.dye_green,
+  [I.potato]: I.baked_potato,
+  [I.salmon]: I.cooked_salmon,
   [B.stone_bricks]: B.cracked_stone_bricks,
   [B.emberquartz_ore]: I.emberquartz,
   [B.amber_ore]: I.amber,

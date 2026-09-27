@@ -4,7 +4,7 @@
 import { initAudio, setVolume, sfx, spatial } from './audio';
 import { B, BLOCKS, SOLID } from './blocks';
 import { EntityManager, MOBS, Mob, TntEntity } from './entities/entities';
-import type { Vehicle } from './entities/vehicles';
+import { makeVehicle, type Vehicle } from './entities/vehicles';
 import { createAvatar } from './entities/avatar';
 import type { MobModel } from './entities/models';
 import { I, itemDef } from './items';
@@ -30,12 +30,15 @@ import { EditHistory } from './game/history';
 import { Input } from './game/input';
 import { Signs } from './game/signs';
 import { Waypoints } from './game/waypoints';
+import { Raids } from './game/raids';
 import { WorldMap } from './ui/map';
 
 const TICK = 1 / 20;
 const DEATH_MESSAGES: Record<string, string> = {
   fall: 'You hit the ground too hard.',
   poison: 'Poison got the better of you.',
+  bee: 'You angered the bees.',
+  raider: 'A raider brought you down.',
   drowning: 'You ran out of air.',
   lava: 'You tried to swim in lava.',
   fire: 'You burned to death.',
@@ -73,6 +76,7 @@ export const ACHIEVEMENTS: Record<string, [string, string]> = {
   trade: ['Fair deal', 'Trade with a villager'],
   tame: ['Best friends', 'Tame a fox or a mossback'],
   brew: ['Local brewery', 'Brew a potion'],
+  hero: ['Hero of the village', 'Beat back a raid'],
 };
 
 type Mode = 'title' | 'loading' | 'playing';
@@ -117,6 +121,7 @@ export class Game {
   readonly chat: Chat;
   readonly history: EditHistory;
   readonly waypoints = new Waypoints();
+  raids!: Raids;
   readonly map: WorldMap;
   /** 0 first person, 1 behind, 2 in front. */
   perspective = 0;
@@ -173,6 +178,7 @@ export class Game {
       document.body.classList.add('touch');
     }
     this.hud = new Hud(root);
+    this.raids = new Raids(this, root);
     if (this.touchMode) {
       this.touch = new TouchControls(root, {
         mineStart: () => { if (!this.input.controlling) return; this.input.mouse[0] = true; this.actions.attack(); },
@@ -348,6 +354,7 @@ export class Game {
     const p = new Player(0.5, 100, 0.5);
     p.creative = meta.gamemode === 'creative';
     this.waypoints.load((meta as SaveMeta).waypoints);
+    this.raids.stop();
     if (meta.player) p.load(meta.player);
     else {
       const gen = new WorldGen(meta.seed);
@@ -733,6 +740,8 @@ export class Game {
   }
 
   // ---------- Pass-throughs kept for scripts and tests ----------
+  /** Test and command hook: build a vehicle by kind. */
+  makeVehicle = makeVehicle;
   /** Block ids by name (so scripts don't hard-code numbers). */
   get ids(): Record<string, number> { return B; }
   /** Item ids by name. */
@@ -1011,6 +1020,7 @@ export class Game {
     this.actions.tick(active);
     w.tick(p.body.pos[0], p.body.pos[1], p.body.pos[2], true);
     ents.tick();
+    this.raids.tick();
     if (this.riding) this.seatPlayer();
     // Autosave every 30 seconds.
     if (++this.autosave >= 600) { this.autosave = 0; this.save(); }

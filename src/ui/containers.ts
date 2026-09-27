@@ -384,17 +384,21 @@ export class ContainerScreen {
     el.innerHTML = '';
     const inv = this.player.inv;
     const icon = (s: ItemStack) => `<span class="trade-item">${slotHTML(s.id, s.count, undefined, !!s.ench?.length)}</span>`;
+    // A Village Hero pays less amber.
+    const hero = this.player.effects.has('hero');
+    const cost = (g: ItemStack): ItemStack => (hero && g.id === I.amber ? { ...g, count: Math.max(1, Math.ceil(g.count * 0.7)) } : g);
     v.offers.forEach((o) => {
+      const give = o.give.map(cost);
       const b = document.createElement('button');
       b.type = 'button';
       b.className = 'btn trade-opt';
-      const affordable = o.give.every((g) => inv.count(g.id) >= g.count);
+      const affordable = give.every((g) => inv.count(g.id) >= g.count);
       const soldOut = o.uses >= o.maxUses;
       b.disabled = !affordable || soldOut;
-      b.innerHTML = `${o.give.map(icon).join('')}<span class="arrow">⇨</span>${icon(o.get)}${soldOut ? '<span class="lv">Sold out</span>' : ''}`;
-      b.title = `${o.give.map((g) => `${g.count} ${itemDef(g.id)?.name}`).join(' + ')} for ${o.get.count} ${itemDef(o.get.id)?.name}`;
+      b.innerHTML = `${give.map(icon).join('')}<span class="arrow">⇨</span>${icon(o.get)}${soldOut ? '<span class="lv">Sold out</span>' : ''}`;
+      b.title = `${give.map((g) => `${g.count} ${itemDef(g.id)?.name}`).join(' + ')} for ${o.get.count} ${itemDef(o.get.id)?.name}`;
       b.addEventListener('click', () => {
-        if (!o.give.every((g) => inv.count(g.id) >= g.count) || o.uses >= o.maxUses) return;
+        if (!give.every((g) => inv.count(g.id) >= g.count) || o.uses >= o.maxUses) return;
         for (const g of o.give) {
           let left = g.count;
           for (let i = 0; i < inv.size && left > 0; i++) {

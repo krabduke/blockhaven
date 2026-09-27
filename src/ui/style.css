@@ -368,6 +368,15 @@ body.touch, body.touch canvas#game { touch-action: none; overscroll-behavior: no
 @keyframes fx-blink { 50% { opacity: 0.45; } }
 @media (prefers-reduced-motion: reduce) { #effects .fx.ending { animation: none; } }
 
+/* ---------- Raid bar ---------- */
+#raidbar { position: fixed; top: 10px; left: 50%; transform: translateX(-50%); z-index: 6; display: none; flex-direction: column; align-items: center; gap: 4px; pointer-events: none; zoom: var(--ui, 1); text-shadow: 2px 2px 0 #000; font-size: 16px; }
+#raidbar.show { display: flex; }
+#raidbar .track { width: min(360px, 70vw); height: 10px; background: #1b1410; border: 2px solid #000; box-shadow: inset 0 0 0 1px #3a2a20; }
+#raidbar .track i { display: block; height: 100%; width: 0; background: var(--danger); transition: width 0.3s; }
+#raidbar.won span { color: var(--lantern); }
+#raidbar.won .track i { background: var(--lantern); }
+@media (prefers-reduced-motion: reduce) { #raidbar .track i { transition: none; } }
+
 /* ---------- Brewing stand ---------- */
 .brew { display: flex; flex-direction: column; align-items: center; gap: 8px; min-width: 220px; }
 .brew-top { display: flex; gap: 24px; align-items: flex-start; }

@@ -196,7 +196,8 @@ const lineup = async (name, kinds, dist, height) => {
     kinds.forEach((k, i) => {
       const [kind, prof] = k.split(':');
       const off = i - (kinds.length - 1) / 2;
-      const m = g.entities.spawnMob(kind, x + 0.5 + off * gap, y + 1, z - 3 + 0.5 + Math.abs(off) * 0.5, prof);
+      const m = g.entities.spawnMob(kind, x + 0.5 + off * gap, y + 1, z - 3 + 0.5 + Math.abs(off) * 0.5, prof === 'captain' ? undefined : prof);
+      if (prof === 'captain') m.captain = true;
       m.spec = { ...m.spec, hostile: false, ranged: false, burnsInDay: false, exploder: false };
       m.yaw = Math.PI - off * 0.12; m.wanderTimer = 99999; m.target = null;
     });
@@ -211,7 +212,31 @@ const lineup = async (name, kinds, dist, height) => {
 };
 if (plains) {
   await lineup('creatures', ['frostling', 'zombie', 'brambler', 'witch', 'skeleton', 'blastcap', 'mirewalker', 'shellcrawler'], 11.5, 0.6);
+  await lineup('raiders', ['bee', 'raider', 'raider:captain', 'raider', 'mossback'], 7, 0.6);
   await lineup('villagers', ['villager:farmer', 'villager:fisher', 'villager:librarian', 'stonewarden', 'villager:cleric', 'villager:smith', 'villager:butcher'], 10, 0.5);
+}
+
+// Crops at every stage, and bee nests and hives from empty to full of honey.
+if (plains && (!only || only.includes('farm'))) {
+  await visit([plains[0], plains[2]]);
+  await game(([x, z]) => {
+    const g = window.blockhaven, w = g.world, B = g.ids;
+    for (const e of g.entities.list) if (e.spec) e.dead = true;
+    const y = w.groundY(x, z) - 1;
+    for (let dx = -8; dx <= 8; dx++) for (let dz = -10; dz <= 6; dz++) { for (let dy = 1; dy <= 8; dy++) w.setBlock(x + dx, y + dy, z + dz, 0); w.setBlock(x + dx, y, z + dz, 2); }
+    for (let i = 0; i < 4; i++) {
+      for (const [row, crop] of [[-6, B.potatoes], [-4, B.redroot], [-2, B.carrots]]) { w.setBlock(x - 4 + i * 2, y, z + row, B.farmland); w.setBlock(x - 4 + i * 2, y + 1, z + row, crop, i * 2 + (i === 3 ? 1 : 0)); w.setBlock(x - 3 + i * 2, y, z + row, B.farmland); w.setBlock(x - 3 + i * 2, y + 1, z + row, crop, i * 2 + 1); }
+    }
+    w.setBlock(x + 4, y + 1, z - 5, B.bee_nest, 0); w.setBlock(x + 4, y + 2, z - 5, B.bee_nest, 5);
+    w.setBlock(x + 6, y + 1, z - 5, B.beehive, 0); w.setBlock(x + 6, y + 2, z - 5, B.beehive, 5);
+    g.player.flying = true;
+    g.player.body.pos = [x + 0.5, y + 4, z + 3];
+    g.player.yaw = 0; g.player.pitch = -0.45;
+  }, [plains[0], plains[2]]);
+  await setTime(4200);
+  await settle(8000);
+  await wait(1000);
+  await shot('farm');
 }
 
 // Gameplay shots keep the HUD: a torch-lit cave with ore, crafting and enchanting screens, a night raid.

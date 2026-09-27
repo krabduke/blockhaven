@@ -791,6 +791,7 @@ const bottle = (liquid: RGB | null, splash: boolean) => (p: Painter) => {
 tile('glass_bottle', bottle(null, false));
 tile('water_bottle', bottle(hex('#3b6fd6'), false));
 for (const [effect, def] of Object.entries(EFFECTS)) {
+  if (effect === 'hero') continue;
   tile('potion_' + effect, bottle(hex(def.color), false));
   tile('splash_potion_' + effect, bottle(hex(def.color), true));
 }
@@ -847,6 +848,46 @@ tile('cooked_fish', fish(hex('#b07a3a'), hex('#e0b070')));
 tile('carrot', (p) => { p.transparent(); for (let i = 0; i < 9; i++) { p.set(4 + i, 12 - i, hex('#e8782a')); p.set(5 + i, 12 - i, hex('#c85a1a')); if (i < 7) p.set(4 + i, 13 - i, hex('#d8681f')); } p.sprite(['g.g', '.gg', 'gg.'], { g: hex('#4f9a2e') }, 0.05, 12, 1); });
 tile('gunpowder', (p) => { p.transparent(); for (let i = 0; i < 40; i++) p.set(4 + Math.floor(p.rand() * 8), 6 + Math.floor(p.rand() * 7), p.rand() < 0.5 ? hex('#5a5a5a') : hex('#3a3a3a')); });
 tile('glow_dust', (p) => { p.transparent(); for (let i = 0; i < 34; i++) p.set(4 + Math.floor(p.rand() * 8), 6 + Math.floor(p.rand() * 7), p.rand() < 0.5 ? hex('#f8d870') : hex('#d8a040')); });
+
+// ---------- Living world: crops, bees, fish ----------
+for (let st = 0; st <= 3; st++) {
+  tile('potatoes_' + st, (p) => {
+    p.transparent();
+    for (let b = 0; b < 3; b++) {
+      const cx = 3 + b * 5, h = 3 + st * 2;
+      for (let y = 15; y > 15 - h; y--) { p.set(cx + ((y + b) % 2), y, p.jit(hex('#4a8a2a'), 0.12)); if (y < 13) { p.set(cx - 1, y, p.jit(hex('#5a9a36'), 0.1)); p.set(cx + 2, y, p.jit(hex('#3e7a24'), 0.1)); } }
+      if (st === 3) { p.set(cx, 15 - h, hex('#f0f0e8')); p.set(cx + 1, 15 - h, hex('#f0e060')); p.set(cx, 15, hex('#c8a060')); }
+    }
+  });
+  tile('redroot_' + st, (p) => {
+    p.transparent();
+    for (let b = 0; b < 4; b++) {
+      const cx = 2 + b * 4, h = 2 + st * 2;
+      for (let y = 15; y > 15 - h; y--) p.set(cx + (y % 2), y, p.jit(hex(y > 12 ? '#8a2a3a' : '#5a9a36'), 0.1));
+      if (st >= 2) p.set(cx + 1, 16 - h, p.jit(hex('#6aa83e'), 0.1));
+      if (st === 3) { p.set(cx, 15, hex('#b8243a')); p.set(cx + 1, 15, hex('#d83a50')); }
+    }
+  });
+}
+const combCells = (p: Painter, base: string, cell: string) => {
+  p.fill(hex(base), 0.06);
+  for (let y = 1; y < S; y += 4) for (let x = (y % 8 === 1 ? 1 : 3); x < S; x += 4) { p.rect(x, y, 2, 2, hex(cell)); }
+};
+tile('nest_side', (p) => { combCells(p, '#c89a4a', '#9a6a2a'); p.rect(6, 7, 4, 3, hex('#2a1a10')); p.border(hex('#8a5a2a')); });
+tile('nest_honey', (p) => { combCells(p, '#c89a4a', '#9a6a2a'); p.rect(6, 7, 4, 3, hex('#2a1a10')); for (const x of [3, 7, 11]) p.rect(x, 9, 2, 5 + (x % 3), hex('#f0a820')); p.border(hex('#8a5a2a')); });
+tile('hive_side', (p) => { p.fill(C.plank, 0.05); for (let y = 0; y < S; y += 4) p.rect(0, y, 16, 1, C.plankDark); p.rect(5, 8, 6, 3, hex('#2a1a10')); p.rect(4, 11, 8, 1, C.plankDark); });
+tile('hive_honey', (p) => { painters['hive_side'](p); for (const x of [5, 8, 10]) p.rect(x, 11, 1, 3 + (x % 3), hex('#f0a820')); p.rect(5, 8, 6, 3, hex('#f0a820')); });
+tile('potato', (p) => { p.transparent(); p.sprite(['..pppp..', '.ppppdp.', 'pphpppp.', 'pppppdpp', '.pdpppp.', '..pppp..'], { p: hex('#c8a060'), h: hex('#e8c888'), d: hex('#8a6a3a') }, 0.06, 4, 5); });
+tile('baked_potato', (p) => { p.transparent(); p.sprite(['..pppp..', '.pphhpp.', 'pphyyhpp', 'ppyyyypp', '.pppppp.', '..pppp..'], { p: hex('#b8803a'), h: hex('#f0e0a0'), y: hex('#f8d060') }, 0.06, 4, 5); });
+tile('redroot', (p) => { p.transparent(); p.sprite(['...gg...', '..gggg..', '...rr...', '..rrrr..', '.rrhrrr.', '.rrrrrr.', '..rrrr..', '...rr...'], { g: hex('#5a9a36'), r: hex('#b8243a'), h: hex('#e85a6a') }, 0.06, 4, 3); });
+tile('redroot_seeds', (p) => { p.transparent(); for (let i = 0; i < 10; i++) p.set(4 + Math.floor(p.rand() * 8), 6 + Math.floor(p.rand() * 6), hex(i % 2 ? '#8a2a3a' : '#6a1e2a')); });
+tile('redroot_stew', (p) => { p.transparent(); p.sprite(['............', 'rrrrrrrrrrrr', 'wrrhrrrrrrrw', '.wrrrrrrrrw.', '..wwwwwwww..'], { r: hex('#b8243a'), h: hex('#e85a6a'), w: hex('#8a5a2a') }, 0.05, 2, 6); });
+tile('honey_bottle', bottle(hex('#f0a820'), false));
+tile('honeycomb', (p) => { p.transparent(); p.sprite(['..hhhh..', '.hchhch.', 'hhhhhhhh', 'hchhchhc', 'hhhhhhhh', '.hchhch.', '..hhhh..'], { h: hex('#f0b030'), c: hex('#c88a1a') }, 0.05, 4, 4); });
+const fishSprite = (body: string, belly: string, fin: string, glow?: string) => (p: Painter) => { p.transparent(); p.sprite(['....bbbb...f', '..bbbbbbb.ff', '.bebbbbbbbff', 'bbbbbbbbbbf.', '.ylllllll.ff', '..llllll...f'], { b: hex(body), l: hex(belly), f: hex(fin), e: hex('#101010'), y: hex(glow ?? belly) }, 0.05, 2, 5); };
+tile('salmon', fishSprite('#b8584a', '#e89a88', '#8a3a30'));
+tile('cooked_salmon', fishSprite('#c8784a', '#e8b890', '#8a5a30'));
+tile('glimmerfish', fishSprite('#3a8ab0', '#bfe8f0', '#2a6a90', '#7af0e8'));
 
 // ---------- Batch 3: Emberdeep, villages, building blocks ----------
 tile('portal', (p) => {

@@ -20,8 +20,8 @@ export interface ItemDef {
   armor?: { slot: 0 | 1 | 2 | 3; points: number; durability: number };
   /** Right-click-and-hold / throw behaviours. */
   use?: 'bow' | 'throw' | 'shears' | 'bonemeal' | 'rod' | 'ignite' | 'dye' | 'firecharge' | 'shield' | 'crossbow';
-  /** Extra effect when eaten. */
-  effect?: 'regen';
+  /** Extra effect when eaten: 'regen' (golden apple), a status effect, or 'cure' (clears poison). */
+  effect?: 'regen' | 'cure' | EffectId;
   /** Dyes: the colour they give. */
   dye?: DyeColor;
   /** Metadata to place the block with (colour of a carpet, banner or stained glass). */
@@ -120,6 +120,16 @@ POTIONS.forEach((p, i) => {
 item(440, 'shield', 'Shield', { maxStack: 1, use: 'shield', tool: { kind: 'sword', tier: 0, speed: 1, durability: 336, damage: 1 } });
 item(441, 'crossbow', 'Crossbow', { maxStack: 1, use: 'crossbow', tool: { kind: 'sword', tier: 0, speed: 1, durability: 465, damage: 1 } });
 item(442, 'bog_slime', 'Bog Slime');
+item(504, 'potato', 'Potato', { food: { hunger: 1, saturation: 0.6 }, places: B.potatoes });
+item(505, 'baked_potato', 'Baked Potato', { food: { hunger: 5, saturation: 6 } });
+item(506, 'redroot', 'Redroot', { food: { hunger: 1, saturation: 1.2 } });
+item(507, 'redroot_seeds', 'Redroot Seeds', { places: B.redroot });
+item(508, 'redroot_stew', 'Redroot Stew', { maxStack: 1, food: { hunger: 7, saturation: 8.4 } });
+item(509, 'honey_bottle', 'Honey Bottle', { maxStack: 16, food: { hunger: 6, saturation: 1.2 }, effect: 'cure' });
+item(510, 'honeycomb', 'Honeycomb');
+item(511, 'salmon', 'Raw Salmon', { food: { hunger: 2, saturation: 0.4 } });
+item(512, 'cooked_salmon', 'Cooked Salmon', { food: { hunger: 6, saturation: 9.6 } });
+item(513, 'glimmerfish', 'Glimmerfish', { food: { hunger: 1, saturation: 0.2 }, effect: 'night_vision' });
 item(501, 'boat', 'Boat', { maxStack: 1 });
 item(502, 'minecart', 'Minecart', { maxStack: 1 });
 item(503, 'saddle', 'Saddle', { maxStack: 1 });
@@ -198,7 +208,7 @@ export function allItemIds(): number[] {
 
 /** Items shown in the creative inventory (skips technical blocks). */
 export function creativeItems(): number[] {
-  const hidden = new Set([B.furnace_lit, B.lamp_on, B.farmland, B.wheat, B.carrots, B.water, B.lava, B.bedrock, B.portal, B.fire, B.wire, B.seagrass, B.kelp]);
+  const hidden = new Set([B.furnace_lit, B.lamp_on, B.farmland, B.wheat, B.carrots, B.potatoes, B.redroot, B.piston_head, B.water, B.lava, B.bedrock, B.portal, B.fire, B.wire, B.seagrass, B.kelp]);
   return allItemIds().filter((id) => !hidden.has(id));
 }
 

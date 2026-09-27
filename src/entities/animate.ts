@@ -207,6 +207,13 @@ const ANIMATORS: Record<string, Animator> = {
     rot(c.parts.eyeL, 0, 0, Math.sin(c.t * 0.6) * 0.1);
     head(c, 0, 0, 0.3);
   },
+  bee(c) {
+    const f = Math.sin(c.t * 40 + c.a.seed);
+    rot(c.parts.wingL, 0, 0, 0.2 + f * 0.7); rot(c.parts.wingR, 0, 0, -0.2 - f * 0.7);
+    c.parts.body.position.y = Math.sin(c.t * 5 + c.a.seed) * 0.03;
+    rot(c.parts.torso, c.mob.beeAnger > 0 ? 0.25 : Math.sin(c.t * 2) * 0.06, 0, 0);
+    rot(c.parts.antennaL, -0.5 + Math.sin(c.t * 4) * 0.15); rot(c.parts.antennaR, -0.5 + Math.sin(c.t * 4 + 1) * 0.15);
+  },
   cavemoth(c) {
     const f = Math.sin(c.t * 26 + c.a.seed);
     rot(c.parts.wingL, 0, 0, 0.15 + f * 0.8); rot(c.parts.wingR, 0, 0, -0.15 - f * 0.8);
@@ -281,6 +288,23 @@ const ANIMATORS: Record<string, Animator> = {
     rot(c.parts.cloak, -clamp(c.a.speed * 5, 0, 0.6) - Math.abs(Math.sin(c.phase)) * 0.1 * c.amp + Math.sin(c.t * 2.5 + c.a.seed) * 0.04);
     rot(c.parts.jaw, Math.max(0, Math.sin(c.t * (c.mob.aiming ? 18 : 3))) * (c.mob.aiming ? 0.25 : 0.06));
     head(c, 0, jitter * 2);
+  },
+  raider(c) {
+    bipedLegs(c, 0.7); bob(c, 0.8, 0.04); breathe(c);
+    let [al, ar] = armsSwing(c, 0.45);
+    if (c.mob.aiming) {
+      // Crossbow levelled at the shoulder; the off hand steadies the prod.
+      ar = -1.45; al = -1.3;
+      rot(c.parts.armR, ar, 0, 0); rot(c.parts.armL, al, 0.55, 0);
+    } else { rot(c.parts.armL, al); rot(c.parts.armR, ar * 0.5 - 0.25); }
+    rot(c.parts.crossbow, c.mob.aiming ? 0 : 0.9);
+    // The scarf tail streams out behind at a run.
+    rot(c.parts.scarfTail, -0.2 - Math.min(0.9, c.a.speed * 6) - Math.abs(Math.sin(c.phase)) * 0.15 * c.amp + Math.sin(c.t * 3 + c.a.seed) * 0.08, 0, 0.1);
+    if (c.parts.pennant) {
+      c.parts.pennant.visible = c.mob.captain;
+      rot(c.parts.pennant, 0.12 + Math.sin(c.phase) * 0.05 * c.amp, 0, -0.08 + Math.sin(c.t * 1.7) * 0.03);
+    }
+    head(c, c.mob.aiming ? 0.05 : 0);
   },
   witch(c) {
     bipedLegs(c, 0.5); bob(c, 0.7, 0.04); breathe(c);

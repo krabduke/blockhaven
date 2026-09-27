@@ -228,6 +228,8 @@ export function meshSubchunk(input: MeshInput): SubMesh {
             if (BLOCKS[id].waterlogged) emitLiquid(layers[2], blocks, meta, light, x, y, z, B.water);
             if (id === B.wheat) layer = tileIndex('wheat_' + Math.min(7, m));
             if (id === B.carrots) layer = tileIndex('carrots_' + Math.min(3, m >> 1));
+            if (id === B.potatoes) layer = tileIndex('potatoes_' + Math.min(3, m >> 1));
+            if (id === B.redroot) layer = tileIndex('redroot_' + Math.min(3, m >> 1));
             const t = TINTED_LAYER[layer] ? tint : WHITE;
             const s = skyAt(i), bl = blkAt(i);
             const o = 0.15, flags = WAVING[id];

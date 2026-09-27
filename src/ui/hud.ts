@@ -192,7 +192,7 @@ export class Hud {
     this.effectsKey = key;
     this.effectsEl.innerHTML = list.map(([id, e]) => {
       const def = EFFECTS[id];
-      const icon = I['potion_' + id];
+      const icon = I['potion_' + id] ?? (id === 'hero' ? I.amber : undefined);
       const lvl = e.level > 1 ? ' ' + ['', 'I', 'II', 'III', 'IV'][e.level] : '';
       return `<div class="fx${def.good ? '' : ' bad'}${e.ticks < 200 ? ' ending' : ''}">${icon ? `<img src="${iconURL(icon)}" alt="">` : ''}<span>${def.name}${lvl}</span><b>${formatTicks(e.ticks)}</b></div>`;
     }).join('');

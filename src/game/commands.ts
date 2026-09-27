@@ -151,6 +151,15 @@ export const COMMANDS: Command[] = [
     },
   },
   {
+    name: 'raid', usage: '/raid start|stop', help: 'Starts or calls off a raid on the village you are in',
+    complete: (i) => (i === 0 ? ['start', 'stop'] : []),
+    run(g, a) {
+      if (a[0] === 'start') { const why = g.raids.start(); if (why) g.chat.say(why); }
+      else if (a[0] === 'stop') { if (g.raids.active) g.raids.stop('The raid is called off.'); else g.chat.say('There is no raid.'); }
+      else g.chat.say('Usage: ' + this.usage);
+    },
+  },
+  {
     name: 'dimension', usage: '/dimension overworld|ember', help: 'Travels to another dimension',
     complete: (i) => (i === 0 ? ['overworld', 'ember'] : []),
     run(g, a) {

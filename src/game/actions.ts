@@ -75,12 +75,16 @@ export class Actions {
           if (this.eating % 4 === 0) sfx.eat();
           if (this.eating > 32) {
             const eff = itemDef(held.id)?.effect;
-            const bowl = held.id === I.mushroom_stew;
+            const bowl = held.id === I.mushroom_stew || held.id === I.redroot_stew;
+            const bottle = held.id === I.honey_bottle;
             if (p.eat(held) && !p.creative) {
               held.count--;
               if (held.count <= 0) p.inv.slots[p.selected] = bowl ? { id: I.bowl, count: 1 } : null;
+              if (bottle) { const left = p.inv.add({ id: I.glass_bottle, count: 1 }); if (left) this.throwStack(left); }
             }
             if (eff === 'regen') p.regenTicks = 100;
+            else if (eff === 'cure') p.effects.delete('poison');
+            else if (eff) p.addEffect(eff, 600);
             this.eating = 0;
           }
         }
@@ -317,8 +321,9 @@ export class Actions {
       } else if (p.creative || p.inv.slots.some((s) => s?.id === I.arrow)) this.crossbowLoad = 1;
       return;
     }
-    // Filling a glass bottle from water.
-    if (held?.id === I.glass_bottle) {
+    // Filling a glass bottle from water (a full bee nest is handled below with the other blocks).
+    const nestHit = !!hit && (hit.id === B.bee_nest || hit.id === B.beehive) && w.getMeta(hit.pos[0], hit.pos[1], hit.pos[2]) >= 5;
+    if (held?.id === I.glass_bottle && !nestHit) {
       const wh = raycast(w, eye, dir, this.reach(), true);
       if (wh && wh.id === B.water) {
         sfx.splash();
@@ -352,6 +357,23 @@ export class Actions {
         return;
       }
       if (id === B.crafting_table) { this.openScreen('crafting'); return; }
+      if ((id === B.bee_nest || id === B.beehive) && w.getMeta(x, y, z) >= 5 && (held?.id === I.glass_bottle || held?.id === I.shears)) {
+        // Harvest honey: a torch or fire under the nest keeps the bees calm; otherwise they swarm you.
+        if (held.id === I.glass_bottle) {
+          if (held.count === 1) p.inv.slots[p.selected] = { id: I.honey_bottle, count: 1 };
+          else { held.count--; const left = p.inv.add({ id: I.honey_bottle, count: 1 }); if (left) this.throwStack(left); }
+        } else {
+          this.entities.dropItem(x + 0.5, y + 0.5, z + 0.5, { id: I.honeycomb, count: 3 });
+          this.damageTool(1);
+        }
+        w.setMeta(x, y, z, 0);
+        sfx.place('wood');
+        this.renderer.swingHand();
+        let smoked = false;
+        for (let dy = 1; dy <= 5 && !smoked; dy++) for (let dx = -1; dx <= 1; dx++) for (let dz = -1; dz <= 1; dz++) { const b = w.getBlock(x + dx, y - dy, z + dz); if (b === B.torch || b === B.fire || b === B.lantern) smoked = true; }
+        if (!smoked) for (const b of this.entities.mobs()) if (b.spec.kind === 'bee' && Math.hypot(b.body.pos[0] - x, b.body.pos[2] - z) < 16) b.beeAnger = 400;
+        return;
+      }
       if (id === B.repeater) {
         const m = w.getMeta(x, y, z);
         w.setMeta(x, y, z, (m & ~12) | ((((m >> 2) & 3) + 1) % 4 << 2));
@@ -668,12 +690,16 @@ export class Actions {
       const b = this.bobber;
       if (b.biteTicks > 0) {
         const r = Math.random();
-        const loot = r < 0.8 ? { id: I.raw_fish, count: 1 } : r < 0.9 ? { id: [I.leather, I.bone, I.string, I.stick][Math.floor(Math.random() * 4)], count: 1 } : { id: [I.book, B.sapling, I.bow, I.iron_ingot][Math.floor(Math.random() * 4)], count: 1 };
+        // Mostly fish (trout, salmon, the rare glowing glimmerfish), sometimes junk, now and then treasure.
+        const pick = <T,>(a: T[]) => a[Math.floor(Math.random() * a.length)];
+        const loot = r < 0.65 ? { id: pick([I.raw_fish, I.raw_fish, I.raw_fish, I.raw_fish, I.salmon, I.salmon, I.glimmerfish]), count: 1 }
+          : r < 0.85 ? { id: pick([I.leather, I.bone, I.string, I.stick, I.bowl, B.lily_pad, I.rotten_flesh, I.water_bottle]), count: 1 }
+            : { id: pick([I.saddle, I.book, I.gold_ingot, I.diamond, I.bow, I.crossbow, I.golden_apple, I.honeycomb]), count: 1 };
         const e = p.eye();
         const d = [e[0] - b.body.pos[0], e[1] - b.body.pos[1], e[2] - b.body.pos[2]];
         ents.dropItem(b.body.pos[0], b.body.pos[1] + 0.3, b.body.pos[2], loot, 0, [d[0] * 0.1, d[1] * 0.1 + Math.hypot(d[0], d[2]) * 0.03, d[2] * 0.1]);
         ents.dropXp(p.body.pos[0], p.body.pos[1] + 0.5, p.body.pos[2], 1 + Math.floor(Math.random() * 6));
-        if (loot.id === I.raw_fish) p.achieve('fish');
+        if (loot.id === I.raw_fish || loot.id === I.salmon || loot.id === I.glimmerfish) p.achieve('fish');
       }
       b.dead = true;
       this.bobber = null;

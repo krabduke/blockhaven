@@ -1,7 +1,7 @@
 // Deterministic terrain generation. Pure: same seed and chunk coordinates
 // always give the same blocks. Runs inside the worker.
 
-import { B } from '../blocks';
+import { B, isLeaves } from '../blocks';
 import { Simplex, hash3, mulberry32 } from '../noise';
 import { CH, CS, SEA_LEVEL, idx } from './chunk';
 import { buildVillage, villagesNear } from './villages';
@@ -309,7 +309,7 @@ export class WorldGen {
     }
 
     // Villages are built last so they clear trees and flowers in their way.
-    const spawns: Spawn[] = [];
+    const spawns: Spawn[] = this.nestBees.splice(0);
     for (const v of villagesNear(this, cx, cz)) spawns.push(...buildVillage(this, v, blocks, meta, cx, cz));
 
     return { blocks, meta, biomes, spawns };
@@ -512,11 +512,29 @@ export class WorldGen {
         // block may be in another chunk).
         const h2 = hash3(this.seed + 32, wx, 0, wz);
         this.tree(blocks, x0, z0, wx, height + 1, wz, kind, h2, meta);
+        if (this.pendingNest) {
+          const [lx, ny, lz] = this.pendingNest;
+          this.pendingNest = null;
+          if (blocks[idx(lx, ny, lz)] === 0 || isLeaves(blocks[idx(lx, ny, lz)])) { blocks[idx(lx, ny, lz)] = B.bee_nest; if (meta) meta[idx(lx, ny, lz)] = 2; }
+        }
       }
     }
   }
 
+  /** Bees for nests placed while building the current chunk. */
+  private nestBees: Spawn[] = [];
+  private pendingNest: [number, number, number] | null = null;
+
   private tree(blocks: Uint8Array, x0: number, z0: number, wx: number, by: number, wz: number, kind: TreeKind, r: number, meta?: Uint8Array): void {
+    // Now and then an oak, birch or blossom tree carries a bee nest on its trunk, with its bees.
+    if ((kind === 'oak' || kind === 'birch' || kind === 'blossom') && hash3(this.seed + 77, wx, by, wz) < 0.09) {
+      const nx = wx, ny = by + 2, nz = wz + 1;
+      const lx = nx - x0, lz = nz - z0;
+      if (lx >= 0 && lx < CS && lz >= 0 && lz < CS && ny < CH) {
+        this.pendingNest = [lx, ny, lz];
+        for (let i = 0; i < 3; i++) this.nestBees.push({ kind: 'bee', x: nx + 0.5, y: ny + 0.2, z: nz + 1.5 });
+      }
+    }
     const set = (x: number, y: number, z: number, id: number, overwrite: boolean) => {
       const lx = x - x0, lz = z - z0;
       if (lx < 0 || lx >= CS || lz < 0 || lz >= CS || y < 0 || y >= CH) return;

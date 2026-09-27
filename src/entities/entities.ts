@@ -59,6 +59,9 @@ interface MobSpec {
   habitat?: 'ember' | 'cave' | 'water' | 'desert' | 'cold' | 'forest' | 'swamp';
 }
 
+/** Flowers bees visit. */
+const FLOWERS = new Set<number>([B.poppy, B.dandelion, B.blue_flower, B.white_flower, B.purple_flower]);
+
 export const MOBS: Record<string, MobSpec> = {
   boar: { kind: 'boar', width: 0.9, height: 0.9, health: 10, speed: 0.7, hostile: false, pitch: 180, xp: 2, food: [I.carrot, I.wheat_item], drops: (r) => [{ id: I.raw_pork, count: 1 + Math.floor(r() * 3) }, { id: I.leather, count: Math.floor(r() * 2) }] },
   hen: { kind: 'hen', width: 0.4, height: 0.7, health: 4, speed: 0.7, hostile: false, pitch: 900, xp: 2, food: [I.seeds], drops: (r) => [{ id: I.raw_chicken, count: 1 }, { id: I.feather, count: Math.floor(r() * 3) }] },
@@ -69,6 +72,7 @@ export const MOBS: Record<string, MobSpec> = {
   stonewarden: { kind: 'stonewarden', width: 1.4, height: 2.7, health: 100, speed: 0.5, hostile: false, guardian: true, attack: 9, pitch: 70, xp: 0, drops: (r) => [{ id: I.iron_ingot, count: 3 + Math.floor(r() * 3) }] },
   emberwisp: { kind: 'emberwisp', width: 0.9, height: 1.1, health: 12, speed: 0.6, hostile: true, ranged: true, projectile: 'fireball', flying: true, fireImmune: true, habitat: 'ember', pitch: 520, xp: 5, drops: (r) => [{ id: I.ember_core, count: r() < 0.5 ? 1 : 0 }, { id: I.gunpowder, count: Math.floor(r() * 2) }] },
   cinderbrute: { kind: 'cinderbrute', width: 1.1, height: 1.7, health: 30, speed: 0.6, hostile: true, attack: 6, fireImmune: true, habitat: 'ember', pitch: 90, xp: 8, drops: (r) => [{ id: I.cinder_brick, count: Math.floor(r() * 4) }, { id: I.gold_ingot, count: r() < 0.25 ? 1 : 0 }, { id: I.emberquartz, count: Math.floor(r() * 3) }] },
+  bee: { kind: 'bee', width: 0.45, height: 0.4, health: 8, speed: 0.55, hostile: false, flying: true, pitch: 1600, xp: 1, drops: () => [] },
   mossback: { kind: 'mossback', width: 1.2, height: 1.75, health: 26, speed: 1.0, hostile: false, food: [I.wheat_item, I.apple], pitch: 160, xp: 3, drops: (r) => [{ id: I.leather, count: Math.floor(r() * 3) }] },
   burrowfox: { kind: 'burrowfox', width: 0.6, height: 0.7, health: 10, speed: 0.85, hostile: false, habitat: 'forest', food: [I.apple], pitch: 700, xp: 2, drops: (r) => [{ id: I.leather, count: Math.floor(r() * 2) }] },
   bogfrog: { kind: 'bogfrog', width: 0.5, height: 0.5, health: 6, speed: 0.6, hostile: false, hops: true, habitat: 'swamp', food: [I.seeds], pitch: 250, xp: 1, drops: (r) => [{ id: I.bog_slime, count: r() < 0.6 ? 1 : 0 }] },
@@ -76,8 +80,9 @@ export const MOBS: Record<string, MobSpec> = {
   frostling: { kind: 'frostling', width: 0.5, height: 1.4, health: 14, speed: 0.75, hostile: true, ranged: true, projectile: 'snowball', habitat: 'cold', pitch: 1100, xp: 5, drops: (r) => [{ id: I.snowball, count: 1 + Math.floor(r() * 4) }, ...(r() < 0.2 ? [{ id: B.ice, count: 1 }] : [])] },
   cavemoth: { kind: 'cavemoth', width: 0.6, height: 0.5, health: 4, speed: 0.4, hostile: false, flying: true, habitat: 'cave', pitch: 1400, xp: 0, drops: () => [] },
   streamfish: { kind: 'streamfish', width: 0.4, height: 0.3, health: 3, speed: 0.5, hostile: false, aquatic: true, habitat: 'water', pitch: 1200, xp: 1, drops: () => [{ id: I.raw_fish, count: 1 }] },
-  zombie: { kind: 'zombie', width: 0.6, height: 1.95, health: 20, speed: 0.7, hostile: true, attack: 3, burnsInDay: true, pitch: 140, xp: 5, drops: (r) => [{ id: I.rotten_flesh, count: Math.floor(r() * 3) }, ...(r() < 0.03 ? [{ id: I.iron_ingot, count: 1 }] : r() < 0.04 ? [{ id: I.carrot, count: 1 }] : [])] },
+  zombie: { kind: 'zombie', width: 0.6, height: 1.95, health: 20, speed: 0.7, hostile: true, attack: 3, burnsInDay: true, pitch: 140, xp: 5, drops: (r) => [{ id: I.rotten_flesh, count: Math.floor(r() * 3) }, ...(r() < 0.03 ? [{ id: I.iron_ingot, count: 1 }] : r() < 0.04 ? [{ id: I.carrot, count: 1 }] : r() < 0.04 ? [{ id: I.potato, count: 1 }] : [])] },
   skeleton: { kind: 'skeleton', width: 0.6, height: 1.95, health: 20, speed: 0.7, hostile: true, ranged: true, projectile: 'arrow', shotDelay: 34, burnsInDay: true, pitch: 480, xp: 5, drops: (r) => [{ id: I.bone, count: Math.floor(r() * 3) }, { id: I.arrow, count: Math.floor(r() * 3) }] },
+  raider: { kind: 'raider', width: 0.6, height: 1.95, health: 24, speed: 0.75, hostile: true, ranged: true, projectile: 'arrow', shotDelay: 50, pitch: 210, xp: 6, drops: (r) => [{ id: I.arrow, count: Math.floor(r() * 3) }, ...(r() < 0.35 ? [{ id: I.amber, count: 1 }] : []), ...(r() < 0.06 ? [{ id: I.crossbow, count: 1 }] : [])] },
   witch: { kind: 'witch', width: 0.6, height: 1.95, health: 26, speed: 0.6, hostile: true, ranged: true, projectile: 'potion', shotDelay: 60, pitch: 620, xp: 5, drops: (r) => [[I.glow_dust, I.sugar, I.string, I.stick, I.gunpowder][Math.floor(r() * 5)]].map((id) => ({ id, count: 1 + Math.floor(r() * 2) })) },
   blastcap: { kind: 'blastcap', width: 0.8, height: 1.1, health: 16, speed: 0.8, hostile: true, exploder: true, pitch: 360, xp: 5, drops: (r) => [{ id: I.gunpowder, count: Math.floor(r() * 3) }] },
   brambler: { kind: 'brambler', width: 0.6, height: 1.9, health: 20, speed: 0.7, hostile: true, ranged: true, projectile: 'thorn', burnsInDay: true, pitch: 260, xp: 5, drops: (r) => [{ id: I.arrow, count: Math.floor(r() * 3) }, { id: I.bone, count: Math.floor(r() * 3) }, { id: I.gunpowder, count: Math.floor(r() * 2) }] },
@@ -218,6 +223,15 @@ export class Mob extends Entity {
   saddled = false;
   /** Mossbacks warm to you with each feeding. */
   temper = 0;
+  /** Bees: their nest, whether they carry nectar, and how long they stay angry. */
+  home: [number, number, number] | null = null;
+  nectar = false;
+  beeAnger = 0;
+  /** Raiders march on this point (a village centre) when nothing is in range. */
+  rally: [number, number] | null = null;
+  /** Raid captains are tougher and carry a banner. */
+  captain = false;
+  private beeTimer = 0;
   /** Ridden by the player: movement comes from the rider's keys. */
   ridden = false;
   riderInput: RiderInput = { forward: 0, strafe: 0, jump: false, yaw: 0, sprint: false };
@@ -276,6 +290,7 @@ export class Mob extends Entity {
     const s = m.spatialFor(this.body.pos);
     sfx.mobHurt(this.spec.pitch * (this.baby ? 1.5 : 1), s);
     if (!this.spec.hostile) { this.panic = 60; this.grazeTicks = 0; }
+    if (this.spec.kind === 'bee' && byPlayer) for (const o of m.mobs()) if (o.spec.kind === 'bee' && dist(o.body.pos, this.body.pos) < 12) o.beeAnger = 400;
     if (this.health <= 0) {
       this.deathTime = 1;
       if (!this.baby) {
@@ -350,6 +365,7 @@ export class Mob extends Entity {
     this.aiming = false;
     if (this.ridden) { this.rideTick(m); return; }
     if (this.tamed && this.spec.kind === 'burrowfox' && this.companionTick(m)) return;
+    if (this.spec.kind === 'bee') { this.beeTick(m); return; }
     if (this.spec.flying) { this.flyTick(m); return; }
     if (this.spec.aquatic) { this.swimTick(m); return; }
     let forward = 0;
@@ -360,11 +376,11 @@ export class Mob extends Entity {
     // Pick a target: hostiles go for the player or villagers; guardians go for hostiles.
     let target: { pos: number[]; hit: (dmg: number, knock: [number, number]) => void; eye: number } | null = null;
     if (this.spec.hostile || (this.spec.guardian && this.angry > 0)) {
-      if (p.alive && !p.creative && pd0 < 16) target = { pos: p.body.pos, hit: (d, k) => p.damage(d, this.spec.kind, k), eye: 1.5 };
+      if (p.alive && !p.creative && pd0 < (this.rally ? 24 : 16)) target = { pos: p.body.pos, hit: (d, k) => p.damage(d, this.spec.kind, k), eye: 1.5 };
     }
     if (this.spec.hostile && this.spec.kind !== 'shellcrawler' && this.age % 10 === 0 || this.spec.guardian) {
       const pool = m.mobs().filter((o) => o !== this && (this.spec.guardian ? o.spec.hostile : o.spec.trader));
-      let best: Mob | null = null, bd = target ? pd0 : 16;
+      let best: Mob | null = null, bd = target ? pd0 : this.rally ? 32 : 16;
       for (const o of pool) { const d = dist(o.body.pos, b.pos); if (d < bd) { bd = d; best = o; } }
       if (best) { const o = best; target = { pos: o.body.pos, hit: (d) => o.hurt(m, d, b.pos, 0.5), eye: o.body.height * 0.8 }; }
     }
@@ -454,14 +470,15 @@ export class Mob extends Entity {
         this.grazeTicks--;
         if (this.spec.kind === 'woolback' && this.sheared && this.grazeTicks === 1 && w.getBlock(Math.floor(b.pos[0]), Math.floor(b.pos[1] - 0.5), Math.floor(b.pos[2])) === B.grass) this.sheared = false;
       }
-      if (this.grazeTicks === 0 && --this.wanderTimer <= 0) {
+      if (this.rally && Math.hypot(this.rally[0] - b.pos[0], this.rally[1] - b.pos[2]) > 6) this.target = [this.rally[0], 0, this.rally[1]];
+      else if (this.grazeTicks === 0 && --this.wanderTimer <= 0) {
         this.wanderTimer = 60 + Math.floor(Math.random() * 120);
         this.target = Math.random() < 0.6 ? null : [b.pos[0] + (Math.random() - 0.5) * 16, 0, b.pos[2] + (Math.random() - 0.5) * 16];
       }
       if (this.target) {
         const dx = this.target[0] - b.pos[0], dz = this.target[2] - b.pos[2];
         if (Math.hypot(dx, dz) < 1) this.target = null;
-        else { face(dx, dz); forward = 0.6; }
+        else { face(dx, dz); forward = this.rally ? 1 : 0.6; }
       }
       if (pd < 6) this.headYaw = Math.atan2(-toPlayer[0], -toPlayer[2]) - this.yaw;
       else this.headYaw *= 0.9;
@@ -522,7 +539,7 @@ export class Mob extends Entity {
     const sp = Math.hypot(b.vel[0], b.vel[2]);
     this.walkAnim += sp * 3.5;
     // Despawn far hostiles.
-    if ((this.spec.hostile || this.spec.habitat === 'cave' || this.spec.habitat === 'water') && (pd0 > 96 || (pd0 > 40 && Math.random() < 1 / 800))) this.dead = true;
+    if (!this.rally && (this.spec.hostile || this.spec.habitat === 'cave' || this.spec.habitat === 'water') && (pd0 > 96 || (pd0 > 40 && Math.random() < 1 / 800))) this.dead = true;
     if (b.pos[1] < -20) this.dead = true;
   }
 
@@ -571,6 +588,76 @@ export class Mob extends Entity {
     this.walkAnim += Math.hypot(b.vel[0], b.vel[2]) * 3.5;
     if (b.onGround) b.fallDistance = 0;
     return true;
+  }
+
+  /**
+   * Bees: forage at flowers near their nest, bring nectar home (a level of honey per trip),
+   * help crops they fly over grow, and sting you if angered (then calm down).
+   */
+  private beeTick(m: EntityManager): void {
+    const b = this.body, w = m.world, p = m.player;
+    if (!this.home && (this.age === 1 || this.age % 200 === 0)) {
+      // Find the nest it came from (spawned beside it).
+      for (let dy = -2; dy <= 2 && !this.home; dy++) for (let dz = -3; dz <= 3 && !this.home; dz++) for (let dx = -3; dx <= 3; dx++) {
+        const id = w.getBlock(Math.floor(b.pos[0]) + dx, Math.floor(b.pos[1]) + dy, Math.floor(b.pos[2]) + dz);
+        if (id === B.bee_nest || id === B.beehive) { this.home = [Math.floor(b.pos[0]) + dx, Math.floor(b.pos[1]) + dy, Math.floor(b.pos[2]) + dz]; break; }
+      }
+    }
+    let goal: number[] | null = null;
+    if (this.beeAnger > 0 && p.alive && !p.creative) {
+      this.beeAnger--;
+      goal = [p.body.pos[0], p.body.pos[1] + 1.4, p.body.pos[2]];
+      if (dist(goal, b.pos) < 1.2 && this.attackCooldown === 0) {
+        const d = [p.body.pos[0] - b.pos[0], p.body.pos[2] - b.pos[2]], l = Math.hypot(d[0], d[1]) || 1;
+        p.damage(1, 'bee', [d[0] / l, d[1] / l]);
+        p.addEffect('poison', 100);
+        this.attackCooldown = 40;
+        this.beeAnger = 0; // one sting, then it calms down
+      }
+    } else if (this.home && this.nectar) {
+      goal = [this.home[0] + 0.5, this.home[1] + 0.5, this.home[2] + 0.5];
+      if (dist(goal, b.pos) < 1.4) {
+        const [hx, hy, hz] = this.home, id = w.getBlock(hx, hy, hz);
+        if (id === B.bee_nest || id === B.beehive) { const lvl = w.getMeta(hx, hy, hz); if (lvl < 5) w.setMeta(hx, hy, hz, lvl + 1); }
+        else this.home = null;
+        this.nectar = false;
+        this.flyTarget = null;
+      }
+    } else {
+      // Forage: pick a flower near home, hover at it a moment, then head back with nectar.
+      const base = this.home ?? b.pos.map(Math.floor);
+      if (!this.flyTarget || this.age % 200 === 0) {
+        this.flyTarget = null;
+        for (let t = 0; t < 12 && !this.flyTarget; t++) {
+          const x = base[0] + Math.floor(Math.random() * 21) - 10, z = base[2] + Math.floor(Math.random() * 21) - 10;
+          for (let y = base[1] + 4; y > base[1] - 8; y--) if (FLOWERS.has(w.getBlock(x, y, z))) { this.flyTarget = [x + 0.5, y + 0.6, z + 0.5]; break; }
+        }
+        if (!this.flyTarget) this.flyTarget = [base[0] + (Math.random() - 0.5) * 8, base[1] + Math.random() * 3, base[2] + (Math.random() - 0.5) * 8];
+      }
+      goal = this.flyTarget;
+      if (dist(goal, b.pos) < 0.8) {
+        if (++this.beeTimer > 40) { this.beeTimer = 0; if (FLOWERS.has(w.getBlock(Math.floor(goal[0]), Math.floor(goal[1] - 0.5), Math.floor(goal[2])))) this.nectar = true; this.flyTarget = null; }
+      }
+    }
+    // Carrying nectar over crops helps them grow.
+    if (this.nectar && this.age % 10 === 0) {
+      const cx = Math.floor(b.pos[0]), cz = Math.floor(b.pos[2]);
+      for (let dy = 1; dy <= 3; dy++) {
+        const cy = Math.floor(b.pos[1]) - dy, id = w.getBlock(cx, cy, cz);
+        if ((id === B.wheat || id === B.carrots || id === B.potatoes || id === B.redroot) && Math.random() < 0.3) { const mm = w.getMeta(cx, cy, cz); if (mm < 7) w.setMeta(cx, cy, cz, mm + 1); break; }
+      }
+    }
+    if (goal) {
+      const d = [goal[0] - b.pos[0], goal[1] - b.pos[1], goal[2] - b.pos[2]], l = Math.hypot(d[0], d[1], d[2]) || 1;
+      const acc = this.spec.speed * (this.beeAnger > 0 ? 0.045 : 0.025);
+      b.vel[0] += d[0] / l * acc; b.vel[1] += d[1] / l * acc; b.vel[2] += d[2] / l * acc;
+    }
+    b.vel[0] += (Math.random() - 0.5) * 0.02; b.vel[1] += (Math.random() - 0.5) * 0.02; b.vel[2] += (Math.random() - 0.5) * 0.02;
+    moveBody(w, b, b.vel[0], b.vel[1], b.vel[2], 0, false);
+    b.vel[0] *= 0.88; b.vel[1] *= 0.88; b.vel[2] *= 0.88;
+    if (Math.hypot(b.vel[0], b.vel[2]) > 0.01) this.yaw = Math.atan2(-b.vel[0], -b.vel[2]);
+    this.walkAnim += 0.4;
+    if (b.pos[1] < -20 || dist(p.body.pos, b.pos) > 96) this.dead = true;
   }
 
   /** Floating movement for Emberwisps and moths. */
@@ -1374,11 +1461,11 @@ export class EntityManager {
   }
 
   serialize(): unknown[] {
-    const mobs = this.list.filter((e) => e instanceof Mob && e.deathTime === 0 && !(e as Mob).spec.hostile && !(e as Mob).spec.flying && !(e as Mob).spec.aquatic).map((e) => {
+    const mobs = this.list.filter((e) => e instanceof Mob && e.deathTime === 0 && !(e as Mob).spec.hostile && (!(e as Mob).spec.flying || (e as Mob).spec.kind === 'bee') && !(e as Mob).spec.aquatic).map((e) => {
       const m = e as Mob;
       return {
         kind: m.spec.kind, pos: m.body.pos, health: m.health, growing: m.growing, sheared: m.sheared, profession: m.spec.trader ? m.profession : undefined, offers: m.spec.trader ? m.offers : undefined,
-        tamed: m.tamed || undefined, sitting: m.sitting || undefined, saddled: m.saddled || undefined,
+        tamed: m.tamed || undefined, sitting: m.sitting || undefined, saddled: m.saddled || undefined, home: m.home ?? undefined,
       };
     });
     const vehicles = this.vehicles().map((v) => ({ vehicle: v.kind, pos: v.body.pos, yaw: v.yaw }));
@@ -1414,7 +1501,7 @@ export class EntityManager {
 
   load(data: unknown): void {
     if (!Array.isArray(data)) return;
-    for (const d of data as { kind: string; vehicle?: string; yaw?: number; pos: [number, number, number]; health: number; growing?: number; sheared?: boolean; profession?: string; offers?: TradeOffer[]; tamed?: boolean; sitting?: boolean; saddled?: boolean }[]) {
+    for (const d of data as { kind: string; vehicle?: string; yaw?: number; pos: [number, number, number]; health: number; growing?: number; sheared?: boolean; profession?: string; offers?: TradeOffer[]; tamed?: boolean; sitting?: boolean; saddled?: boolean; home?: [number, number, number] }[]) {
       if (d.vehicle) { const v = makeVehicle(d.vehicle, d.pos[0], d.pos[1], d.pos[2], d.yaw ?? 0); if (v) this.add(v); continue; }
       if (!MOBS[d.kind]) continue;
       const m = this.spawnMob(d.kind, d.pos[0], d.pos[1], d.pos[2], d.profession);
@@ -1423,6 +1510,7 @@ export class EntityManager {
       if (d.growing) { m.makeBaby(); m.growing = d.growing; }
       m.sheared = !!d.sheared;
       m.tamed = !!d.tamed; m.sitting = !!d.sitting; m.saddled = !!d.saddled;
+      if (d.home) m.home = d.home;
     }
   }
 }

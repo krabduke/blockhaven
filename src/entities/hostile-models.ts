@@ -431,7 +431,82 @@ function emberwisp(): MobModel {
   ]);
 }
 
+// ---------------------------------------------------------------- Raider
+// A road-worn marauder in a quilted slate gambeson with rust stitching, an iron kettle helm and a
+// grilled half-mask, a long rust scarf, a bandolier of bolts, and a heavy crossbow. Captains carry
+// a tall pennant on their back.
+function raider(): MobModel {
+  const skinC = '#b89878';
+  const face = withFace(tone(skinC, { noise: 0.04 }), (g, w, h) => {
+    px(g, '#2a2420', 1, 2, w - 2, 1);                                   // brow shadow under the helm
+    px(g, '#f0e0b0', 1, 3, 2, 1); px(g, '#f0e0b0', w - 3, 3, 2, 1);     // pale eyes
+    px(g, '#c87830', 2, 3); px(g, '#c87830', w - 3, 3);
+    px(g, '#6a6e72', 0, 4, w, h - 4);                                   // iron half-mask
+    px(g, '#8a8e92', 0, 4, w, 1);
+    for (let x = 1; x < w - 1; x += 2) px(g, '#2a2c30', x, 5, 1, 2);     // breathing grille
+  });
+  const quilt: Paint = (g, w, h, f, rand) => {
+    tone('#3e5a5e', { top: '#4a686c', bottom: '#2e4448', noise: 0.06 })(g, w, h, f, rand);
+    if (f === 2 || f === 3) return;
+    for (let y = 1; y < h; y += 3) for (let x = (y % 2) ; x < w; x += 3) px(g, '#9a4a2a', x, y);   // rust stitch diamonds
+  };
+  const belt: Paint = (g, w, h, f, rand) => { quilt(g, w, h, f, rand); if (f !== 2 && f !== 3) { px(g, '#3a2418', 0, h - 3, w, 2); if (f === 5) px(g, '#b89040', Math.floor(w / 2) - 1, h - 3, 2, 2); } };
+  const sleeve = bands([['#3e5a5e', 7], ['#9a4a2a', 1], ['#4a3424', 4]]);
+  const leg = bands([['#3a3430', 5], ['#8a7a60', 1], ['#3a3430', 1], ['#8a7a60', 1], ['#3a3430', 1], ['#2a1e18', 3]]);
+  const iron = tone('#6a6e72', { top: '#8a8e92', bottom: '#4a4e52', noise: 0.05 });
+  const scarf = fur('#9a4a2a', { top: '#b05a34', bottom: '#7a3a20', strand: 0.2 });
+  const strap = tone('#4a3020', { top: '#5a3a28' });
+  const wood = tone('#6a4a2e', { top: '#8a6a44', bottom: '#4a3020' });
+  const bolt = tone('#c8c0a8');
+  const flag: Paint = (g, w, h, f, rand) => {
+    fur('#8a2e22', { top: '#a03a2a', strand: 0.12 })(g, w, h, f, rand);
+    if (f === 0 || f === 1) {
+      // An original raider sigil: a pale broken ring pierced by a bolt.
+      const cx = Math.floor(w / 2), cy = Math.floor(h / 3);
+      for (let a = 0; a < 12; a++) { if (a === 2 || a === 3) continue; const t = a / 12 * Math.PI * 2; px(g, '#e8dcc0', cx + Math.round(Math.cos(t) * 2.4), cy + Math.round(Math.sin(t) * 2.4)); }
+      for (let y = cy - 4; y <= cy + 4; y++) px(g, '#e8dcc0', cx, y);
+      for (let x = 0; x < w; x += 2) px(g, '#5a1a14', x, h - 1 - (x % 4 === 0 ? 1 : 0), 1, 2);
+    }
+  };
+  return build('raider', [
+    { name: 'legL', size: [4, 12, 4], pivot: [-2, 12, 0], offset: [0, -6, 0], paint: leg },
+    { name: 'legR', size: [4, 12, 4], pivot: [2, 12, 0], offset: [0, -6, 0], paint: leg },
+    {
+      name: 'torso', size: [8, 12, 4.6], pivot: [0, 12, 0], offset: [0, 6, 0], paint: belt,
+      extra: [
+        box([1.4, 15, 0.8], [0, 6.5, -2.6], strap, [0, 0, 0.62]),                       // bandolier across the chest
+        ...[-2.5, -0.8, 0.9, 2.6].map((d): Detail => box([0.6, 2.2, 0.6], [d * 0.8, 6.5 + d * 0.95, -3.1], bolt, [0, 0, 0.62])),
+        box([2.6, 3, 1.6], [3.2, 1.5, -1.8], tone('#5a3a24')),                           // belt pouch
+      ],
+    },
+    { name: 'scarf', size: [9, 2.2, 5.6], pivot: [0, 24, 0], offset: [0, -1.1, 0], paint: scarf, parent: 'torso' },
+    { name: 'scarfTail', size: [2.4, 8, 0.8], pivot: [-2, 23, 2.9], offset: [0, -4, 0.4], paint: scarf, parent: 'torso', rot: [-0.2, 0, 0.1] },
+    { name: 'head', size: [8, 8, 8], pivot: [0, 24, 0], offset: [0, 4, 0], paint: face, parent: 'torso' },
+    {
+      name: 'helm', size: [8.8, 3, 8.8], pivot: [0, 30, 0], offset: [0, 1.5, 0], paint: iron, parent: 'head',
+      extra: [box([12, 0.8, 12], [0, -1.2, 0], iron), box([1.2, 1.4, 7], [0, 3.2, 0], tone('#9a4a2a'))],
+    },
+    { name: 'armL', size: [4, 12, 4], pivot: [-6, 22, 0], offset: [0, -5, 0], paint: sleeve, parent: 'torso' },
+    { name: 'armR', size: [4, 12, 4], pivot: [6, 22, 0], offset: [0, -5, 0], paint: sleeve, parent: 'torso' },
+    {
+      // Heavy crossbow gripped at the stock; the prod sits out in front.
+      name: 'crossbow', size: [1.6, 1.8, 9], pivot: [6, 11, 0], offset: [0, 0, -2.5], paint: wood, parent: 'armR',
+      extra: [
+        box([11, 1, 1.2], [0, 0.6, -6.6], iron),                        // prod
+        box([0.3, 0.3, 4.2], [-4.2, 0.6, -4.6], tone('#d8d0c0'), [0, 0.95, 0]),
+        box([0.3, 0.3, 4.2], [4.2, 0.6, -4.6], tone('#d8d0c0'), [0, -0.95, 0]),
+        box([0.6, 0.6, 5], [0, 1.2, -4], bolt),                         // loaded bolt
+        box([1.2, 2.4, 1.2], [0, -1.6, 1.6], wood, [0.3, 0, 0]),        // grip
+      ],
+    },
+    {
+      name: 'pennant', size: [0.9, 22, 0.9], pivot: [2.4, 14, 3.2], offset: [0, 11, 0], paint: wood, parent: 'torso', rot: [0.12, 0, -0.08],
+      extra: [box([0.4, 10, 6], [0, 5, 3.3], flag), box([1.6, 1.6, 1.6], [0, 11.6, 0], iron)],
+    },
+  ]);
+}
+
 export const HOSTILE_MODELS: Record<string, () => MobModel> = {
-  zombie, skeleton, witch, blastcap, mirewalker, brambler, shellcrawler, dunescuttler, frostling, cinderbrute, emberwisp,
+  zombie, skeleton, witch, raider, blastcap, mirewalker, brambler, shellcrawler, dunescuttler, frostling, cinderbrute, emberwisp,
 };
 

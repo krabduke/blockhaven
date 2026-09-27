@@ -210,7 +210,7 @@ export class World implements ChunkSource {
     const below = this.getBlock(x, y - 1, z);
     switch (d.shape) {
       case 'cross':
-        if (id === B.wheat || id === B.carrots) return below === B.farmland;
+        if (id === B.wheat || id === B.carrots || id === B.potatoes || id === B.redroot) return below === B.farmland;
         if (id === B.dead_bush) return below === B.sand || below === B.dirt || below === B.grass;
         if (id === B.sugar_cane) {
           if (below === B.sugar_cane) return true;
@@ -723,6 +723,11 @@ export class World implements ChunkSource {
         this.onDrop(x + 0.5, y + 0.5, z + 0.5, { id: 277, count: meta >= 7 ? 1 + Math.floor(this.rand() * 3) : 1 });
       }
       if (id === B.carrots) this.onDrop(x + 0.5, y + 0.5, z + 0.5, { id: 293, count: meta >= 7 ? 2 + Math.floor(this.rand() * 3) : 1 });
+      if (id === B.potatoes) this.onDrop(x + 0.5, y + 0.5, z + 0.5, { id: I.potato, count: meta >= 7 ? 1 + Math.floor(this.rand() * 4) : 1 });
+      if (id === B.redroot) {
+        if (meta >= 7) this.onDrop(x + 0.5, y + 0.5, z + 0.5, { id: I.redroot, count: 1 + Math.floor(this.rand() * 2) });
+        this.onDrop(x + 0.5, y + 0.5, z + 0.5, { id: I.redroot_seeds, count: meta >= 7 ? 1 + Math.floor(this.rand() * 3) : 1 });
+      }
     }
     // An extended piston and its head come apart together.
     if ((id === B.piston || id === B.sticky_piston) && (meta & 8)) {
@@ -1093,7 +1098,7 @@ export class World implements ChunkSource {
     } else if (id === B.wheat) {
       const m = this.getMeta(x, y, z);
       if (m < 7 && lightAbove >= 9 && r < 0.33) this.setMeta(x, y, z, m + 1);
-    } else if (id === B.carrots) {
+    } else if (id === B.carrots || id === B.potatoes || id === B.redroot) {
       const m = this.getMeta(x, y, z);
       if (m < 7 && lightAbove >= 9 && r < 0.33) this.setMeta(x, y, z, m + 1);
     } else if (id === B.sapling) {
@@ -1112,7 +1117,7 @@ export class World implements ChunkSource {
   /** Apply bone meal. Returns true if it did something (and should be used up). */
   boneMeal(x: number, y: number, z: number): boolean {
     const id = this.getBlock(x, y, z);
-    if (id === B.wheat || id === B.carrots) {
+    if (id === B.wheat || id === B.carrots || id === B.potatoes || id === B.redroot) {
       const m = this.getMeta(x, y, z);
       if (m >= 7) return false;
       this.setMeta(x, y, z, Math.min(7, m + 2 + Math.floor(this.rand() * 4)));

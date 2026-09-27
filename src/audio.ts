@@ -73,6 +73,25 @@ function tone(freq: number, dur: number, type: OscillatorType, gain: number, sli
   o.stop(t + dur + 0.02);
 }
 
+/** A slow-swelling brass-like note: two detuned saws through a low-pass. */
+function swell(freq: number, dur: number, gain: number, when = 0): void {
+  if (!ctx || !master) return;
+  const t = ctx.currentTime + when;
+  const f = ctx.createBiquadFilter();
+  f.type = 'lowpass'; f.frequency.setValueAtTime(400, t); f.frequency.linearRampToValueAtTime(1400, t + dur * 0.4); f.Q.value = 2;
+  const g = ctx.createGain();
+  g.gain.setValueAtTime(0.0001, t);
+  g.gain.exponentialRampToValueAtTime(gain, t + dur * 0.3);
+  g.gain.setValueAtTime(gain, t + dur * 0.7);
+  g.gain.exponentialRampToValueAtTime(0.001, t + dur);
+  f.connect(g).connect(master);
+  for (const d of [-4, 4]) {
+    const o = ctx.createOscillator();
+    o.type = 'sawtooth'; o.frequency.value = freq; o.detune.value = d;
+    o.connect(f); o.start(t); o.stop(t + dur + 0.05);
+  }
+}
+
 /** Distance attenuation and stereo pan from listener to a sound source. */
 export interface Spatial { gain: number; pan: number }
 
@@ -116,6 +135,10 @@ export const sfx = {
   brewed(s: Spatial = { gain: 1, pan: 0 }) { [392, 523, 659].forEach((f, i) => tone(f, 0.18, 'sine', 0.05 * s.gain, f * 1.02, i * 0.07)); noise(900, 1, 0.3, 'bandpass', 0.15 * s.gain, 0.05, s.pan); },
   /** A dull wooden thunk when a shield takes a hit. */
   shieldBlock() { noise(260, 1.4, 0.12, 'lowpass', 0.6); tone(120, 0.1, 'triangle', 0.08, 90); },
+  /** The raiders' war horn: two long, low calls. */
+  warHorn() { swell(98, 1.6, 0.16); swell(110, 2.2, 0.16, 1.5); },
+  /** A bright little fanfare when a raid is beaten. */
+  fanfare() { [392, 523, 659, 784, 1047].forEach((f, i) => tone(f, i === 4 ? 0.6 : 0.16, 'triangle', 0.09, undefined, i * 0.11)); },
   levelUp() { [523, 659, 784].forEach((f, i) => tone(f, 0.15, 'triangle', 0.08, undefined, i * 0.08)); },
 };
 

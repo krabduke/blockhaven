@@ -421,6 +421,41 @@ const village = await g(async () => {
 check('villages exist and have villagers and a bell', village.found && village.villagers > 0 && village.bell, JSON.stringify(village));
 check('trading with a villager works', !!village.traded);
 
+// --- Raids: a war horn, three waves of raiders marching on the village, then a hero's reward.
+const raid = await g(async () => {
+  const G = window.blockhaven, p = G.player;
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  const log = [];
+  const orig = G.chat.say.bind(G.chat); G.chat.say = (t) => { log.push(t); orig(t); };
+  p.creative = true;
+  G.runCommand('/raid start');
+  const waves = [];
+  let captain = false, marched = false, bar = false;
+  for (let wave = 1; wave <= 3; wave++) {
+    for (let i = 0; i < 40 && !(G.raids.active && G.raids.active.wave === wave && G.raids.active.gap === 0); i++) { if (G.raids.active && G.raids.active.gap > 1) G.raids.active.gap = 1; await sleep(250); }
+    const r = G.raids.active;
+    if (!r) break;
+    await sleep(1500);
+    bar ||= document.querySelector('#raidbar')?.classList.contains('show') ?? false;
+    const raiders = r.raiders.filter((m) => !m.dead);
+    captain ||= raiders.some((m) => m.captain);
+    if (wave === 1) {
+      const before = raiders.map((m) => Math.hypot(m.body.pos[0] - r.cx, m.body.pos[2] - r.cz));
+      await sleep(2000);
+      const after = raiders.map((m) => Math.hypot(m.body.pos[0] - r.cx, m.body.pos[2] - r.cz));
+      marched = after.reduce((a, b) => a + b, 0) < before.reduce((a, b) => a + b, 0) - 2;
+    }
+    waves.push(raiders.length);
+    for (const m of raiders) m.hurt(G.entities, 100, null, 0, true);
+    await sleep(1600);
+  }
+  await sleep(500);
+  const out = { waves, captain, marched, bar, over: !G.raids.active, hero: p.effects.has('hero'), achieved: p.achievements.has('hero'), said: log.filter((t) => /raid|wave|horn/i.test(t)).length };
+  G.chat.say = orig;
+  return out;
+});
+check('a raid sends three growing waves at the village, led at last by a captain, and beating it makes you a hero', raid.waves.length === 3 && raid.waves[0] > 0 && raid.waves[2] > raid.waves[0] && raid.captain && raid.marched && raid.bar && raid.over && raid.hero && raid.achieved, JSON.stringify(raid));
+
 // --- Ember Gate: build a frame, light it, travel, arrive through a gate.
 const ember = await g(async ({ x, y, z }) => {
   const G = window.blockhaven, w = G.world, p = G.player;
@@ -816,6 +851,32 @@ await wait(300);
   });
   check('a glass bottle fills from water', bottle.filled === 1 && bottle.left === 2, JSON.stringify(bottle));
 
+  const living = await g(async () => {
+    const G = window.blockhaven, p = G.player, w = G.world, B = G.ids, It = G.items;
+    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+    const [x, , z] = p.body.pos.map(Math.floor);
+    const y = Math.floor(p.body.pos[1]) + 3;
+    for (let dx = -2; dx <= 2; dx++) for (let dz = -4; dz <= 2; dz++) { w.setBlock(x + dx, y, z + dz, B.stone); for (let dy = 1; dy <= 3; dy++) w.setBlock(x + dx, y + dy, z + dz, 0); }
+    // A full bee nest two steps ahead, calmed by a torch beneath it.
+    w.setBlock(x, y, z - 2, B.bee_nest, 5);
+    w.setBlock(x, y - 1, z - 2, B.torch);
+    p.body.pos = [x + 0.5, y + 1, z + 0.5]; p.body.vel = [0, 0, 0];
+    p.inv.slots.fill(null);
+    p.inv.slots[0] = { id: It.glass_bottle, count: 2 };
+    p.selected = 0; p.yaw = 0; p.pitch = -0.7;
+    await sleep(150);
+    G.use();
+    await sleep(100);
+    const honey = p.inv.count(It.honey_bottle), emptied = w.getMeta(x, y, z - 2);
+    // Ripe potatoes and redroot beside you.
+    w.setBlock(x + 1, y, z, B.farmland); w.setBlock(x + 1, y + 1, z, B.potatoes, 7);
+    w.setBlock(x - 1, y, z, B.farmland); w.setBlock(x - 1, y + 1, z, B.redroot, 7);
+    w.breakBlock(x + 1, y + 1, z, true); w.breakBlock(x - 1, y + 1, z, true);
+    for (let i = 0; i < 20 && !(p.inv.count(It.potato) && p.inv.count(It.redroot) && p.inv.count(It.redroot_seeds)); i++) await sleep(200);
+    return { honey, emptied, potatoes: p.inv.count(It.potato), redroot: p.inv.count(It.redroot), seeds: p.inv.count(It.redroot_seeds) };
+  });
+  check('a full bee nest gives honey to a bottle; potatoes and redroot drop crops and seeds', living.honey === 1 && living.emptied === 0 && living.potatoes >= 1 && living.redroot >= 1 && living.seeds >= 1, JSON.stringify(living));
+
   const shield = await g(async () => {
     const G = window.blockhaven, p = G.player, It = G.items;
     const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -961,7 +1022,7 @@ await wait(300);
     const y = Math.floor(p.body.pos[1]) + 10;
     for (let dx = -4; dx <= 4; dx++) for (let dz = -14; dz <= 4; dz++) { w.setBlock(x + dx, y - 2, z + dz, B.stone); w.setBlock(x + dx, y - 1, z + dz, B.water, 0); for (let dy = 0; dy <= 3; dy++) w.setBlock(x + dx, y + dy, z + dz, 0); }
     await sleep(200);
-    const boat = new (await import('/src/entities/vehicles.ts')).Boat(x + 0.5, y - 0.2, z + 0.5, 0);
+    const boat = G.makeVehicle('boat', x + 0.5, y - 0.2, z + 0.5, 0);
     G.entities.add(boat);
     G.mount(boat);
     p.yaw = 0;

@@ -161,7 +161,7 @@ def(24, 'crafting_table', 'Crafting Table', { tiles: { top: 'crafting_top', bott
 def(25, 'furnace', 'Furnace', { tiles: { top: 'furnace_top', side: 'furnace_side', front: 'furnace_front' }, hardness: 3.5, tool: 'pickaxe', harvestTier: 0 });
 def(26, 'furnace_lit', 'Furnace', { tiles: { top: 'furnace_top', side: 'furnace_side', front: 'furnace_front_lit' }, emit: 13, hardness: 3.5, tool: 'pickaxe', harvestTier: 0, drop: () => [B.furnace, 1] });
 def(27, 'torch', 'Torch', { shape: 'torch', layer: 'cutout', solid: false, opaque: false, emit: 14, hardness: 0, sound: 'wood', needsSupport: true, tiles: 'torch', flammable: false });
-def(28, 'tall_grass', 'Tall Grass', { ...plant, tiles: 'tall_grass', replaceable: true, drop: (r) => r < 0.125 ? [277 /* seeds */, 1] : null });
+def(28, 'tall_grass', 'Tall Grass', { ...plant, tiles: 'tall_grass', replaceable: true, drop: (r) => r < 0.125 ? [277 /* seeds */, 1] : r < 0.15 ? [507 /* redroot seeds */, 1] : null });
 def(29, 'poppy', 'Red Flower', { ...plant, tiles: 'poppy' });
 def(30, 'dandelion', 'Yellow Flower', { ...plant, tiles: 'dandelion' });
 def(31, 'obsidian', 'Obsidian', { hardness: 50, tool: 'pickaxe', harvestTier: 3 });
@@ -322,6 +322,12 @@ def(178, 'piston_head', 'Piston Head', { shape: 'piston_head', opaque: false, li
 def(179, 'hopper', 'Hopper', { shape: 'hopper', opaque: false, lightOpacity: 0, hardness: 3, tool: 'pickaxe', harvestTier: 0, tiles: { top: 'hopper_top', side: 'hopper_side', bottom: 'hopper_side' }, icon: 'hopper_item' });
 // Watcher: facing (DIR6, the face that watches) | pulsing << 3.
 def(180, 'watcher', 'Watcher', { shape: 'facing6', hardness: 3, tool: 'pickaxe', harvestTier: 0, tiles: { top: 'watcher_face', side: 'watcher_side', bottom: 'watcher_back' } });
+def(181, 'potatoes', 'Potatoes', { ...plant, tiles: 'potatoes_3', drop: 'none' });
+def(182, 'redroot', 'Redroot', { ...plant, tiles: 'redroot_3', drop: 'none' });
+// Bee nests (in trees) and beehives (crafted): meta is the honey level 0-5.
+const hive = (full: string, base: string) => [base, base, base, base, base, full, full, full, full, full, full, full, full, full, full, full];
+def(183, 'bee_nest', 'Bee Nest', { hardness: 0.3, tool: 'axe', sound: 'wood', tiles: 'nest_side', metaTiles: hive('nest_honey', 'nest_side') });
+def(184, 'beehive', 'Beehive', { hardness: 0.6, tool: 'axe', sound: 'wood', tiles: 'hive_side', metaTiles: hive('hive_honey', 'hive_side') });
 def(160, 'brewing_stand', 'Brewing Stand', { shape: 'table', opaque: false, lightOpacity: 0, emit: 3, tiles: { top: 'brewing_top', side: 'brewing_side', bottom: 'cobblestone' }, hardness: 0.5, tool: 'pickaxe', harvestTier: 0, icon: 'brewing_item' });
 def(115, 'bell', 'Village Bell', { shape: 'lantern', layer: 'cutout', opaque: false, hardness: 5, tool: 'pickaxe', tiles: 'bell', icon: 'bell_item', sound: 'stone' });
 
