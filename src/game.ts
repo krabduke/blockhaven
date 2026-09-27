@@ -1298,7 +1298,11 @@ export class Game {
       const ready = this.nearbyReady(2);
       const secs = (performance.now() - this.loadStart) / 1000;
       this.menus.setLoading(`Building terrain… ${Math.min(99, Math.round(ready * 100))}%`);
-      if (ready >= 1 || secs > 20) this.finishLoading();
+      if (this.pool?.failed) {
+        this.menus.showLoadError('The terrain generator couldn’t start. This usually means the game was updated while this tab was open. Reloading fixes it, and your worlds are safe.');
+      } else if (secs > 15 && w.chunks.size === 0) {
+        this.menus.showLoadError('No terrain has generated after 15 seconds. Reload the page to try again; your worlds are safe.');
+      } else if (ready >= 1 || (secs > 25 && w.chunks.size > 0)) this.finishLoading();
       this.placeCamera(1);
       this.renderer.updateSky(w.time, this.renderer.camera.position);
       this.renderer.renderFrame(dt, false, 1, false);

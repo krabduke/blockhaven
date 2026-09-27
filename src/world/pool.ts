@@ -15,6 +15,8 @@ export class WorkerPool {
   private busy: number[] = [];
   private pending = new Map<number, Pending>();
   private nextId = 1;
+  /** Set when a worker fails to load or crashes; the world can't generate without them. */
+  failed: string | null = null;
 
   constructor(seed: number, dimension: 'overworld' | 'ember' = 'overworld', size = Math.max(1, Math.min(4, (navigator.hardwareConcurrency || 4) - 1))) {
     for (let i = 0; i < size; i++) {
@@ -26,7 +28,12 @@ export class WorkerPool {
         this.busy[p.worker]--;
         p.resolve(e.data);
       };
-      w.onerror = (e) => console.error('Chunk worker error', e.message);
+      w.onerror = (e) => {
+        // A worker script that 404s (stale tab after an update) or throws lands here.
+        this.failed = e.message || 'The terrain worker could not be loaded.';
+        console.error('Chunk worker error', this.failed);
+      };
+      w.onmessageerror = () => { this.failed = 'The terrain worker sent data the game could not read.'; };
       w.postMessage({ type: 'init', seed, dimension } satisfies WorkerRequest);
       this.workers.push(w);
       this.busy.push(0);

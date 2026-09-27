@@ -263,10 +263,25 @@ export class Menus {
 
   private buildLoading(): void {
     const s = this.screen('loading');
+    s.style.flexDirection = 'column';
+    s.style.gap = '16px';
+    const err = el('div', { class: 'panel title-menu stack', id: 'load-error' });
+    err.style.display = 'none';
+    err.append(el('h2', {}, 'The world couldn’t load'), el('p', { class: 'hint', id: 'load-error-text' }, ''), button('Reload the page', 'primary', () => location.reload()));
+    s.appendChild(err);
     s.appendChild(el('div', { class: 'loading', id: 'loading-text' }, 'Building terrain…'));
   }
 
+  /** Show a load failure with a reload button (or hide it with null). */
+  showLoadError(text: string | null): void {
+    const box = this.screens.get('loading')!.querySelector('#load-error') as HTMLElement;
+    box.style.display = text ? 'flex' : 'none';
+    if (text) box.querySelector('#load-error-text')!.textContent = text;
+    (this.screens.get('loading')!.querySelector('#loading-text') as HTMLElement).style.display = text ? 'none' : '';
+  }
+
   setLoading(text: string): void {
+    this.showLoadError(null);
     this.screens.get('loading')!.querySelector('#loading-text')!.textContent = text;
   }
 }
