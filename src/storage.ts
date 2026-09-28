@@ -13,6 +13,9 @@ export interface WorldMeta {
   player?: unknown;
   blockEntities?: unknown;
   spawn?: [number, number, number];
+  difficulty?: 'peaceful' | 'easy' | 'normal' | 'hard';
+  /** Keep your inventory and experience when you die. */
+  keepInventory?: boolean;
 }
 
 const DB_NAME = 'blockhaven';

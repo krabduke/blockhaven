@@ -209,6 +209,7 @@ export class Actions {
 
   private finishBreak(pos: [number, number, number], id: number, drop: boolean): void {
     const w = this.world!, p = this.player;
+    p.stat('mined');
     const shears = p.held?.id === I.shears;
     if (drop && shears && (isLeaves(id) || id === B.tall_grass)) {
       // Shears collect the block itself.
@@ -664,6 +665,7 @@ export class Actions {
     sfx.place(d.sound);
     consume();
     this.renderer.swingHand();
+    p.stat('placed');
   }
 
   private supportOk(x: number, y: number, z: number, id: number, meta: number): boolean {
@@ -724,7 +726,7 @@ export class Actions {
         const d = [e[0] - b.body.pos[0], e[1] - b.body.pos[1], e[2] - b.body.pos[2]];
         ents.dropItem(b.body.pos[0], b.body.pos[1] + 0.3, b.body.pos[2], loot, 0, [d[0] * 0.1, d[1] * 0.1 + Math.hypot(d[0], d[2]) * 0.03, d[2] * 0.1]);
         ents.dropXp(p.body.pos[0], p.body.pos[1] + 0.5, p.body.pos[2], 1 + Math.floor(Math.random() * 6));
-        if (loot.id === I.raw_fish || loot.id === I.salmon || loot.id === I.glimmerfish) p.achieve('fish');
+        if (loot.id === I.raw_fish || loot.id === I.salmon || loot.id === I.glimmerfish) { p.achieve('fish'); p.stat('fish'); }
       }
       b.dead = true;
       this.bobber = null;

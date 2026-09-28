@@ -159,6 +159,26 @@ export const COMMANDS: Command[] = [
     },
   },
   {
+    name: 'difficulty', usage: '/difficulty peaceful|easy|normal|hard', help: 'Changes how hard this world is',
+    complete: (i) => (i === 0 ? ['peaceful', 'easy', 'normal', 'hard'] : []),
+    run(g, a) {
+      const d = a[0];
+      if (d !== 'peaceful' && d !== 'easy' && d !== 'normal' && d !== 'hard') { g.chat.say(`Difficulty is ${g.player.difficulty}. Usage: ${this.usage}`); return; }
+      g.setDifficulty(d);
+      g.chat.say(`Difficulty set to ${d}`);
+    },
+  },
+  {
+    name: 'gamerule', usage: '/gamerule keepInventory true|false', help: 'Changes this world\'s rules',
+    complete: (i) => (i === 0 ? ['keepInventory'] : i === 1 ? ['true', 'false'] : []),
+    run(g, a) {
+      if (a[0] !== 'keepInventory') { g.chat.say('Usage: ' + this.usage); return; }
+      if (a[1] !== 'true' && a[1] !== 'false') { g.chat.say(`keepInventory is ${g.meta?.keepInventory ? 'true' : 'false'}`); return; }
+      g.setKeepInventory(a[1] === 'true');
+      g.chat.say(`keepInventory is now ${a[1]}: you ${a[1] === 'true' ? 'keep' : 'drop'} your things when you die`);
+    },
+  },
+  {
     name: 'music', usage: '/music', help: 'Plays a new piece of music now',
     run(g) {
       if (g.settings.music <= 0) { g.chat.say('Music is off. Turn it up in Settings > Sound.'); return; }

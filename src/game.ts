@@ -12,7 +12,7 @@ import type { MobModel } from './entities/models';
 import { I, itemDef } from './items';
 import { craft } from './crafting';
 import { hashString } from './noise';
-import { raycast, stepBody, updateContacts } from './physics';
+import { collisionBox, raycast, stepBody, updateContacts } from './physics';
 import { EYE_HEIGHT, Player, SNEAK_EYE_HEIGHT } from './player';
 import { Renderer } from './render/renderer';
 import { deleteWorld, download, exportWorld, importWorld, listWorlds, saveWorldMeta, savedChunkKeys, type WorldMeta } from './storage';
@@ -38,6 +38,7 @@ import { GuestSession, HostSession, type Welcome } from './net/session';
 import { answerInvite, type Link } from './net/peer';
 import { ShareScreens } from './ui/share';
 import { glideStep, wornGlider } from './game/glide';
+import type { Difficulty } from './player';
 import { WorldMap } from './ui/map';
 
 const TICK = 1 / 20;
@@ -223,7 +224,14 @@ export class Game {
     this.containers.onDrop = (s) => this.actions.throwStack(s);
     this.menus = new Menus(root, {
       play: (w) => this.play(w),
-      create: (name, seed, gm) => this.createWorld(name, seed, gm),
+      create: (name, seed, gm, opts) => this.createWorld(name, seed, gm, opts),
+      difficulty: (next) => {
+        const order: Difficulty[] = ['peaceful', 'easy', 'normal', 'hard'];
+        if (next) this.setDifficulty(order[(order.indexOf(this.player.difficulty) + 1) % order.length]);
+        const d = this.player.difficulty;
+        return d[0].toUpperCase() + d.slice(1);
+      },
+      progress: () => this.progress(),
       resume: () => { this.menus.show(null); this.input.lockPointer(); },
       saveAndQuit: () => this.quitToTitle(),
       respawn: () => this.respawn(),
@@ -336,7 +344,7 @@ export class Game {
         }
       };
       world.collectItems = (x, y, z, take) => ents.collectInto(x, y, z, take);
-      ents.onMobKilled = (mob, byPlayer) => { if (byPlayer && mob.spec.hostile) this.player.achieve('hunter'); };
+      ents.onMobKilled = (mob, byPlayer) => { if (!byPlayer) return; this.player.stat('kills'); if (mob.spec.hostile) this.player.achieve('hunter'); };
       ents.onBred = () => this.player.achieve('rancher');
       ents.onBossDefeated = (mob) => this.colossusDefeated(mob);
       ents.onProjectileHit = (proj, mob) => {
@@ -372,10 +380,10 @@ export class Game {
     this.entities!.player = this.player;
   }
 
-  private async createWorld(name: string, seedText: string, gamemode: 'survival' | 'creative'): Promise<void> {
+  private async createWorld(name: string, seedText: string, gamemode: 'survival' | 'creative', opts: { difficulty?: Difficulty; keepInventory?: boolean } = {}): Promise<void> {
     const seedStr = seedText || String(Math.floor(Math.random() * 1e12));
     const seed = /^-?\d+$/.test(seedStr) ? (Number(seedStr) >>> 0) || hashString(seedStr) : hashString(seedStr);
-    const meta: WorldMeta = { id: 'w' + Date.now().toString(36), name, seed, seedText: seedStr, gamemode, created: Date.now(), lastPlayed: Date.now(), time: 1000 };
+    const meta: WorldMeta = { id: 'w' + Date.now().toString(36), name, seed, seedText: seedStr, gamemode, created: Date.now(), lastPlayed: Date.now(), time: 1000, difficulty: opts.difficulty ?? 'normal', keepInventory: opts.keepInventory ?? false };
     try { await saveWorldMeta(meta); } catch { this.toast('Saving is unavailable in this browser. Your world will not be kept.'); }
     this.play(meta);
   }
@@ -401,6 +409,7 @@ export class Game {
       if (!p.creative) this.toast(this.touchMode ? 'Hold Mine on a tree to get started. Tap ▦ for your inventory.' : 'Punch a tree to get started. Press E for your inventory.');
     }
     p.onDeath = (src) => this.onDeath(src);
+    p.difficulty = meta.difficulty ?? 'normal';
     p.onBlock = (amount) => {
       sfx.shieldBlock();
       const sh = p.held;
@@ -414,6 +423,7 @@ export class Game {
     this.player = p;
     this.containers = this.rebuildContainers();
     this.entities!.player = p;
+    this.entities!.peaceful = p.difficulty === 'peaceful';
     const wm = meta as SaveMeta;
     if (wm.weather) { this.world!.weather = wm.weather; this.world!.weatherTimer = wm.weatherTimer ?? 12000; }
     this.prevPos = [...p.body.pos];
@@ -508,6 +518,7 @@ export class Game {
       if (s.id === I.iron_ingot) p.achieve('iron');
     };
     c.onCrafted = (s) => {
+      p.stat('crafted', s.count);
       if (s.id === B.crafting_table) p.achieve('table');
       if (itemDef(s.id)?.tool?.kind === 'pickaxe') p.achieve('pickaxe');
       if (s.id === I.stone_pickaxe) p.achieve('stone');
@@ -657,16 +668,22 @@ export class Game {
 
   private onDeath(source: string): void {
     const p = this.player;
-    if (!p.creative) {
-      for (let i = 0; i < p.inv.size; i++) {
-        const s = p.inv.slots[i];
-        if (s) { this.entities?.dropItem(p.body.pos[0], p.body.pos[1] + 1, p.body.pos[2], s, 40, [(Math.random() - 0.5) * 0.4, 0.3, (Math.random() - 0.5) * 0.4]); p.inv.slots[i] = null; }
+    p.stat('deaths');
+    const keep = !!this.meta?.keepInventory;
+    if (!p.creative && !keep) {
+      // Everything you carried and wore spills out, with some of your experience.
+      for (const inv of [p.inv, p.armor]) for (let i = 0; i < inv.size; i++) {
+        const s = inv.slots[i];
+        if (s) { this.entities?.dropItem(p.body.pos[0], p.body.pos[1] + 1, p.body.pos[2], s, 40, [(Math.random() - 0.5) * 0.4, 0.3, (Math.random() - 0.5) * 0.4]); inv.slots[i] = null; }
       }
+      const xp = Math.min(100, p.xpLevel * 7);
+      if (xp > 0) this.entities?.dropXp(p.body.pos[0], p.body.pos[1] + 1, p.body.pos[2], xp);
+      p.xpLevel = 0; p.xpProgress = 0;
     }
     this.containers.close();
     document.exitPointerLock();
     this.waypoints.setDeath([...p.body.pos] as [number, number, number], this.dimension);
-    this.menus.setDeathReason((DEATH_MESSAGES[source] ?? 'You died.') + ` Your belongings are at ${p.body.pos.map((v) => Math.floor(v)).join(', ')}; it's marked on your screen and map.`);
+    this.menus.setDeathReason((DEATH_MESSAGES[source] ?? 'You died.') + (keep || p.creative ? ' You kept everything you were carrying.' : ` Your belongings are at ${p.body.pos.map((v) => Math.floor(v)).join(', ')}; it's marked on your screen and map.`));
     this.menus.show('death');
   }
 
@@ -919,6 +936,50 @@ export class Game {
     this.prevPos = [...p.body.pos];
   }
 
+  /** Walking into a one-block step with room above it: hop up. */
+  private shouldAutoJump(forward: number, strafe: number): boolean {
+    const w = this.world!, p = this.player, b = p.body;
+    if (!b.onGround || p.flying || p.sneaking || b.inWater || this.riding || (forward <= 0 && strafe === 0)) return false;
+    const sp = Math.hypot(b.vel[0], b.vel[2]);
+    // Head the way you're pushing: your facing when standing still, else your motion.
+    const fx = -Math.sin(p.yaw) * forward + Math.cos(p.yaw) * strafe, fz = -Math.cos(p.yaw) * forward - Math.sin(p.yaw) * strafe;
+    const dl = Math.hypot(fx, fz);
+    const [dx, dz] = sp > 0.03 ? [b.vel[0] / sp, b.vel[2] / sp] : [fx / (dl || 1), fz / (dl || 1)];
+    const x = Math.floor(b.pos[0] + dx * 0.75), z = Math.floor(b.pos[2] + dz * 0.75), y = Math.floor(b.pos[1] + 0.01);
+    const box = collisionBox(w.getBlock(x, y, z), w.getMeta(x, y, z));
+    if (!box || box.max[1] <= 0.5 || box.max[1] > 1) return false;
+    const clear = (cx: number, cy: number, cz: number) => !collisionBox(w.getBlock(cx, cy, cz), w.getMeta(cx, cy, cz));
+    return clear(x, y + 1, z) && clear(x, y + 2, z) && clear(Math.floor(b.pos[0]), y + 2, Math.floor(b.pos[2]));
+  }
+
+  // ---------- Difficulty, rules and progress ----------
+  setDifficulty(d: Difficulty): void {
+    this.player.difficulty = d;
+    if (this.meta) this.meta.difficulty = d;
+    if (this.entities) this.entities.peaceful = d === 'peaceful';
+    if (d === 'peaceful') this.raids.stop();
+  }
+
+  setKeepInventory(on: boolean): void { if (this.meta) this.meta.keepInventory = on; }
+
+  private progress(): { achievements: { title: string; desc: string; done: boolean }[]; stats: [string, string][] } {
+    const p = this.player, st = p.stats;
+    const n = (k: string) => Math.floor(st[k] ?? 0).toLocaleString();
+    const dist = (k: string) => { const m = st[k] ?? 0; return m >= 1000 ? `${(m / 1000).toFixed(1)} km` : `${Math.round(m)} m`; };
+    const secs = Math.floor((st.ticks ?? 0) / 20);
+    const time = secs >= 3600 ? `${Math.floor(secs / 3600)} h ${Math.floor((secs % 3600) / 60)} min` : `${Math.floor(secs / 60)} min`;
+    return {
+      achievements: Object.entries(ACHIEVEMENTS).map(([id, [title, desc]]) => ({ title, desc, done: p.achievements.has(id) })),
+      stats: [
+        ['Time played', time], ['Blocks mined', n('mined')], ['Blocks placed', n('placed')], ['Items crafted', n('crafted')],
+        ['Creatures defeated', n('kills')], ['Deaths', n('deaths')], ['Damage taken', `${Math.round(st.damageTaken ?? 0) / 2} hearts`],
+        ['Food eaten', n('eaten')], ['Fish caught', n('fish')], ['Jumps', n('jumps')],
+        ['Walked', dist('walked')], ['Swum', dist('swum')], ['Flown', dist('flown')], ['Glided', dist('glided')], ['Ridden', dist('ridden')],
+        ['Level', String(p.xpLevel)],
+      ],
+    };
+  }
+
   /** Your name in shared worlds. */
   get playerName(): string { return this.settings.name.trim() || 'Wanderer'; }
   /** Test hook: how loud the game is right now. */
@@ -1135,7 +1196,8 @@ export class Game {
     // (on macOS it switches input source).
     const mv = this.input.movement();
     let { forward, strafe } = mv;
-    const { jump } = mv;
+    let { jump } = mv;
+    if (!jump && this.settings.autoJump && this.shouldAutoJump(forward, strafe)) jump = true;
     // A raised shield slows you to a walk.
     if (p.blocking) { forward *= 0.3; strafe *= 0.3; }
     p.sneaking = mv.sneak;
@@ -1194,7 +1256,8 @@ export class Game {
     const moved = Math.hypot(p.body.pos[0] - this.prevPos[0], p.body.pos[2] - this.prevPos[2]);
     if (p.body.inWater) p.addExhaustion(0.01 * moved);
     else if (p.sprinting) p.addExhaustion(0.1 * moved);
-    if (jump && wasOnGround && !p.body.onGround) p.addExhaustion(p.sprinting ? 0.2 : 0.05);
+    if (jump && wasOnGround && !p.body.onGround) { p.addExhaustion(p.sprinting ? 0.2 : 0.05); p.stat('jumps'); }
+    if (moved > 0 && moved < 5) p.stat(this.riding ? 'ridden' : p.gliding ? 'glided' : p.flying ? 'flown' : p.body.inWater ? 'swum' : 'walked', moved);
     if (p.body.onGround && !p.sneaking) {
       this.stepDist += moved;
       if (this.stepDist > 1.7) { this.stepDist = 0; sfx.step(this.soundBelow()); }

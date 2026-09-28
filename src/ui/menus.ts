@@ -1,5 +1,6 @@
 // Title screen, world list, world creation, pause, settings and death screens.
 
+import type { Difficulty } from '../player';
 import { deleteWorld, download, duplicateWorld, exportWorld, importWorld, listWorlds, renameWorld, type WorldMeta } from '../storage';
 import { BINDABLE, DEFAULT_KEYS, keyName } from '../game/input';
 
@@ -29,13 +30,15 @@ export interface Settings {
   /** Lower the render resolution when frames get slow. */
   autoQuality: boolean;
   music: number;
+  /** Hop up single-block steps you walk into. */
+  autoJump: boolean;
   /** What other players see above your head in a shared world. */
   name: string;
 }
 
 const DEFAULTS: Settings = {
   renderDistance: 8, fov: 70, sensitivity: 1, brightness: 0.5, volume: 0.6, viewBobbing: true, invertY: false, fancy: true, shadows: true, post: true,
-  keys: {}, toggleSprint: false, toggleSneak: false, reduceMotion: false, uiScale: 1, showCoords: false, minimap: true, fpsCap: 0, autoQuality: true, music: 0.4, name: '',
+  keys: {}, toggleSprint: false, toggleSneak: false, reduceMotion: false, uiScale: 1, showCoords: false, minimap: true, fpsCap: 0, autoQuality: true, music: 0.4, name: '', autoJump: false,
 };
 
 export function loadSettings(): Settings {
@@ -75,7 +78,11 @@ function timeAgo(t: number): string {
 
 export interface MenuCallbacks {
   play(world: WorldMeta): void;
-  create(name: string, seedText: string, gamemode: 'survival' | 'creative'): void;
+  create(name: string, seedText: string, gamemode: 'survival' | 'creative', opts: { difficulty: Difficulty; keepInventory: boolean }): void;
+  /** The current world's difficulty; with `next`, step to the next one first. */
+  difficulty(next?: boolean): string;
+  /** Achievements (earned or not) and statistics, for the progress screen. */
+  progress(): { achievements: { title: string; desc: string; done: boolean }[]; stats: [string, string][] };
   resume(): void;
   saveAndQuit(): void;
   respawn(): void;
@@ -94,6 +101,7 @@ export class Menus {
     this.buildWorlds();
     this.buildCreate();
     this.buildPause();
+    this.buildProgress();
     this.buildSettings();
     this.buildControls();
     this.buildDeath();
@@ -131,6 +139,8 @@ export class Menus {
     if (id === 'worlds') this.refreshWorlds();
     if (id === 'settings') this.renderSettings();
     if (id === 'controls') this.renderControls();
+    if (id === 'pause') { const d = this.screens.get('pause')!.querySelector<HTMLElement>('[data-difficulty]'); if (d) d.textContent = `Difficulty: ${this.cb.difficulty()}`; }
+    if (id === 'progress') this.renderProgress();
     if (id) this.onShow(id);
     const first = id ? this.screens.get(id)?.querySelector<HTMLElement>('button, input') : null;
     first?.focus({ preventScroll: true });
@@ -262,11 +272,28 @@ export class Menus {
     seg.append(sb, cbn);
     const row = el('div', { class: 'row' });
     row.append(
-      button('Create world', 'primary', () => this.cb.create(name.value.trim() || 'New World', seed.value.trim(), mode)),
+      button('Create world', 'primary', () => this.cb.create(name.value.trim() || 'New World', seed.value.trim(), mode, { difficulty: diff, keepInventory: keep.checked })),
       button('Cancel', '', () => this.show('worlds')),
     );
     for (const i of [name, seed]) i.addEventListener('keydown', (e) => e.stopPropagation());
-    p.append(el('div', {}, ''), nameL, name, seedL, seed, el('span', { class: 'lbl' }, 'Game mode'), seg, desc, row);
+    // Difficulty and whether you keep your things when you die.
+    let diff: Difficulty = 'normal';
+    const dseg = el('div', { class: 'seg', role: 'group', 'aria-label': 'Difficulty' });
+    const DIFF: [Difficulty, string][] = [['peaceful', 'Peaceful'], ['easy', 'Easy'], ['normal', 'Normal'], ['hard', 'Hard']];
+    const ddesc = el('p', { class: 'hint' });
+    const DESC: Record<Difficulty, string> = {
+      peaceful: 'No monsters, no hunger, and you heal on your own.',
+      easy: 'Monsters hit softly and hunger never takes you below half health.',
+      normal: 'The game as it’s meant to be played.',
+      hard: 'Monsters hit harder, and starving can kill you.',
+    };
+    const setDiff = (d: Difficulty) => { diff = d; for (const b of dseg.querySelectorAll('button')) b.setAttribute('aria-pressed', String(b.dataset.d === d)); ddesc.textContent = DESC[d]; };
+    for (const [d, label] of DIFF) { const b = el('button', { type: 'button', 'data-d': d }, label); b.addEventListener('click', () => setDiff(d)); dseg.appendChild(b); }
+    setDiff('normal');
+    const keepL = el('label', { class: 'check' });
+    const keep = el('input', { type: 'checkbox' });
+    keepL.append(keep, ' Keep your things when you die');
+    p.append(el('div', {}, ''), nameL, name, seedL, seed, el('span', { class: 'lbl' }, 'Game mode'), seg, desc, el('span', { class: 'lbl' }, 'Difficulty'), dseg, ddesc, keepL, row);
     s.appendChild(p);
   }
 
@@ -277,13 +304,44 @@ export class Menus {
       el('h2', {}, 'Paused'),
       button('Back to game', 'primary', () => this.cb.resume()),
       button('Invite a friend', '', () => this.show('invite')),
+      button('Achievements and stats', '', () => this.show('progress')),
       button('Settings', '', () => { this.settingsBack = 'pause'; this.show('settings'); }),
       button('Export a backup', '', () => this.cb.exportCurrent()),
       button('Save and quit to title', '', () => this.cb.saveAndQuit()),
     );
-    const [invite, , backup, quit] = [...p.querySelectorAll('button')].slice(1);
+    const [invite, , , backup, quit] = [...p.querySelectorAll('button')].slice(1);
     invite.dataset.hostOnly = ''; backup.dataset.hostOnly = ''; quit.dataset.quit = '';
+    // Difficulty, stepped through with each click.
+    const diff = button('Difficulty', '', () => { diff.textContent = `Difficulty: ${this.cb.difficulty(true)}`; });
+    diff.dataset.hostOnly = '';
+    diff.dataset.difficulty = '';
+    p.insertBefore(diff, backup);
     s.appendChild(p);
+  }
+
+  private buildProgress(): void {
+    const s = this.screen('progress');
+    s.appendChild(el('div', { class: 'panel progress-panel stack' }));
+  }
+
+  private renderProgress(): void {
+    const p = this.screens.get('progress')!.querySelector('.progress-panel')!;
+    p.innerHTML = '';
+    const { achievements, stats } = this.cb.progress();
+    const got = achievements.filter((a) => a.done).length;
+    p.appendChild(el('h2', {}, 'Achievements and stats'));
+    p.appendChild(el('p', { class: 'hint' }, `${got} of ${achievements.length} achievements earned in this world.`));
+    const cols = el('div', { class: 'progress-cols' });
+    const list = el('ul', { class: 'ach-list' });
+    for (const a of [...achievements].sort((x, y) => Number(y.done) - Number(x.done))) {
+      const li = el('li', { class: a.done ? 'done' : '' });
+      li.append(el('b', {}, a.title), el('span', {}, a.desc));
+      list.appendChild(li);
+    }
+    const table = el('dl', { class: 'stat-list' });
+    for (const [k, v] of stats) table.append(el('dt', {}, k), el('dd', {}, v));
+    cols.append(list, table);
+    p.append(cols, button('Back', 'primary', () => this.show('pause')));
   }
 
   private buildSettings(): void {
@@ -341,6 +399,7 @@ export class Menus {
     section('Controls');
     slider('Mouse sensitivity', 'sensitivity', 0.2, 2.5, 0.05, (v) => `${Math.round(v * 100)}%`);
     toggle('Invert mouse', 'invertY');
+    toggle('Auto-jump', 'autoJump', 'On', 'Off', 'Step up one-block ledges without pressing jump');
     toggle('Sprint key', 'toggleSprint', 'Toggle', 'Hold');
     toggle('Sneak key', 'toggleSneak', 'Toggle', 'Hold');
     p.appendChild(button('Keys…', '', () => this.show('controls')));

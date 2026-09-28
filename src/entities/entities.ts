@@ -1227,6 +1227,8 @@ export class EntityManager {
   onExplosion: (x: number, y: number, z: number) => void = () => {};
   onMobKilled: (mob: Mob, byPlayer: boolean) => void = () => {};
   onBossDefeated: (mob: Mob) => void = () => {};
+  /** Peaceful difficulty: no monsters spawn. */
+  peaceful = false;
 
   // ---------- Shared worlds ----------
   /** Other players in a shared world (on the host), as creatures and items see them. */
@@ -1347,6 +1349,7 @@ export class EntityManager {
   }
 
   private tickSpawners(): void {
+    if (this.peaceful) return;
     const p = this.player.body.pos;
     for (const key of this.world.spawners) {
       const [x, y, z] = key.split(',').map(Number);
@@ -1451,6 +1454,8 @@ export class EntityManager {
   private spawnTick(): void {
     // Nothing spawns on its own in the Hollow: only its Colossus lives there.
     if (this.world.tickCount % 20 !== 0 || this.world.dimension === 'hollow') return;
+    // Peaceful: monsters that wander in fade away.
+    if (this.peaceful) for (const m of this.mobs()) if (m.spec.hostile && !m.spec.boss) { m.dead = true; this.puff(m.body.pos[0], m.body.pos[1] + 0.8, m.body.pos[2]); }
     const w = this.world;
     const p = this.player.body.pos;
     const mobs = this.mobs();
@@ -1465,7 +1470,7 @@ export class EntityManager {
     const open = (x: number, y: number, z: number, h = 2) => { for (let k = 0; k < h; k++) if (w.getBlock(x, y + k, z) !== 0) return false; return true; };
 
     if (w.dimension === 'ember') {
-      if (hostile >= 12) return;
+      if (hostile >= 12 || this.peaceful) return;
       for (let tries = 0; tries < 4; tries++) {
         const pos = tryPos(18, 44);
         if (!pos) continue;
@@ -1517,7 +1522,7 @@ export class EntityManager {
       }
     }
     // Hostiles in the dark (surface at night, caves any time).
-    if (hostile < 14) {
+    if (hostile < 14 && !this.peaceful) {
       for (let tries = 0; tries < 6; tries++) {
         const pos = tryPos(20, 44);
         if (!pos) continue;

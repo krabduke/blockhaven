@@ -2,11 +2,14 @@
 // crafting table, furnace, chest and the creative item palette.
 
 import { sfx } from '../audio';
-import { SMELTING, craft } from '../crafting';
+import { SMELTING, assignPlan, craft, planFits, recipePlans, timesCraftable, type RecipePlan } from '../crafting';
 import type { Inventory, Slot } from '../inventory';
 import { BREW_TICKS, brewFuel, isBrewIngredient } from '../brewing';
 import { ENCHANT_NAMES, I, creativeCategory, creativeItems, itemDef, maxDurability, maxStack, type CreativeTab, type ItemStack } from '../items';
 
+/** Sorting order: building blocks, then nature, decoration, power, tools, food, other. */
+const TAB_ORDER: CreativeTab[] = ['building', 'nature', 'decor', 'power', 'tools', 'food', 'misc'];
+const sortRank = (id: number) => TAB_ORDER.indexOf(creativeCategory(id));
 const TABS: [CreativeTab, string][] = [['all', 'All'], ['building', 'Building'], ['nature', 'Nature'], ['decor', 'Decoration'], ['power', 'Power'], ['tools', 'Tools & combat'], ['food', 'Food & farming'], ['misc', 'Other']];
 import { offers, roman } from '../enchanting';
 import { PROFESSION_NAMES, type TradeOffer } from '../trading';
@@ -44,6 +47,12 @@ export class ContainerScreen {
   private hovered: SlotRef | null = null;
   private progressEls: { cook?: HTMLElement; burn?: HTMLElement } = {};
   private search = '';
+  /** The recipe book beside the crafting grid. */
+  private bookOpen = (() => { try { return localStorage.getItem('blockhaven.book') === '1'; } catch { return false; } })();
+  private bookSearch = '';
+  private bookCanMake = false;
+  private bookEl: HTMLElement | null = null;
+  private bookKey = '';
   private tab: CreativeTab = 'all';
   /** Dragging a held stack across slots to share it out (left) or drop one in each (right). */
   private drag: { button: number; refs: SlotRef[] } | null = null;
@@ -211,6 +220,22 @@ export class ContainerScreen {
     closeBtn.addEventListener('click', () => this.close());
     panel.appendChild(closeBtn);
     const inv = this.player.inv;
+    this.bookEl = null;
+    if (this.kind === 'player' || this.kind === 'crafting') {
+      const bookBtn = document.createElement('button');
+      bookBtn.className = 'book-btn' + (this.bookOpen ? ' on' : '');
+      bookBtn.type = 'button';
+      bookBtn.textContent = 'Recipes';
+      bookBtn.title = 'Show what you can craft';
+      bookBtn.setAttribute('aria-pressed', String(this.bookOpen));
+      bookBtn.addEventListener('click', () => {
+        this.bookOpen = !this.bookOpen;
+        try { localStorage.setItem('blockhaven.book', this.bookOpen ? '1' : '0'); } catch { /* storage unavailable */ }
+        this.build();
+      });
+      panel.appendChild(bookBtn);
+      if (this.bookOpen) this.root.insertBefore(this.buildBook(), panel);
+    }
 
     if (this.kind === 'creative') {
       const title = document.createElement('h3');
@@ -357,7 +382,8 @@ export class ContainerScreen {
     } else if (this.kind === 'chest' && this.chest) {
       const chest = this.chest;
       const t = document.createElement('div');
-      const h = document.createElement('h3'); h.textContent = 'Chest';
+      const h = document.createElement('h3'); h.textContent = 'Chest'; h.className = 'with-sort';
+      h.appendChild(this.sortButton(() => chest.sort(sortRank), 'Sort this chest'));
       t.appendChild(h);
       t.appendChild(this.grid(9, Array.from({ length: 27 }, (_, i) => this.invRef(chest, i, 'container'))));
       top.appendChild(t);
@@ -366,11 +392,156 @@ export class ContainerScreen {
     if (this.kind === 'enchant') this.renderOffers();
     if (this.kind === 'trade') this.renderTrades();
     const label = document.createElement('h3');
+    label.className = 'with-sort';
     label.textContent = 'Inventory';
+    label.appendChild(this.sortButton(() => inv.sort(sortRank, 9, 36), 'Sort your inventory (the hotbar stays as it is)'));
     panel.appendChild(label);
     panel.appendChild(this.grid(9, Array.from({ length: 27 }, (_, i) => this.invRef(inv, i + 9, 'player'))));
     panel.appendChild(Object.assign(document.createElement('div'), { className: 'gap' }));
     panel.appendChild(this.grid(9, Array.from({ length: 9 }, (_, i) => this.invRef(inv, i, 'hotbar'))));
+    this.render();
+  }
+
+  private sortButton(run: () => void, title: string): HTMLButtonElement {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'sort-btn';
+    b.textContent = 'Sort';
+    b.title = title;
+    b.addEventListener('click', () => { run(); sfx.click(); this.render(); });
+    return b;
+  }
+
+  // ---------- Recipe book ----------
+  /** What you're carrying (plus what's already in the grid), as id -> count. */
+  private haveCounts(): Map<number, number> {
+    const have = new Map<number, number>();
+    for (const st of [...this.player.inv.slots, ...this.craftGrid]) if (st) have.set(st.id, (have.get(st.id) ?? 0) + st.count);
+    return have;
+  }
+
+  private buildBook(): HTMLElement {
+    const book = document.createElement('div');
+    book.className = 'panel recipe-book';
+    const h = document.createElement('h3');
+    h.textContent = 'Recipes';
+    const search = document.createElement('input');
+    search.className = 'field search';
+    search.placeholder = 'Search recipes';
+    search.value = this.bookSearch;
+    search.setAttribute('aria-label', 'Search recipes');
+    search.addEventListener('keydown', (e) => { e.stopPropagation(); if (e.key === 'Escape') { e.preventDefault(); this.close(); } else if (e.key === 'Enter') search.blur(); });
+    search.addEventListener('input', () => { this.bookSearch = search.value; this.bookKey = ''; this.renderBook(); });
+    const only = document.createElement('label');
+    only.className = 'book-only';
+    const cb = document.createElement('input');
+    cb.type = 'checkbox';
+    cb.checked = this.bookCanMake;
+    cb.addEventListener('change', () => { this.bookCanMake = cb.checked; this.bookKey = ''; this.renderBook(); });
+    only.append(cb, ' Only what I can make');
+    const list = document.createElement('div');
+    list.className = 'book-list';
+    const hint = document.createElement('p');
+    hint.className = 'hint';
+    hint.textContent = 'Click to lay a recipe out in the grid; Shift-click for as many as you can make.';
+    book.append(h, search, only, list, hint);
+    this.bookEl = list;
+    this.bookKey = '';
+    this.renderBook();
+    return book;
+  }
+
+  private renderBook(): void {
+    const list = this.bookEl;
+    if (!list) return;
+    const have = this.haveCounts();
+    const key = [...have].map(([a, b]) => a + ':' + b).join(',') + '|' + this.bookSearch + '|' + this.bookCanMake + '|' + this.craftW;
+    if (key === this.bookKey) return;
+    this.bookKey = key;
+    const q = this.bookSearch.trim().toLowerCase();
+    const seen = new Set<number>();
+    const rows: { p: RecipePlan; n: number }[] = [];
+    for (const p of recipePlans()) {
+      if (!planFits(p, this.craftW)) continue;
+      const name = itemDef(p.result[0])?.name.toLowerCase() ?? '';
+      if (q && !name.includes(q)) continue;
+      const n = timesCraftable(p, have, 1);
+      if (this.bookCanMake && !n) continue;
+      // One entry per result (the first recipe you can make, else the first).
+      if (seen.has(p.result[0])) { if (n) { const i = rows.findIndex((r) => r.p.result[0] === p.result[0]); if (i >= 0 && !rows[i].n) rows[i] = { p, n }; } continue; }
+      seen.add(p.result[0]);
+      rows.push({ p, n });
+    }
+    rows.sort((a, b) => (b.n ? 1 : 0) - (a.n ? 1 : 0));
+    list.innerHTML = '';
+    for (const { p, n } of rows) {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'slot recipe' + (n ? '' : ' cant');
+      b.innerHTML = slotHTML(p.result[0], p.result[1]);
+      b.setAttribute('aria-label', `${itemDef(p.result[0])?.name}${n ? '' : ' (missing ingredients)'}`);
+      b.addEventListener('click', (e) => this.layOut(p, e.shiftKey));
+      b.addEventListener('mouseenter', () => this.recipeTip(p, have));
+      b.addEventListener('mouseleave', () => { this.tooltip.style.display = 'none'; });
+      list.appendChild(b);
+    }
+    if (!rows.length) {
+      const e = document.createElement('div');
+      e.className = 'empty';
+      e.textContent = this.bookCanMake ? 'Nothing you can make yet. Gather more, or clear the filter.' : 'No recipes match that search.';
+      list.appendChild(e);
+    }
+  }
+
+  private recipeTip(p: RecipePlan, have: Map<number, number>): void {
+    const need = new Map<string, { n: number; ok: boolean }>();
+    for (const c of p.cells) {
+      if (c === null) continue;
+      const opts = Array.isArray(c) ? c : [c];
+      const name = opts.length > 1 ? `any ${itemDef(opts[0])?.name.replace(/^(Oak|Birch|Spruce|White|Red) /, '')}` : itemDef(opts[0])?.name ?? '?';
+      const got = opts.reduce((a, id) => a + (have.get(id) ?? 0), 0);
+      const e = need.get(name) ?? { n: 0, ok: true };
+      e.n++;
+      e.ok = got >= e.n;
+      need.set(name, e);
+    }
+    const lines = [...need].map(([name, e]) => `<span style="color:${e.ok ? '#9ad07a' : '#d98a7a'}">${e.n} × ${escapeHtml(name)}</span>`);
+    this.tooltip.innerHTML = `${escapeHtml(itemDef(p.result[0])?.name ?? '')}${p.result[1] > 1 ? ` (makes ${p.result[1]})` : ''}<br>${lines.join('<br>')}`;
+    this.tooltip.style.display = 'block';
+  }
+
+  /** Put the ingredients for one craft (or as many as possible) into the grid. */
+  private layOut(p: RecipePlan, max: boolean): void {
+    const inv = this.player.inv, w = this.craftW;
+    // Clear the grid back into the inventory first.
+    for (let i = 0; i < this.craftGrid.length; i++) {
+      const st = this.craftGrid[i];
+      if (!st) continue;
+      const left = inv.add(st);
+      this.craftGrid[i] = left;
+      if (left) { sfx.click(); this.render(); return; }
+    }
+    const have = this.haveCounts();
+    let n = max ? timesCraftable(p, have) : 1;
+    const pick = assignPlan(p, have, Math.max(1, n));
+    if (!n || !pick) { this.render(); this.renderBook(); return; }
+    for (const id of pick) if (id) n = Math.min(n, maxStack(id));
+    const ids = assignPlan(p, have, n)!;
+    ids.forEach((id, i) => {
+      if (!id) return;
+      // Take n of this item out of the inventory.
+      let left = n;
+      for (let k = 0; k < inv.slots.length && left > 0; k++) {
+        const st = inv.slots[k];
+        if (!st || st.id !== id || st.ench?.length) continue;
+        const take = Math.min(left, st.count);
+        st.count -= take; left -= take;
+        if (st.count <= 0) inv.slots[k] = null;
+      }
+      const cell = p.shapeless ? i : (i % p.w) + Math.floor(i / p.w) * w;
+      this.craftGrid[cell] = { id, count: n };
+    });
+    sfx.click();
     this.render();
   }
 
@@ -468,6 +639,7 @@ export class ContainerScreen {
       if (r.el && r.el.dataset.k !== html) { r.el.innerHTML = html; r.el.dataset.k = html; }
     }
     this.cursorEl.innerHTML = this.cursor ? slotHTML(this.cursor.id, this.cursor.count, this.cursor.damage, !!this.cursor.ench?.length) : '';
+    this.renderBook();
     if (this.brewing && this.progressEls.cook) {
       this.progressEls.cook.style.height = `${(this.brewing.brew / BREW_TICKS) * 100}%`;
       this.progressEls.burn!.style.width = `${Math.min(100, (this.brewing.fuel / 10) * 100)}%`;

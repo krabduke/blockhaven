@@ -402,3 +402,39 @@ body.touch, body.touch canvas#game { touch-action: none; overscroll-behavior: no
 .share .code-box .btn { align-self: flex-start; }
 .share .status:empty { display: none; }
 .share .status { color: var(--bone); }
+
+/* ---------- Recipe book ---------- */
+#container.show { gap: 12px; flex-wrap: wrap; }
+.book-btn { position: absolute; top: 6px; left: 8px; background: var(--slot); border: 2px solid; border-color: #57422f #1b140e #1b140e #57422f; color: var(--bone-dim); font: inherit; font-size: 14px; padding: 2px 8px; cursor: pointer; }
+.book-btn:hover { color: var(--bone); }
+.book-btn.on { background: var(--bark); color: var(--lantern); border-color: #1b140e #57422f #57422f #1b140e; }
+.book-btn:focus-visible { outline: var(--px) solid var(--lantern); outline-offset: 1px; }
+.recipe-book { width: min(300px, calc(100vw - 32px)); max-height: min(560px, calc(100vh - 32px)); display: flex; flex-direction: column; gap: 6px; }
+.recipe-book h3 { margin: 0; font-size: 18px; font-weight: 500; color: var(--bone-dim); }
+.recipe-book .book-only { font-size: 14px; color: var(--bone-dim); display: flex; gap: 6px; align-items: center; cursor: pointer; }
+.recipe-book .book-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(44px, 1fr)); overflow-y: auto; min-height: 120px; flex: 1; align-content: start; }
+.recipe-book .slot.recipe { cursor: pointer; padding: 0; font: inherit; }
+.recipe-book .slot.recipe.cant img { opacity: 0.35; filter: grayscale(0.7); }
+.recipe-book .slot.recipe:focus-visible { outline: var(--px) solid var(--lantern); outline-offset: -2px; }
+.recipe-book .empty { grid-column: 1 / -1; color: var(--bone-dim); font-size: 14px; padding: 8px 0; }
+.recipe-book .hint { font-size: 13px; margin: 0; }
+.inv:has(.book-btn) { padding-top: 36px; }
+.inv h3.with-sort { display: flex; align-items: center; gap: 10px; }
+.sort-btn { background: var(--slot); border: 2px solid; border-color: #57422f #1b140e #1b140e #57422f; color: var(--bone-dim); font: inherit; font-size: 13px; padding: 0 7px; cursor: pointer; }
+.sort-btn:hover { color: var(--bone); }
+.sort-btn:focus-visible { outline: var(--px) solid var(--lantern); outline-offset: 1px; }
+
+/* ---------- Achievements and stats ---------- */
+.progress-panel { width: min(760px, calc(100vw - 32px)); max-height: calc(100vh - 32px); display: flex; flex-direction: column; }
+.progress-cols { display: grid; grid-template-columns: 1.4fr 1fr; gap: 20px; overflow-y: auto; min-height: 0; }
+@media (max-width: 640px) { .progress-cols { grid-template-columns: 1fr; } }
+.ach-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.ach-list li { display: flex; flex-direction: column; padding: 5px 8px; background: rgba(0, 0, 0, 0.25); border-left: 3px solid #4a3a2c; color: var(--bone-dim); }
+.ach-list li b { font-weight: 500; color: var(--bone-dim); }
+.ach-list li span { font-size: 14px; }
+.ach-list li.done { border-left-color: var(--lantern); }
+.ach-list li.done b { color: var(--lantern); }
+.stat-list { display: grid; grid-template-columns: 1fr auto; gap: 4px 12px; margin: 0; align-content: start; }
+.stat-list dt { color: var(--bone-dim); }
+.stat-list dd { margin: 0; text-align: right; color: var(--bone); font-variant-numeric: tabular-nums; }
+label.check { display: flex; align-items: center; gap: 8px; color: var(--bone-dim); cursor: pointer; }

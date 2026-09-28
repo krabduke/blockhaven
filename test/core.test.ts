@@ -381,3 +381,43 @@ describe('natural variety', () => {
     expect(seagrass).toBeGreaterThan(0);
   });
 });
+
+describe('recipe book planning', () => {
+  it('lays every recipe out so craft() accepts it', async () => {
+    const { recipePlans, assignPlan } = await import('../src/crafting');
+    for (const p of recipePlans()) {
+      const have = new Map<number, number>();
+      for (const c of p.cells) if (c !== null) for (const id of Array.isArray(c) ? c : [c]) have.set(id, 64);
+      const ids = assignPlan(p, have, 1);
+      expect(ids).not.toBeNull();
+      const w = Math.max(p.w, p.h);
+      const grid = Array.from({ length: w * w }, () => null as { id: number; count: number } | null);
+      ids!.forEach((id, i) => { if (id) grid[(i % p.w) + Math.floor(i / p.w) * w] = { id, count: 1 }; });
+      const out = craft(grid, w);
+      expect(out?.id, `recipe for ${p.result[0]}`).toBe(p.result[0]);
+    }
+  });
+
+  it('counts how many times something can be made', async () => {
+    const { recipePlans, timesCraftable } = await import('../src/crafting');
+    const sticks = recipePlans().find((p) => p.result[0] === I.stick)!;
+    expect(timesCraftable(sticks, new Map([[B.planks, 5]]))).toBe(2);
+    const table = recipePlans().find((p) => p.result[0] === B.crafting_table)!;
+    expect(timesCraftable(table, new Map([[B.planks, 3]]))).toBe(0);
+  });
+});
+
+describe('inventory', () => {
+  it('keeps enchantments when an item is added', () => {
+    const inv = new Inventory(4);
+    inv.add({ id: I.iron_pickaxe, count: 1, ench: [{ id: 'efficiency', level: 3 }] });
+    expect(inv.slots[0]?.ench?.[0]).toEqual({ id: 'efficiency', level: 3 });
+  });
+
+  it('sorts: merges partial stacks, groups by kind, and packs to the front', () => {
+    const inv = new Inventory(6);
+    inv.slots = [{ id: I.apple, count: 10 }, null, { id: B.stone, count: 40 }, { id: I.apple, count: 60 }, null, { id: B.stone, count: 30 }];
+    inv.sort((id) => (id === B.stone ? 0 : 1));
+    expect(inv.slots.map((s) => s && [s.id, s.count])).toEqual([[B.stone, 64], [B.stone, 6], [I.apple, 64], [I.apple, 6], null, null]);
+  });
+});

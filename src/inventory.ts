@@ -17,7 +17,7 @@ export class Inventory {
     if (max > 1) {
       for (let i = from; i < to && left > 0; i++) {
         const s = this.slots[i];
-        if (s && s.id === stack.id && s.count < max) {
+        if (s && s.id === stack.id && s.count < max && !s.ench?.length && !stack.ench?.length) {
           const n = Math.min(left, max - s.count);
           s.count += n;
           left -= n;
@@ -27,11 +27,31 @@ export class Inventory {
     for (let i = from; i < to && left > 0; i++) {
       if (!this.slots[i]) {
         const n = Math.min(left, max);
-        this.slots[i] = { id: stack.id, count: n, damage: stack.damage };
+        // Keep everything about the stack (enchantments, a loaded crossbow), not just what it is.
+        this.slots[i] = { ...stack, count: n };
         left -= n;
       }
     }
-    return left > 0 ? { id: stack.id, count: left, damage: stack.damage } : null;
+    return left > 0 ? { ...stack, count: left } : null;
+  }
+
+  /**
+   * Tidy slots [from, to): merge partial stacks of the same plain item, then order by `rank`
+   * (then id), leaving the gaps at the end.
+   */
+  sort(rank: (id: number) => number, from = 0, to = this.slots.length): void {
+    const items = this.slots.slice(from, to).filter((st): st is ItemStack => !!st);
+    const merged: ItemStack[] = [];
+    for (const st of items) {
+      const plain = !st.ench?.length && !st.damage && !st.charged;
+      const into = plain ? merged.find((m) => m.id === st.id && !m.ench?.length && !m.damage && !m.charged && m.count < maxStack(m.id)) : undefined;
+      if (!into) { merged.push({ ...st }); continue; }
+      const room = maxStack(st.id) - into.count, n = Math.min(room, st.count);
+      into.count += n;
+      if (st.count > n) merged.push({ ...st, count: st.count - n });
+    }
+    merged.sort((a, b) => rank(a.id) - rank(b.id) || a.id - b.id || b.count - a.count);
+    for (let i = from; i < to; i++) this.slots[i] = merged[i - from] ?? null;
   }
 
   count(id: number): number {

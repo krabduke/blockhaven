@@ -9,6 +9,11 @@ export const PLAYER_HEIGHT = 1.8;
 export const EYE_HEIGHT = 1.62;
 export const SNEAK_EYE_HEIGHT = 1.27;
 
+export type Difficulty = 'peaceful' | 'easy' | 'normal' | 'hard';
+/** Damage that doesn't come from a creature or an explosion, so difficulty doesn't scale it. */
+const ENVIRONMENT = new Set(['fall', 'fire', 'lava', 'drowning', 'starvation', 'void', 'command', 'glide', 'poison', 'cactus', 'suffocation', 'magma', 'berry']);
+const DAMAGE_SCALE: Record<Difficulty, number> = { peaceful: 0.5, easy: 0.5, normal: 1, hard: 1.5 };
+
 export class Player {
   body: Body;
   yaw = 0;
@@ -21,6 +26,10 @@ export class Player {
   xpProgress = 0;
   xpTotal = 0;
   achievements = new Set<string>();
+  /** Running totals for the statistics screen (see STAT_NAMES). */
+  stats: Record<string, number> = {};
+  /** Set from the world: scales damage from creatures and changes hunger. */
+  difficulty: Difficulty = 'normal';
   onAchievement: (id: string) => void = () => {};
   selected = 0;
   health = 20;
@@ -146,6 +155,8 @@ export class Player {
         return;
       }
     }
+    // Difficulty: creatures and explosions hit softer on Easy and harder on Hard.
+    if (!ENVIRONMENT.has(source)) amount *= DAMAGE_SCALE[this.difficulty];
     // Armor and Protection (not for starvation, drowning, the void or commands).
     if (!['starvation', 'drowning', 'void', 'command'].includes(source)) {
       const armor = Math.min(20, this.armorPoints);
@@ -166,6 +177,7 @@ export class Player {
       }
     }
     this.health -= amount;
+    this.stat('damageTaken', amount);
     this.hurtTime = 10;
     this.invulnerable = 10;
     this.lastDamageSource = source;
@@ -184,9 +196,13 @@ export class Player {
     }
   }
 
+  /** Add to a running total. */
+  stat(key: string, n = 1): void { this.stats[key] = (this.stats[key] ?? 0) + n; }
+
   eat(stack: ItemStack): boolean {
     const food = itemDef(stack.id)?.food;
     if (!food || (this.food >= 20 && !this.creative)) return false;
+    this.stat('eaten');
     this.food = Math.min(20, this.food + food.hunger);
     this.saturation = Math.min(this.food, this.saturation + food.saturation);
     sfx.burp();
@@ -195,10 +211,17 @@ export class Player {
 
   /** Survival mechanics, once per tick. */
   tickStats(): void {
+    if (this.alive) this.stat('ticks');
     if (this.hurtTime > 0) this.hurtTime--;
     if (this.invulnerable > 0) this.invulnerable--;
     if (!this.alive || this.creative) {
       this.air = 300;
+      return;
+    }
+    // Peaceful: never hungry, and wounds close on their own.
+    if (this.difficulty === 'peaceful') {
+      this.exhaustion = 0;
+      if (++this.foodTimer >= 40) { this.foodTimer = 0; this.food = Math.min(20, this.food + 1); if (this.health < 20) this.health = Math.min(20, this.health + 1); }
       return;
     }
     // Hunger.
@@ -223,7 +246,9 @@ export class Player {
       }
     } else if (this.food <= 0) {
       if (this.foodTimer >= 80) {
-        if (this.health > 1) this.damage(1, 'starvation');
+        // Starving: Easy leaves you on half health, Normal on half a heart, Hard lets it kill you.
+        const floor = this.difficulty === 'easy' ? 10 : this.difficulty === 'hard' ? 0 : 1;
+        if (this.health > floor) this.damage(1, 'starvation');
         this.foodTimer = 0;
       }
     } else this.foodTimer = 0;
@@ -257,7 +282,7 @@ export class Player {
   serialize(): unknown {
     return {
       pos: this.body.pos, yaw: this.yaw, pitch: this.pitch, inv: this.inv.toJSON(), selected: this.selected,
-      armor: this.armor.toJSON(), xpLevel: this.xpLevel, xpProgress: this.xpProgress, xpTotal: this.xpTotal, achievements: [...this.achievements],
+      armor: this.armor.toJSON(), xpLevel: this.xpLevel, xpProgress: this.xpProgress, xpTotal: this.xpTotal, achievements: [...this.achievements], stats: this.stats,
       health: this.health, food: this.food, saturation: this.saturation, flying: this.flying, spawn: this.spawn,
       effects: [...this.effects].map(([id, e]) => [id, e.level, e.ticks]),
     };
@@ -274,6 +299,7 @@ export class Player {
     this.xpProgress = d.xpProgress ?? 0;
     this.xpTotal = d.xpTotal ?? 0;
     this.achievements = new Set(d.achievements ?? []);
+    this.stats = { ...d.stats };
     this.selected = d.selected ?? 0;
     this.health = d.health ?? 20;
     this.food = d.food ?? 20;

@@ -243,6 +243,58 @@ export const SMELTING: Record<number, number> = {
   [B.spruce_log]: I.coal,
 };
 
+/** A recipe laid out for the recipe book: `cells` is row-major, `w` x `h`; shapeless ones fill left to right. */
+export interface RecipePlan { result: [number, number]; cells: (number | number[] | null)[]; w: number; h: number; shapeless: boolean }
+
+let plans: RecipePlan[] | null = null;
+/** Every crafting recipe, for the recipe book. */
+export function recipePlans(): RecipePlan[] {
+  if (plans) return plans;
+  plans = [];
+  for (const r of shaped) {
+    const h = r.pattern.length, w = Math.max(...r.pattern.map((p) => p.length));
+    const cells: RecipePlan['cells'] = [];
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) { const ch = r.pattern[y][x] ?? ' '; cells.push(ch === ' ' ? null : r.key[ch]); }
+    plans.push({ result: r.result, cells, w, h, shapeless: false });
+  }
+  for (const r of shapeless) {
+    const n = r.ingredients.length, w = n <= 4 ? 2 : 3;
+    plans.push({ result: r.result, cells: [...r.ingredients], w: Math.min(w, n), h: Math.ceil(n / w), shapeless: true });
+  }
+  return plans;
+}
+
+/** Does the plan fit a grid of this width? */
+export function planFits(p: RecipePlan, gridW: number): boolean {
+  return p.shapeless ? p.cells.length <= gridW * gridW : p.w <= gridW && p.h <= gridW;
+}
+
+/**
+ * Choose items for each cell to craft `times` times from `have` (item id -> count). Where a cell takes
+ * any of several items, the one you have most of is used. Returns the chosen id per cell (0 = empty) or null.
+ */
+export function assignPlan(p: RecipePlan, have: Map<number, number>, times: number): number[] | null {
+  const left = new Map(have);
+  const out: number[] = [];
+  for (const c of p.cells) {
+    if (c === null) { out.push(0); continue; }
+    const opts = Array.isArray(c) ? c : [c];
+    let best = -1, bc = 0;
+    for (const id of opts) { const n = left.get(id) ?? 0; if (n >= times && n > bc) { bc = n; best = id; } }
+    if (best < 0) return null;
+    left.set(best, bc - times);
+    out.push(best);
+  }
+  return out;
+}
+
+/** How many times the plan can be crafted from `have`, up to `cap`. */
+export function timesCraftable(p: RecipePlan, have: Map<number, number>, cap = 64): number {
+  let n = 0;
+  while (n < cap && assignPlan(p, have, n + 1)) n++;
+  return n;
+}
+
 export function recipeCount(): number {
   return shaped.length + shapeless.length;
 }

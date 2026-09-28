@@ -1157,6 +1157,84 @@ await wait(300);
   check('a watcher pulses when the block it looks at changes', pw.watcher, JSON.stringify(pw));
 }
 
+// --- More quality of life: recipe book, sorting, auto-jump, difficulty, keep inventory, stats.
+{
+  const qol = await g(async () => {
+    const G = window.blockhaven, p = G.player, w = G.world, B = G.ids, It = G.items;
+    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+    const out = {};
+    try { Object.defineProperty(G.input, 'locked', { get: () => true, configurable: true }); } catch { /* already */ }
+    p.creative = false; p.flying = false; p.health = 20;
+    // Recipe book: lay out sticks from planks and take them.
+    p.inv.slots.fill(null);
+    p.inv.slots[0] = { id: B.planks, count: 8 };
+    G.openInventory();
+    await sleep(200);
+    if (!document.querySelector('.recipe-book')) document.querySelector('.book-btn').click();
+    await sleep(200);
+    const stickBtn = [...document.querySelectorAll('.recipe-book .recipe:not(.cant)')].find((e) => e.getAttribute('aria-label') === 'Stick');
+    stickBtn?.dispatchEvent(new MouseEvent('click', { bubbles: true, shiftKey: true }));
+    await sleep(100);
+    out.gridFilled = document.querySelectorAll('#container .inv-top .grid .slot img').length;
+    out.planksLeft = p.inv.count(B.planks);
+    // Sort: split stacks merge and line up.
+    p.inv.slots.fill(null);
+    p.inv.slots[20] = { id: It.apple, count: 5 }; p.inv.slots[12] = { id: B.stone, count: 40 }; p.inv.slots[30] = { id: B.stone, count: 40 };
+    document.querySelector('#container .sort-btn').click();
+    out.sorted = p.inv.slots.slice(9, 13).map((st) => st && [st.id === B.stone ? 'stone' : st.id === It.apple ? 'apple' : st.id, st.count]);
+    G.containers.close();
+    await sleep(100);
+    // Auto-jump: walk into a one-block step.
+    const [x, , z] = p.body.pos.map(Math.floor);
+    const y = Math.floor(p.body.pos[1]) + 12;
+    for (let dx = -2; dx <= 2; dx++) for (let dz = -6; dz <= 2; dz++) { w.setBlock(x + dx, y - 1, z + dz, B.stone); for (let dy = 0; dy <= 4; dy++) w.setBlock(x + dx, y + dy, z + dz, dz <= -3 && dy === 0 ? B.stone : 0); }
+    G.settings.autoJump = true;
+    p.body.pos = [x + 0.5, y, z + 0.5]; p.body.vel = [0, 0, 0]; p.yaw = 0; p.pitch = 0;
+    await sleep(200);
+    const trace = [];
+    G.keys.add('KeyW');
+    for (let i = 0; i < 14; i++) { await sleep(100); trace.push([+(p.body.pos[1] - y).toFixed(2), +(p.body.pos[2] - z).toFixed(2), p.body.onGround ? 1 : 0]); }
+    G.keys.delete('KeyW');
+    out.climbed = p.body.pos[1] >= y + 0.9;
+    if (!out.climbed) out.trace = { trace, ctl: G.input.controlling, sneak: p.sneaking, riding: !!G.riding, speed: p.speed, flying: p.flying, keys: [...G.keys] };
+    G.settings.autoJump = false;
+    // Difficulty: Peaceful clears monsters; Hard hits harder than Easy.
+    const zb = G.entities.spawnMob('zombie', x + 0.5, y + 1, z - 4.5);
+    G.runCommand('/difficulty peaceful');
+    await sleep(1500);
+    out.peacefulCleared = zb.dead;
+    G.runCommand('/difficulty easy'); p.health = 20; p.invulnerable = 0; p.damage(4, 'zombie'); const easy = 20 - p.health;
+    G.runCommand('/difficulty hard'); p.health = 20; p.invulnerable = 0; p.damage(4, 'zombie'); const hard = 20 - p.health;
+    p.health = 20; p.invulnerable = 0; p.damage(4, 'fall'); const fall = 20 - p.health;
+    out.damage = { easy, hard, fall };
+    G.runCommand('/difficulty normal');
+    // Keep inventory through a death.
+    G.runCommand('/gamerule keepInventory true');
+    p.inv.slots.fill(null);
+    p.inv.slots[3] = { id: It.diamond, count: 7 };
+    p.health = 20; p.invulnerable = 0; p.damage(100, 'command');
+    await sleep(300);
+    out.kept = p.inv.count(It.diamond) === 7 && !p.alive;
+    document.querySelector('#death .btn.primary')?.click();
+    await sleep(500);
+    out.respawned = p.alive;
+    G.runCommand('/gamerule keepInventory false');
+    // The progress screen lists achievements and counts things you've done.
+    G.menus.show('pause'); G.menus.show('progress');
+    await sleep(100);
+    const txt = document.querySelector('#progress')?.textContent ?? '';
+    out.progress = { achievements: document.querySelectorAll('#progress .ach-list li').length, done: document.querySelectorAll('#progress .ach-list li.done').length, hasStats: /Blocks mined/.test(txt) && /Time played/.test(txt), deaths: p.stats.deaths ?? 0, walked: Math.round(p.stats.walked ?? 0) };
+    G.menus.show(null);
+    return out;
+  });
+  check('the recipe book lays a recipe out in the grid from what you carry', qol.gridFilled === 2 && qol.planksLeft < 8, JSON.stringify(qol));
+  check('Sort merges stacks and lines things up', JSON.stringify(qol.sorted) === JSON.stringify([['stone', 64], ['stone', 16], ['apple', 5], null]), JSON.stringify(qol.sorted));
+  check('auto-jump climbs a one-block step', qol.climbed, JSON.stringify(qol));
+  check('Peaceful clears monsters; Hard hits harder than Easy; falls are the same on any difficulty', qol.peacefulCleared && qol.damage.hard > qol.damage.easy * 2.5 && qol.damage.fall > 0, JSON.stringify(qol.damage));
+  check('with keepInventory you keep your things when you die', qol.kept && qol.respawned, JSON.stringify(qol));
+  check('the progress screen lists achievements and your stats', qol.progress.achievements > 20 && qol.progress.done > 3 && qol.progress.hasStats && qol.progress.deaths >= 1 && qol.progress.walked > 0, JSON.stringify(qol.progress));
+}
+
 // --- Sound: music you can hear, and caves that echo.
 {
   const snd = await g(async () => {
