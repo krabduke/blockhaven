@@ -29,7 +29,7 @@ function offerReload(game: Game): void {
   bar.id = 'update-bar';
   bar.setAttribute('role', 'status');
   const text = document.createElement('span');
-  text.textContent = 'A new version of Blockhaven is ready.';
+  text.textContent = 'A new version of QubeCraft is ready.';
   const reload = document.createElement('button');
   reload.type = 'button';
   reload.className = 'btn primary';

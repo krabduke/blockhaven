@@ -882,7 +882,7 @@ export class Game {
     this.canvas.toBlob((blob) => {
       if (!blob) { this.toast('Couldn’t capture a screenshot.'); return; }
       const d = new Date(), pad = (n: number) => String(n).padStart(2, '0');
-      const name = `blockhaven-${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}_${pad(d.getHours())}-${pad(d.getMinutes())}-${pad(d.getSeconds())}.png`;
+      const name = `qubecraft-${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}_${pad(d.getHours())}-${pad(d.getMinutes())}-${pad(d.getSeconds())}.png`;
       const a = Object.assign(document.createElement('a'), { href: URL.createObjectURL(blob), download: name });
       a.click();
       setTimeout(() => URL.revokeObjectURL(a.href), 5000);
@@ -1376,7 +1376,7 @@ export class Game {
     const biome = c ? BIOME_NAMES[c.biomes[(bx & 15) + (bz & 15) * 16]] : '?';
     const facing = ['north (-z)', 'west (-x)', 'south (+z)', 'east (+x)'][p.quadrant()];
     const lines = [
-      `Blockhaven 0.1   ${this.fps} fps`,
+      `QubeCraft 0.1   ${this.fps} fps`,
       `XYZ ${x.toFixed(2)} / ${y.toFixed(2)} / ${z.toFixed(2)}`,
       `Block ${bx} ${by} ${bz}   Chunk ${bx >> 4} ${bz >> 4}`,
       `Facing ${facing}`,

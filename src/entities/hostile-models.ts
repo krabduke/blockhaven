@@ -1,4 +1,4 @@
-// Models for hostile creatures. Every design here is original to Blockhaven: shapes and colours
+// Models for hostile creatures. Every design here is original to QubeCraft: shapes and colours
 // are chosen to read clearly at a distance and to look like nothing but themselves. Textures are
 // painted at high resolution; face details are placed in model pixels, down to a third of one.
 

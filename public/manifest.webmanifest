@@ -1,6 +1,6 @@
 {
-  "name": "Blockhaven",
-  "short_name": "Blockhaven",
+  "name": "QubeCraft",
+  "short_name": "QubeCraft",
   "description": "An open-source blocky survival sandbox that runs in your browser.",
   "start_url": "./",
   "scope": "./",

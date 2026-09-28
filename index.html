@@ -5,8 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
-  <meta name="description" content="Blockhaven: an open-source blocky survival sandbox that runs in your browser.">
-  <title>Blockhaven</title>
+  <meta name="description" content="QubeCraft: an open-source blocky survival sandbox that runs in your browser.">
+  <title>QubeCraft</title>
   <meta name="theme-color" content="#2e2219">
   <link rel="icon" type="image/png" href="icons/favicon-32.png">
   <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
@@ -36,7 +36,7 @@
         if (window.blockhaven) return;
         var box = document.getElementById('boot-error');
         box.style.display = 'block';
-        box.innerHTML = '<h1 style="margin-top:0">Blockhaven didn’t start</h1><p>Try reloading the page (Cmd+Shift+R on a Mac, Ctrl+Shift+R elsewhere). Your worlds are stored in this browser and are safe.</p>'
+        box.innerHTML = '<h1 style="margin-top:0">QubeCraft didn’t start</h1><p>Try reloading the page (Cmd+Shift+R on a Mac, Ctrl+Shift+R elsewhere). Your worlds are stored in this browser and are safe.</p>'
           + (errors.length ? '<p>Error: <code></code></p>' : '') + '<p><button onclick="location.reload()">Reload</button></p>';
         if (errors.length) box.querySelector('code').textContent = errors.join(' | ');
       }, 12000);

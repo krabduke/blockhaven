@@ -148,7 +148,7 @@ export class Menus {
 
   private buildTitle(): void {
     const s = this.screen('title', false);
-    s.appendChild(el('h1', { class: 'logo' }, 'Blockhaven'));
+    s.appendChild(el('h1', { class: 'logo' }, 'QubeCraft'));
     s.appendChild(el('p', { class: 'tagline' }, 'Dig in. Build up. Make it through the night.'));
     const menu = el('div', { class: 'title-menu stack' });
     menu.append(
@@ -158,7 +158,7 @@ export class Menus {
     );
     s.appendChild(menu);
     const foot = el('div', { class: 'title-foot' });
-    foot.append(el('span', {}, 'Blockhaven 0.1'), el('span', {}, 'Open source · MIT licence'));
+    foot.append(el('span', {}, 'QubeCraft 0.1'), el('span', {}, 'Open source · MIT licence'));
     s.appendChild(foot);
   }
 
@@ -201,7 +201,7 @@ export class Menus {
       try { const { blob, name } = await exportWorld(this.selectedWorld.id); download(blob, name); this.status(`Saved ${name}`); }
       catch (e) { this.status((e as Error).message); }
     });
-    const fileIn = el('input', { type: 'file', accept: '.blockhaven,.json,application/json,application/gzip', 'aria-label': 'World file to import' });
+    const fileIn = el('input', { type: 'file', accept: '.qubecraft,.blockhaven,.json,application/json,application/gzip', 'aria-label': 'World file to import' });
     fileIn.style.display = 'none';
     fileIn.addEventListener('change', async () => {
       const f = fileIn.files?.[0];

@@ -123,7 +123,7 @@ export class HostSession {
           link.onMessage = (m) => {
             if (m.op !== 'hello') return;
             clearTimeout(t);
-            if (m.build !== __BUILD_ID__) { link.send({ op: 'bye', reason: 'You and the host are running different versions of Blockhaven. Both reload the page, then try again.' }); setTimeout(() => link.close(), 500); reject(new Error('Your friend is on a different version of the game. Ask them to reload the page.')); return; }
+            if (m.build !== __BUILD_ID__) { link.send({ op: 'bye', reason: 'You and the host are running different versions of QubeCraft. Both reload the page, then try again.' }); setTimeout(() => link.close(), 500); reject(new Error('Your friend is on a different version of the game. Ask them to reload the page.')); return; }
             resolve(this.admit(link, String(m.name || 'Friend').slice(0, 16)));
           };
         });

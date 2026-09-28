@@ -1,5 +1,5 @@
 // Blocky creature models: boxes with small procedurally painted textures.
-// Every creature design in Blockhaven is original to this project.
+// Every creature design in QubeCraft is original to this project.
 //
 // Units are model pixels (16 = one block). A part is a box hung from a
 // pivot; parts can be nested so that rotating a pivot moves everything below

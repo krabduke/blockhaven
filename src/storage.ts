@@ -160,14 +160,14 @@ export async function exportWorld(id: string): Promise<{ blob: Blob; name: strin
   }
   const blob = await gzip(JSON.stringify({ format: FORMAT, version: 1, meta, chunks }));
   const safe = meta.name.replace(/[^\w\- ]+/g, '').trim() || 'world';
-  return { blob, name: `${safe}.blockhaven` };
+  return { blob, name: `${safe}.qubecraft` };
 }
 
 /** Read a world file made by exportWorld; it becomes a new world in the list. */
 export async function importWorld(file: Blob): Promise<WorldMeta> {
   let data: { format?: string; meta?: WorldMeta; chunks?: Record<string, [string, string]> };
-  try { data = JSON.parse(await gunzipText(file)); } catch { throw new Error('That file isn’t a Blockhaven world.'); }
-  if (data.format !== FORMAT || !data.meta || !data.chunks) throw new Error('That file isn’t a Blockhaven world.');
+  try { data = JSON.parse(await gunzipText(file)); } catch { throw new Error('That file isn’t a QubeCraft world.'); }
+  if (data.format !== FORMAT || !data.meta || !data.chunks) throw new Error('That file isn’t a QubeCraft world.');
   const id = 'w' + Date.now().toString(36);
   const existing = await listWorlds().catch(() => [] as WorldMeta[]);
   let name = data.meta.name;

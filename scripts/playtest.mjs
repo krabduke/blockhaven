@@ -779,7 +779,7 @@ await wait(300);
     await G.storage.deleteWorld(meta.id);
     return { name, size: blob.size, ok };
   });
-  check('a world exports to a file and imports back as a new world', round.ok && round.size > 100 && round.name.endsWith('.blockhaven'), JSON.stringify(round));
+  check('a world exports to a file and imports back as a new world', round.ok && round.size > 100 && round.name.endsWith('.qubecraft'), JSON.stringify(round));
   await g(() => { const p = window.blockhaven.player; p.creative = false; window.__invSnap.forEach((s, i) => { p.inv.slots[i] = s; }); });
 }
 
