@@ -448,3 +448,12 @@ label.check { display: flex; align-items: center; gap: 8px; color: var(--bone-di
 #instruments .inst-label { background: rgba(20, 14, 10, 0.72); padding: 2px 8px; font-size: 14px; color: var(--bone); }
 #spyglass { position: fixed; inset: 0; z-index: 4; pointer-events: none; display: none; background: radial-gradient(circle at center, transparent 0, transparent 38vmin, rgba(0, 0, 0, 0.94) 39vmin); }
 #spyglass.show { display: block; }
+
+/* ---------- Anvil ---------- */
+.anvil { display: flex; flex-direction: column; gap: 8px; align-items: flex-start; }
+.anvil .anvil-name { width: 260px; font-size: 16px; padding: 6px 10px; }
+.anvil-row { display: flex; align-items: center; gap: 10px; }
+.anvil-row .plus { color: var(--bone-dim); font-size: 22px; }
+.anvil-cost { margin: 0; font-size: 14px; color: #9ad07a; min-height: 1.2em; }
+.anvil-cost.bad { color: #d98a7a; }
+.furnace-title { margin: 0 12px 0 0; }

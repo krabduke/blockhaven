@@ -421,3 +421,26 @@ describe('inventory', () => {
     expect(inv.slots.map((s) => s && [s.id, s.count])).toEqual([[B.stone, 64], [B.stone, 6], [I.apple, 64], [I.apple, 6], null, null]);
   });
 });
+
+describe('anvil', () => {
+  it('repairs with material, a quarter per unit', async () => {
+    const { anvilResult } = await import('../src/anvil');
+    const r = anvilResult({ id: I.iron_pickaxe, count: 1, damage: 200 }, { id: I.iron_ingot, count: 5 }, '');
+    expect(r?.out.damage).toBe(0);
+    expect(r?.useB).toBe(4);
+    expect(r?.cost).toBe(4);
+  });
+  it('combines two tools and merges their enchantments', async () => {
+    const { anvilResult } = await import('../src/anvil');
+    const r = anvilResult({ id: I.iron_pickaxe, count: 1, damage: 200, ench: [{ id: 'efficiency', level: 2 }] }, { id: I.iron_pickaxe, count: 1, damage: 100, ench: [{ id: 'efficiency', level: 2 }, { id: 'unbreaking', level: 1 }] }, '');
+    // 50 + 150 left, plus 12% of 250 = 230 of 250.
+    expect(r?.out.damage).toBe(20);
+    expect(r?.out.ench).toEqual([{ id: 'efficiency', level: 3 }, { id: 'unbreaking', level: 1 }]);
+  });
+  it('renames for one level, and does nothing without a change', async () => {
+    const { anvilResult } = await import('../src/anvil');
+    expect(anvilResult({ id: I.apple, count: 3 }, null, 'Snack')?.out.name).toBe('Snack');
+    expect(anvilResult({ id: I.apple, count: 3 }, null, '')).toBeNull();
+    expect(anvilResult({ id: I.apple, count: 3 }, { id: I.stick, count: 1 }, '')).toBeNull();
+  });
+});

@@ -128,6 +128,14 @@ r(['C', 'G', 'G'], { C: I.crystal_shard, G: I.gold_ingot }, I.spyglass);
 r(['PPP', 'PCP', 'PPP'], { P: I.paper, C: I.compass }, I.empty_map);
 s([I.paper, I.string, I.gold_ingot], I.name_tag);
 r(['SS ', 'SB ', '  S'], { S: I.string, B: I.bog_slime }, I.lead, 2);
+r([' S ', 'SES', 'CCC'], { S: I.spark_dust, E: I.emberquartz, C: B.stone }, B.comparator);
+r(['BBB', ' i ', 'iii'], { B: B.iron_block, i: I.iron_ingot }, B.anvil);
+r([' S ', 'SCS', 'LLL'], { S: I.stick, C: I.coal, L: LOGS }, B.campfire);
+r([' L ', 'LFL', ' L '], { L: LOGS, F: B.furnace }, B.smoker);
+r(['PSP', 'P P', 'PSP'], { P: PLANKS, S: B.plank_slab }, B.barrel);
+r(['S S', 'S S', 'SSS'], { S: B.plank_slab }, B.composter);
+r(['SSS', 'SLS', 'SSS'], { S: I.stick, L: I.leather }, B.item_frame);
+r(['T T', ' T '], { T: B.terracotta }, B.flower_pot);
 // Worn-out gliders mend with leather.
 s([I.glider, I.leather], I.glider);
 r(['GGG', 'GAG', 'GGG'], { G: I.gold_ingot, A: I.apple }, I.golden_apple);

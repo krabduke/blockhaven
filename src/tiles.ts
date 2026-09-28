@@ -29,6 +29,7 @@ add('crossbow_loaded');
 for (const t of ['piston_inner', 'watcher_back_on', 'repeater_on', 'repeater_torch', 'repeater_torch_on']) add(t);
 add('door_top');
 add('astral_frame_top_full'); add('astral_eye');
+for (const t of ['comparator_on', 'compost', 'compost_ready', 'campfire_fire']) add(t);
 add('bed_foot');
 add('water_flow');
 for (let i = 0; i < 10; i++) add('destroy_' + i);

@@ -392,6 +392,7 @@ export class Mob extends Entity {
     const w = m.world, b = this.body, p = m.nearestPlayer(this.body.pos);
     updateContacts(w, b, this.body.height * 0.85);
     if (this.leash) this.leashTick(m);
+    if (b.onCampfire && this.age % 20 === 0 && !this.spec.fireImmune) this.hurt(m, 1, null, 0);
     if (this.angry > 0) this.angry--;
     if (this.healCooldown > 0) this.healCooldown--;
     this.aiming = false;

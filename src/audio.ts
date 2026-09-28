@@ -222,6 +222,8 @@ export const sfx = {
   warHorn() { swell(98, 1.6, 0.16); swell(110, 2.2, 0.16, 1.5); },
   /** A bright little fanfare when a raid is beaten. */
   fanfare() { [392, 523, 659, 784, 1047].forEach((f, i) => tone(f, i === 4 ? 0.6 : 0.16, 'triangle', 0.09, undefined, i * 0.11)); },
+  /** A ringing clang of hammer on anvil. */
+  anvil() { tone(1500, 0.5, 'triangle', 0.07, 1450); tone(2350, 0.35, 'sine', 0.05); noise(2800, 3, 0.12, 'bandpass', 0.35); },
   levelUp() { [523, 659, 784].forEach((f, i) => tone(f, 0.15, 'triangle', 0.08, undefined, i * 0.08)); },
 };
 

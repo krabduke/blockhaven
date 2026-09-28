@@ -1,6 +1,7 @@
 // Ties everything together: the main loop, player control, mining and
 // placing, interactions, commands, saving, and the title screen flyover.
 
+import * as THREE from 'three';
 import { audioLevel, initAudio, setCave, setMusicVolume, setVolume, sfx, spatial } from './audio';
 import { Music, type Mood } from './music';
 import { Ambience } from './ambience';
@@ -35,6 +36,7 @@ import { Signs } from './game/signs';
 import { Waypoints } from './game/waypoints';
 import { Raids } from './game/raids';
 import { MapStore } from './game/maps';
+import { FrameItems } from './game/frames';
 import { Instruments } from './ui/instruments';
 import { nearestStructure } from './world/structures';
 import { GuestSession, HostSession, type Welcome } from './net/session';
@@ -147,6 +149,7 @@ export class Game {
   readonly waypoints = new Waypoints();
   /** Paper maps made in this world. */
   readonly maps = new MapStore();
+  private frameItems = new FrameItems(this);
   private instruments!: Instruments;
   private spyEl!: HTMLElement;
   /** Looking through a spyglass. */
@@ -376,6 +379,7 @@ export class Game {
 
   private disposeWorld(): void {
     this.signs.clear();
+    this.frameItems.clear();
     this.history.clear();
     this.riding = null;
     this.map.clear();
@@ -1139,7 +1143,7 @@ export class Game {
     this.renderer.setHeldItem(heldId, heldId === I.bow && this.actions.bowCharge > 8 ? 'pull' : held?.charged ? 'loaded' : this.player.blocking ? 'block' : '');
     this.renderer.nightVision = this.player.effects.has('night_vision') ? Math.min(1, (this.player.effects.get('night_vision')!.ticks) / 200) : 0;
     this.tickAchievements(dt);
-    if (w.tickCount % 5 === 0) this.signs.sync();
+    if (w.tickCount % 5 === 0) { this.signs.sync(); this.frameItems.sync(); }
     this.updateAvatar(alpha, dt);
     const handLight = this.entities!.lightAt(cam.x, cam.y, cam.z);
     const moving = Math.hypot(this.player.body.vel[0], this.player.body.vel[2]) > 0.02 && this.player.body.onGround && this.settings.viewBobbing;
@@ -1316,6 +1320,14 @@ export class Game {
     if (p.regenTicks > 0) { p.regenTicks--; if (p.regenTicks % 25 === 0) p.health = Math.min(20, p.health + 1); }
     if (p.alive && p.body.onGround && !p.sneaking && w.getBlock(Math.floor(p.body.pos[0]), Math.floor(p.body.pos[1] - 0.1), Math.floor(p.body.pos[2])) === B.magma && w.tickCount % 20 === 0) p.damage(1, 'fire');
     if (p.alive && p.body.inFire) p.burning = Math.max(p.burning, 80);
+    if (p.alive && p.body.onCampfire && w.tickCount % 20 === 0) p.damage(1, 'fire');
+    // Smoke rising from campfires nearby.
+    if (w.tickCount % 3 === 0) for (const key of w.campfires) {
+      const [cx, cy, cz] = key.split(',').map(Number);
+      if (Math.abs(cx - p.body.pos[0]) > 40 || Math.abs(cz - p.body.pos[2]) > 40) continue;
+      const g = 0.55 + Math.random() * 0.2;
+      ents.particles.add(new THREE.Vector3(cx + 0.35 + Math.random() * 0.3, cy + 0.7, cz + 0.35 + Math.random() * 0.3), new THREE.Vector3((Math.random() - 0.5) * 0.01, 0.07, (Math.random() - 0.5) * 0.01), new THREE.Color(g, g, g), 70, 0.14, -0.0008);
+    }
     // Standing in a gate for 4 seconds (instantly in Creative) takes you through.
     if (p.portalCooldown > 0 && !p.body.inPortal) p.portalCooldown = Math.max(0, p.portalCooldown - 1);
     if (p.body.inPortal && p.alive && p.portalCooldown === 0) {

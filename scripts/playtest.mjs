@@ -1304,6 +1304,90 @@ await wait(300);
   check('a lead leads an animal and ties it to a fence; a name tag names it', inst.leashed && inst.followed && inst.tied && inst.named, JSON.stringify(inst));
 }
 
+// --- Workshop blocks: comparator, campfire, smoker, barrel, composter, item frame, flower pot, anvil.
+{
+  const ws = await g(async () => {
+    const G = window.blockhaven, p = G.player, w = G.world, B = G.ids, It = G.items, E = G.entities;
+    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+    try { Object.defineProperty(G.input, 'locked', { get: () => true, configurable: true }); } catch { /* already */ }
+    const out = {};
+    p.creative = false; p.flying = false; p.health = 20;
+    const [x, , z] = p.body.pos.map(Math.floor);
+    const y = Math.floor(p.body.pos[1]) + 18;
+    for (let dx = -8; dx <= 8; dx++) for (let dz = -10; dz <= 6; dz++) { w.setBlock(x + dx, y - 1, z + dz, B.stone); for (let dy = 0; dy <= 5; dy++) w.setBlock(x + dx, y + dy, z + dz, 0); }
+    p.body.pos = [x + 0.5, y, z + 3.5]; p.body.vel = [0, 0, 0];
+    // A comparator reads how full a chest is and lights a lamp.
+    w.setBlock(x - 4, y, z - 3, B.chest); w.setBlock(x - 4, y, z - 4, B.comparator, 2); w.setBlock(x - 4, y, z - 5, B.lamp);
+    const chest = w.getBlockEntity(x - 4, y, z - 3);
+    chest.inv.slots[0] = { id: B.stone, count: 64 }; chest.inv.slots[1] = { id: B.stone, count: 64 };
+    await sleep(500);
+    out.comparator = { level: (w.getMeta(x - 4, y, z - 4) >> 3) & 15, lamp: w.getBlock(x - 4, y, z - 5) === B.lamp_on };
+    chest.inv.slots.fill(null);
+    await sleep(400);
+    out.comparatorOff = w.getBlock(x - 4, y, z - 5) === B.lamp;
+    // A campfire cooks food laid on it.
+    w.setBlock(x - 2, y, z - 3, B.campfire);
+    const cf = w.getBlockEntity(x - 2, y, z - 3);
+    cf.inv.slots[0] = { id: It.raw_pork, count: 1 }; cf.cook[0] = 590;
+    await sleep(1200);
+    out.campfire = !cf.inv.slots[0] && E.list.some((e) => e.stack?.id === It.cooked_pork);
+    // A smoker cooks food twice as fast, and won't smelt ore.
+    w.setBlock(x, y, z - 3, B.smoker);
+    const sm = w.getBlockEntity(x, y, z - 3);
+    sm.inv.slots[0] = { id: It.raw_fish, count: 1 }; sm.inv.slots[1] = { id: It.coal, count: 1 };
+    await sleep(5600);
+    out.smoker = sm.inv.slots[2]?.id === It.cooked_fish;
+    sm.inv.slots[0] = { id: B.iron_ore, count: 1 }; sm.inv.slots[2] = null;
+    await sleep(1200);
+    out.smokerOre = !sm.inv.slots[2];
+    // Right-clicking the others.
+    const look = (tx, ty, tz) => { const dx = tx + 0.5 - p.body.pos[0], dy = ty - (p.body.pos[1] + 1.62), dz = tz + 0.5 - p.body.pos[2]; p.yaw = Math.atan2(-dx, -dz); p.pitch = Math.atan2(dy, Math.hypot(dx, dz)); };
+    const useOn = async (tx, ty, tz, held, aimY = 0.5) => { p.body.pos = [tx + 0.5, y, tz + 2.5]; p.body.vel = [0, 0, 0]; p.inv.slots[0] = held; p.selected = 0; look(tx, ty + aimY, tz); await sleep(120); G.use(); await sleep(150); };
+    w.setBlock(x + 2, y, z - 3, B.barrel);
+    await useOn(x + 2, y, z - 3, null);
+    out.barrel = document.querySelector('#container.show h3.with-sort')?.textContent?.startsWith('Barrel') ?? false;
+    G.containers.close(); await sleep(100);
+    w.setBlock(x + 4, y, z - 3, B.composter);
+    for (let i = 0; i < 40 && w.getMeta(x + 4, y, z - 3) < 7; i++) await useOn(x + 4, y, z - 3, { id: It.seeds, count: 64 });
+    await sleep(1300);
+    out.composterReady = w.getMeta(x + 4, y, z - 3) === 8;
+    await useOn(x + 4, y, z - 3, null);
+    await sleep(500);
+    out.boneMeal = E.list.some((e) => e.stack?.id === It.bone_meal) || p.inv.count(It.bone_meal) > 0;
+    w.setBlock(x - 1, y + 1, z - 4, B.stone);
+    w.setBlock(x - 1, y + 1, z - 3, B.item_frame, 0);
+    await useOn(x - 1, y + 1, z - 3, { id: It.diamond, count: 5 });
+    out.frame = w.getBlockEntity(x - 1, y + 1, z - 3)?.inv.slots[0]?.id === It.diamond && p.inv.slots[0]?.count === 4;
+    w.setBlock(x + 1, y, z - 1, B.flower_pot);
+    await useOn(x + 1, y, z - 1, { id: B.poppy, count: 1 }, 0.25);
+    out.pot = w.getMeta(x + 1, y, z - 1) > 0 && !p.inv.slots[0];
+    w.breakBlock(x + 1, y, z - 1, true);
+    await sleep(800);
+    out.potDrops = p.inv.count(B.poppy) >= 1 || E.list.some((e) => e.stack?.id === B.poppy);
+    // An anvil mends an iron pickaxe with ingots for experience levels.
+    w.setBlock(x + 6, y, z - 3, B.anvil, 0);
+    p.xpLevel = 10;
+    await useOn(x + 6, y, z - 3, null);
+    const c = G.containers;
+    c.anvilSlots = [{ id: It.iron_pickaxe, count: 1, damage: 120 }, { id: It.iron_ingot, count: 3 }];
+    c.render();
+    await sleep(100);
+    out.anvilCost = document.querySelector('.anvil-cost')?.textContent ?? '';
+    const res = document.querySelectorAll('#container .anvil .slot')[2];
+    res.dispatchEvent(new MouseEvent('click', { bubbles: true, button: 0, shiftKey: true }));
+    res.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0, shiftKey: true }));
+    await sleep(200);
+    const pick = p.inv.slots.find((s) => s?.id === It.iron_pickaxe);
+    out.anvil = { mended: pick ? pick.damage ?? 0 : null, level: p.xpLevel, ingots: c.anvilSlots[1]?.count ?? 0 };
+    c.close();
+    return out;
+  });
+  check('a comparator reads how full a chest is and powers a lamp, and goes dark when it empties', ws.comparator.level > 0 && ws.comparator.lamp && ws.comparatorOff, JSON.stringify(ws.comparator));
+  check('a campfire cooks food laid on it; a smoker cooks food twice as fast and won\'t smelt ore', ws.campfire && ws.smoker && ws.smokerOre, JSON.stringify(ws));
+  check('barrels store, composters turn plants into bone meal, item frames show an item, flower pots hold a plant', ws.barrel && ws.composterReady && ws.boneMeal && ws.frame && ws.pot && ws.potDrops, JSON.stringify(ws));
+  check('an anvil mends gear with its material for experience levels', ws.anvil.mended === 0 && ws.anvil.level === 8 && ws.anvil.ingots === 1 && /Costs 2 levels/.test(ws.anvilCost), JSON.stringify(ws.anvil) + ' ' + ws.anvilCost);
+}
+
 // --- Sound: music you can hear, and caves that echo.
 {
   const snd = await g(async () => {

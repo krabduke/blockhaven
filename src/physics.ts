@@ -88,6 +88,9 @@ export function collisionBox(id: number, meta: number): Box | null {
     case 'bed': return { min: [0, 0, 0], max: [1, 9 / 16, 1] };
     case 'table': return { min: [0, 0, 0], max: [1, 12 / 16, 1] };
     case 'frame': return { min: [0, 0, 0], max: [1, 13 / 16, 1] };
+    case 'campfire': return { min: [0, 0, 0], max: [1, 7 / 16, 1] };
+    case 'pot': return { min: [5 / 16, 0, 5 / 16], max: [11 / 16, 6 / 16, 11 / 16] };
+    case 'anvil': return (meta & 1) ? { min: [0, 0, 2 / 16], max: [1, 1, 14 / 16] } : { min: [2 / 16, 0, 0], max: [14 / 16, 1, 1] };
     case 'pane': return { min: [7 / 16, 0, 7 / 16], max: [9 / 16, 1, 9 / 16] };
     case 'trapdoor': return trapdoorBox(meta);
     case 'lantern': return id === B.bell ? { min: [4 / 16, 4 / 16, 4 / 16], max: [12 / 16, 1, 12 / 16] } : { min: [5 / 16, meta & 1 ? 2 / 16 : 0, 5 / 16], max: [11 / 16, (meta & 1 ? 2 / 16 : 0) + 9 / 16, 11 / 16] };
@@ -131,10 +134,12 @@ export function selectionBox(id: number, meta: number): Box | null {
     case 'portal': return null;
     case 'astralpool': return null;
     case 'rail': return { min: [0, 0, 0], max: [1, 2 / 16, 1] };
+    case 'comparator': return { min: [0, 0, 0], max: [1, 2 / 16, 1] };
     case 'banner':
       if (meta & 64) return { min: [0.3, 0, 0.3], max: [0.7, 1, 0.7] };
     // falls through: wall banners are picked like a ladder
     case 'painting':
+    case 'itemframe':
     case 'vine':
     case 'ladder': {
       const f = meta & 3, t = 2 / 16;
@@ -228,6 +233,8 @@ export class Body {
   inPortal = false;
   /** Standing in an Astral Gate. */
   inAstral = false;
+  /** Standing on a campfire. */
+  onCampfire = false;
   inFire = false;
   fallDistance = 0;
   constructor(x: number, y: number, z: number, public width: number, public height: number) {
@@ -333,7 +340,7 @@ export function moveBody(w: BlockReader, body: Body, dx: number, dy: number, dz:
 /** Update fluid / ladder contact flags. */
 export function updateContacts(w: BlockReader, body: Body, eyeHeight: number): void {
   const a = body.aabb();
-  body.inWater = false; body.inLava = false; body.onLadder = false; body.inWeb = false; body.inPortal = false; body.inAstral = false; body.inFire = false;
+  body.inWater = false; body.inLava = false; body.onLadder = false; body.inWeb = false; body.inPortal = false; body.inAstral = false; body.onCampfire = false; body.inFire = false;
   const x0 = Math.floor(a.min[0] + 0.001), x1 = Math.floor(a.max[0] - 0.001);
   const y0 = Math.floor(a.min[1] + 0.001), y1 = Math.floor(a.max[1] - 0.4);
   const z0 = Math.floor(a.min[2] + 0.001), z1 = Math.floor(a.max[2] - 0.001);
@@ -344,6 +351,7 @@ export function updateContacts(w: BlockReader, body: Body, eyeHeight: number): v
     else if (id === B.cobweb) body.inWeb = true;
     else if (id === B.portal) body.inPortal = true;
     else if (id === B.astral_portal) body.inAstral = true;
+    else if (id === B.campfire) body.onCampfire = true;
     else if (id === B.fire) body.inFire = true;
   }
   const fx = Math.floor(body.pos[0]), fz = Math.floor(body.pos[2]);

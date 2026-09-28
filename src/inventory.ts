@@ -17,7 +17,7 @@ export class Inventory {
     if (max > 1) {
       for (let i = from; i < to && left > 0; i++) {
         const s = this.slots[i];
-        if (s && s.id === stack.id && s.count < max && !s.ench?.length && !stack.ench?.length) {
+        if (s && s.id === stack.id && s.count < max && !s.ench?.length && !stack.ench?.length && s.name === stack.name) {
           const n = Math.min(left, max - s.count);
           s.count += n;
           left -= n;
@@ -43,8 +43,8 @@ export class Inventory {
     const items = this.slots.slice(from, to).filter((st): st is ItemStack => !!st);
     const merged: ItemStack[] = [];
     for (const st of items) {
-      const plain = !st.ench?.length && !st.damage && !st.charged;
-      const into = plain ? merged.find((m) => m.id === st.id && !m.ench?.length && !m.damage && !m.charged && m.count < maxStack(m.id)) : undefined;
+      const plain = !st.ench?.length && !st.damage && !st.charged && !st.name;
+      const into = plain ? merged.find((m) => m.id === st.id && !m.ench?.length && !m.damage && !m.charged && !m.name && m.count < maxStack(m.id)) : undefined;
       if (!into) { merged.push({ ...st }); continue; }
       const room = maxStack(st.id) - into.count, n = Math.min(room, st.count);
       into.count += n;

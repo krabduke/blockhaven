@@ -8,7 +8,7 @@
 //   light     Uint8 x4   (sky*16, block*16, ao/face brightness 0-255, unused)
 //   tint      Uint8 x4   (rgb multiplier, unused)
 
-import { B, BLOCKS, DIR6, DIR6_FACE, EMIT, OPAQUE, SHAPE_CUBE, connectsFence, isLeaves, isLog } from '../blocks';
+import { B, BLOCKS, DIR6, DIR6_FACE, EMIT, OPAQUE, POTTED, SHAPE_CUBE, connectsFence, isLeaves, isLog } from '../blocks';
 import { gateBox, stairBoxes } from '../physics';
 import { ROTATABLE, TILE_NAMES, TINTED, VARIANT_LAYERS, baseTile, tileIndex } from '../tiles';
 import { BIOME_TINT } from './worldgen';
@@ -195,7 +195,7 @@ export function meshSubchunk(input: MeshInput): SubMesh {
 
         if (SHAPE_CUBE[id]) {
           // Directional front face.
-          const directional = id === B.furnace || id === B.furnace_lit || id === B.crafting_table || id === B.pumpkin || id === B.chest;
+          const directional = id === B.furnace || id === B.furnace_lit || id === B.smoker || id === B.smoker_lit || id === B.crafting_table || id === B.pumpkin || id === B.chest;
           const axis = isLog(id) || id === B.basalt || id === B.hay_bale ? m & 3 : 0; // 1 = along x, 2 = along z
           const front = directional ? facingToFaceIndex(m) : -1;
           for (let f = 0; f < 6; f++) {
@@ -442,6 +442,82 @@ export function meshSubchunk(input: MeshInput): SubMesh {
             const d = DIR6[m & 7];
             const c = [0.5 + d[0] * 0.375, d[1] === -1 ? 2 / 16 : 6 / 16, 0.5 + d[2] * 0.375];
             emitBox(bld, blocks, light, x, y, z, [c[0] - 2 / 16, c[1] - 2 / 16, c[2] - 2 / 16], [c[0] + 2 / 16, c[1] + 2 / 16, c[2] + 2 / 16], side, i);
+            break;
+          }
+          case 'comparator': {
+            // A slab with two torches at the back (lit when it's putting out power) and one at the front (lit in subtract mode).
+            const f = m & 3, sub = (m & 4) !== 0, out = (m >> 3) & 15;
+            emitBoxFaces(bld, blocks, light, x, y, z, [0, 0, 0], [1, 2 / 16, 1], (fi) => (fi === 2 ? tileIndex(out ? 'comparator_on' : 'comparator') : tileIndex('stone')), i);
+            const hv = [[0, 1], [-1, 0], [0, -1], [1, 0]][f], side = [-hv[1], hv[0]];
+            const post = (along: number, across: number, lit: boolean, h: number) => {
+              const cx = 0.5 + hv[0] * along + side[0] * across, cz = 0.5 + hv[1] * along + side[1] * across;
+              emitBox(bld, blocks, light, x, y, z, [cx - 1 / 16, 2 / 16, cz - 1 / 16], [cx + 1 / 16, h, cz + 1 / 16], tileIndex(lit ? 'repeater_torch_on' : 'repeater_torch'), i);
+            };
+            post(-4 / 16, -4 / 16, out > 0, 7 / 16);
+            post(-4 / 16, 4 / 16, out > 0, 7 / 16);
+            post(5 / 16, 0, sub, 5 / 16);
+            break;
+          }
+          case 'anvil': {
+            // A heavy base, a waist and a long top, turned along x or z.
+            const along = (m & 1) === 1;
+            const B3 = (a: number[], b: number[]) => (along ? [a, b] : [[a[2], a[1], a[0]], [b[2], b[1], b[0]]]);
+            const tf = (fi: number) => tileIndex(fi === 2 ? 'anvil_top' : 'anvil_side');
+            for (const [a, b] of [[[2 / 16, 0, 2 / 16], [14 / 16, 4 / 16, 14 / 16]], [[4 / 16, 4 / 16, 5 / 16], [12 / 16, 10 / 16, 11 / 16]], [[0, 10 / 16, 3 / 16], [1, 1, 13 / 16]]]) {
+              const [mn, mx] = B3(a, b);
+              emitBoxFaces(bld, blocks, light, x, y, z, mn, mx, tf, i);
+            }
+            break;
+          }
+          case 'campfire': {
+            // Four logs in a square, and flames in the middle.
+            const lg = tileIndex('campfire_log');
+            for (const [mn, mx] of [[[0, 0, 1 / 16], [1, 4 / 16, 5 / 16]], [[0, 0, 11 / 16], [1, 4 / 16, 15 / 16]], [[1 / 16, 3 / 16, 0], [5 / 16, 7 / 16, 1]], [[11 / 16, 3 / 16, 0], [15 / 16, 7 / 16, 1]]]) emitBox(bld, blocks, light, x, y, z, mn, mx, lg, i);
+            const fire = tileIndex('campfire_fire'), s0 = skyAt(i), o = 0.2;
+            for (const [ax, az, bx, bz] of [[o, o, 1 - o, 1 - o], [o, 1 - o, 1 - o, o]]) {
+              bld.vert(x + ax, y + 1 / 16, z + az, 0, 1, fire, 0, s0, 15, 1, WHITE);
+              bld.vert(x + bx, y + 1 / 16, z + bz, 1, 1, fire, 0, s0, 15, 1, WHITE);
+              bld.vert(x + bx, y + 1, z + bz, 1, 0, fire, 0, s0, 15, 1, WHITE);
+              bld.vert(x + ax, y + 1, z + az, 0, 0, fire, 0, s0, 15, 1, WHITE);
+              bld.quad(false, true);
+            }
+            break;
+          }
+          case 'composter': {
+            // A wooden box, filled with compost up to its level.
+            const tf = (fi: number) => TILE_LAYERS[id * 6 + fi];
+            const t = 2 / 16;
+            emitBoxFaces(bld, blocks, light, x, y, z, [0, 0, 0], [1, t, 1], tf, i);
+            for (const [mn, mx] of [[[0, 0, 0], [t, 1, 1]], [[1 - t, 0, 0], [1, 1, 1]], [[t, 0, 0], [1 - t, 1, t]], [[t, 0, 1 - t], [1 - t, 1, 1]]]) emitBoxFaces(bld, blocks, light, x, y, z, mn, mx, (fi) => (fi === 2 ? tileIndex('composter_top') : TILE_LAYERS[id * 6 + fi]), i);
+            const lvl = Math.min(8, m);
+            if (lvl > 0) emitBox(bld, blocks, light, x, y, z, [t, t, t], [1 - t, t + (Math.min(7, lvl) / 7) * (13 / 16), 1 - t], tileIndex(lvl >= 8 ? 'compost_ready' : 'compost'), i);
+            break;
+          }
+          case 'itemframe': {
+            // A small board on the wall (the item in it is drawn separately).
+            const f = m & 3, d = 1 / 16;
+            const wall: [number[], number[]][] = [[[2 / 16, 2 / 16, 0], [14 / 16, 14 / 16, d]], [[1 - d, 2 / 16, 2 / 16], [1, 14 / 16, 14 / 16]], [[2 / 16, 2 / 16, 1 - d], [14 / 16, 14 / 16, 1]], [[0, 2 / 16, 2 / 16], [d, 14 / 16, 14 / 16]]];
+            const [mn, mx] = wall[f];
+            emitBox(bld, blocks, light, x, y, z, mn, mx, tileIndex('item_frame'), i);
+            break;
+          }
+          case 'pot': {
+            // A clay pot, with whatever's planted in it.
+            emitBox(bld, blocks, light, x, y, z, [5 / 16, 0, 5 / 16], [11 / 16, 6 / 16, 11 / 16], tileIndex('flower_pot'), i);
+            emitBox(bld, blocks, light, x, y, z, [6 / 16, 4 / 16, 6 / 16], [10 / 16, 5 / 16, 10 / 16], tileIndex('dirt'), i);
+            const plant = POTTED[m] ?? 0;
+            if (plant === B.cactus) emitBox(bld, blocks, light, x, y, z, [6 / 16, 5 / 16, 6 / 16], [10 / 16, 1, 10 / 16], TILE_LAYERS[B.cactus * 6], i);
+            else if (plant) {
+              const layer = TILE_LAYERS[plant * 6], s0 = skyAt(i), b0 = blkAt(i), o = 0.25;
+              const t = TINTED_LAYER[layer] ? tint : WHITE;
+              for (const [ax, az, bx, bz] of [[o, o, 1 - o, 1 - o], [o, 1 - o, 1 - o, o]]) {
+                bld.vert(x + ax, y + 5 / 16, z + az, 0, 1, layer, 0, s0, b0, 0.9, t);
+                bld.vert(x + bx, y + 5 / 16, z + bz, 1, 1, layer, 0, s0, b0, 0.9, t);
+                bld.vert(x + bx, y + 1, z + bz, 1, 0, layer, 0, s0, b0, 0.9, t);
+                bld.vert(x + ax, y + 1, z + az, 0, 0, layer, 0, s0, b0, 0.9, t);
+                bld.quad(false, true);
+              }
+            }
             break;
           }
           case 'repeater': {

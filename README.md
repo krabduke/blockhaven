@@ -42,6 +42,7 @@ All taken in-game at render distance 16 with the default Fancy graphics.
 | ![Timbered tunnels of an abandoned mine with rails and cobwebs](docs/screenshots/mine.png) | ![A sanctum hall around the Astral Gate over lava](docs/screenshots/sanctum.png) |
 | ![The Hollow: a pale island with obsidian pillars in a starry void](docs/screenshots/hollow.png) | ![The Hollow Colossus, mended by a beam from an anchor stone](docs/screenshots/colossus.png) |
 | ![Crossbow raiders and their banner-carrying captain beside a bee and a mossback](docs/screenshots/raiders.png) | ![Potatoes, redroot and carrots at every stage beside bee nests and hives](docs/screenshots/farm.png) |
+| ![A comparator, campfire, smoker, item frame, flower pot, barrel, composter and anvil at dusk](docs/screenshots/workshop.png) | |
 | ![The crafting table screen](docs/screenshots/crafting.png) | ![The enchanting table screen](docs/screenshots/enchanting.png) |
 
 ## Features
@@ -81,6 +82,7 @@ All taken in-game at render distance 16 with the default Fancy graphics.
 - Sound, all synthesized in the browser with no audio files: generative music that composes a new piece every few minutes in a mood that suits where you are (bright by day, modal at night, sparse in caves, dark in the Emberdeep, glassy in the Hollow; `/music` plays one now), wind that grows with height, surf, rain, birdsong, crickets, frogs, cave drips, and an echo on every sound when you're underground
 - Conveniences: a recipe book beside the crafting grid (search it, show only what you can make, click to lay a recipe out or Shift-click for as many as you can), a Sort button for your inventory and chests, auto-jump for one-block steps (Settings > Controls), difficulty from Peaceful to Hard (chosen when you create a world, changed from the pause menu or with `/difficulty`), a keep-inventory rule (`/gamerule keepInventory true`), and an Achievements and stats screen in the pause menu
 - Instruments and handling: a compass that points home, a clock with the day and time, paper maps that fill in as you explore, treasure maps (found in shipwrecks) that mark buried chests on the beach with an X, a spyglass (hold use to zoom), leads to walk animals and tie them to fences, and name tags (named creatures show their name and never wander off)
+- Workshop and home blocks: comparators (they read how full a container is, or compare and subtract signals), an anvil (mend gear with its material, combine two of the same, merge enchantments, rename things), campfires that cook without fuel and calm bees, a smoker that cooks food twice as fast, barrels, composters that turn plants into bone meal, item frames and flower pots
 - Farming: till with a hoe, then plant wheat and carrots, which grow in the light. Bone meal speeds up crops, saplings and grass
 - Achievements for the classic milestones
 
@@ -248,7 +250,7 @@ Every push runs lint, the unit tests, the playtest, the phone test and the two-p
 
 ## What's not in yet
 
-Comparators, map items, and more of multiplayer: shared chests and furnaces, travelling between dimensions together, and a way to connect through networks that block direct links.
+More of multiplayer: shared chests and furnaces, travelling between dimensions together, and a way to connect through networks that block direct links.
 
 ## Licence
 

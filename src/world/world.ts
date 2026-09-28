@@ -2,7 +2,7 @@
 // side effects (light, fluids, falling blocks, support), random ticks,
 // block entities, and scheduling chunk generation and meshing.
 
-import { B, BLOCKS, DIR6, EMIT, LIGHT_OPACITY, RAIL_DIRS, RAIL_EXITS, SOLID, isLeaves, isLog, isRail, type RailDir } from '../blocks';
+import { B, BLOCKS, DIR6, EMIT, LIGHT_OPACITY, POTTED, RAIL_DIRS, RAIL_EXITS, SOLID, isLeaves, isLog, isRail, type RailDir } from '../blocks';
 import { SMELTING } from '../crafting';
 import { BREW_TICKS, brewFuel, brewResult } from '../brewing';
 import { Inventory, type Slot } from '../inventory';
@@ -21,7 +21,13 @@ export interface SignBE { kind: 'sign'; lines: string[] }
 /** Slots: 0 ingredient, 1 fuel, 2-4 bottles. */
 export interface BrewingBE { kind: 'brewing'; inv: Inventory; fuel: number; brew: number }
 export interface HopperBE { kind: 'hopper'; inv: Inventory; cooldown: number }
-export type BlockEntity = ChestBE | FurnaceBE | SignBE | BrewingBE | HopperBE;
+/** Up to four things cooking on a campfire, each with its own timer. */
+export interface CampfireBE { kind: 'campfire'; inv: Inventory; cook: number[] }
+/** An item frame's one item. */
+export interface FrameBE { kind: 'frame'; inv: Inventory }
+export type BlockEntity = ChestBE | FurnaceBE | SignBE | BrewingBE | HopperBE | CampfireBE | FrameBE;
+/** Ticks for a campfire to cook one item. */
+export const CAMPFIRE_TICKS = 600;
 
 /** Horizontal facings used by furnaces, chests and repeaters: 0 south, 1 west, 2 north, 3 east. */
 const HVEC: [number, number, number][] = [[0, 0, 1], [-1, 0, 0], [0, 0, -1], [1, 0, 0]];
@@ -97,6 +103,9 @@ export class World implements ChunkSource {
   weatherTimer = 12000 + Math.floor(Math.random() * 60000);
   /** Positions of monster cages in loaded chunks. */
   readonly spawners = new Set<string>();
+  /** Comparators and campfires in loaded chunks (they're checked every few ticks). */
+  readonly comparators = new Set<string>();
+  readonly campfires = new Set<string>();
   tickCount = 0;
 
   onSubMesh: (cx: number, sy: number, cz: number, mesh: SubMesh | null) => void = () => {};
@@ -210,10 +219,14 @@ export class World implements ChunkSource {
     c.modified = true;
     c.version++;
     if (old === B.spawner) this.spawners.delete(`${x},${y},${z}`);
+    if (old === B.comparator) this.comparators.delete(`${x},${y},${z}`);
+    if (id === B.comparator) this.comparators.add(`${x},${y},${z}`);
+    if (old === B.campfire) this.campfires.delete(`${x},${y},${z}`);
+    if (id === B.campfire) this.campfires.add(`${x},${y},${z}`);
     if (id === B.spawner) this.spawners.add(`${x},${y},${z}`);
     if (old !== id) {
       const key = `${x},${y},${z}`;
-      if (this.blockEntities.has(key) && id !== B.furnace && id !== B.furnace_lit && id !== B.chest && id !== B.sign && id !== B.brewing_stand && id !== B.hopper) {
+      if (this.blockEntities.has(key) && id !== B.furnace && id !== B.furnace_lit && id !== B.smoker && id !== B.smoker_lit && id !== B.chest && id !== B.barrel && id !== B.sign && id !== B.brewing_stand && id !== B.hopper && id !== B.campfire && id !== B.item_frame) {
         const be = this.blockEntities.get(key)!;
         if (be.kind !== 'sign') for (const s of be.inv.slots) if (s) this.onDrop(x + 0.5, y + 0.5, z + 0.5, s);
         this.blockEntities.delete(key);
@@ -472,7 +485,7 @@ export class World implements ChunkSource {
       }
       // Pull one item in from the container above, or pick up items lying on top.
       const above = this.blockEntities.get(`${x},${y + 1},${z}`);
-      if (above && above.kind !== 'sign') {
+      if (above && above.kind !== 'sign' && above.kind !== 'frame' && above.kind !== 'campfire') {
         const slots = above.kind === 'furnace' ? [2] : above.kind === 'brewing' ? [2, 3, 4] : above.inv.slots.map((_, i) => i);
         for (const i of slots) {
           const s = above.inv.slots[i];
@@ -493,6 +506,9 @@ export class World implements ChunkSource {
       return false;
     };
     if (be.kind === 'furnace') return fromAbove ? slot(0) : !!itemDef(s.id)?.fuelTicks && slot(1);
+    // Campfires take one raw food per spot; frames aren't fed by hoppers.
+    if (be.kind === 'campfire') { const i = be.inv.slots.findIndex((x) => !x); if (i < 0 || SMELTING[s.id] === undefined || !itemDef(SMELTING[s.id])?.food) return false; be.inv.slots[i] = { ...s, count: 1 }; be.cook[i] = 0; return true; }
+    if (be.kind === 'frame') return false;
     if (be.kind === 'brewing') {
       if (brewFuel(s.id) && !fromAbove) return slot(1);
       if (s.id === I.water_bottle || itemDef(s.id)?.potion) return [2, 3, 4].some((i) => !be.inv.slots[i] && slot(i));
@@ -523,6 +539,10 @@ export class World implements ChunkSource {
       const v = HVEC[m & 3];
       return sx + v[0] === tx && sy === ty && sz + v[2] === tz ? 15 : 0;
     }
+    if (id === B.comparator) {
+      const m = this.getMeta(sx, sy, sz), v = HVEC[m & 3];
+      return sx + v[0] === tx && sy === ty && sz + v[2] === tz ? (m >> 3) & 15 : 0;
+    }
     if (id === B.watcher) {
       const m = this.getMeta(sx, sy, sz);
       if (!(m & 8)) return 0;
@@ -552,7 +572,7 @@ export class World implements ChunkSource {
           }
           if (sid === B.pressure_plate && ey === 1 && (this.getMeta(sx, sy, sz) & 1)) return true;
           // A repeater or watcher pointed into the block powers it through.
-          if ((sid === B.repeater || sid === B.watcher) && this.sourcePowerInto(sx, sy, sz, nx, ny, nz) > 0) return true;
+          if ((sid === B.repeater || sid === B.watcher || sid === B.comparator) && this.sourcePowerInto(sx, sy, sz, nx, ny, nz) > 0) return true;
         }
       }
     }
@@ -812,6 +832,7 @@ export class World implements ChunkSource {
         this.onDrop(x + 0.5, y + 0.5, z + 0.5, { id: 277, count: meta >= 7 ? 1 + Math.floor(this.rand() * 3) : 1 });
       }
       if (id === B.carrots) this.onDrop(x + 0.5, y + 0.5, z + 0.5, { id: 293, count: meta >= 7 ? 2 + Math.floor(this.rand() * 3) : 1 });
+      if (id === B.flower_pot && POTTED[meta]) this.onDrop(x + 0.5, y + 0.5, z + 0.5, { id: POTTED[meta], count: 1 });
       if (id === B.potatoes) this.onDrop(x + 0.5, y + 0.5, z + 0.5, { id: I.potato, count: meta >= 7 ? 1 + Math.floor(this.rand() * 4) : 1 });
       if (id === B.redroot) {
         if (meta >= 7) this.onDrop(x + 0.5, y + 0.5, z + 0.5, { id: I.redroot, count: 1 + Math.floor(this.rand() * 2) });
@@ -1042,6 +1063,66 @@ export class World implements ChunkSource {
     this.schedule(x, y, z, 20 + Math.floor(this.rand() * 10));
   }
 
+  // ---------- Campfires and comparators ----------
+  /** Raw food on a campfire cooks, then pops off the top. */
+  private tickCampfires(): void {
+    for (const key of this.campfires) {
+      const be = this.getBlockEntity(...(key.split(',').map(Number) as [number, number, number]));
+      if (!be || be.kind !== 'campfire') continue;
+      const [x, y, z] = key.split(',').map(Number);
+      be.inv.slots.forEach((st, i) => {
+        if (!st) { be.cook[i] = 0; return; }
+        if (++be.cook[i] < CAMPFIRE_TICKS) return;
+        be.inv.slots[i] = null;
+        be.cook[i] = 0;
+        const out = SMELTING[st.id];
+        if (out !== undefined) this.onDrop(x + 0.5, y + 0.6, z + 0.5, { id: out, count: 1 });
+      });
+    }
+  }
+
+  /** How full a container is, as a signal from 0 to 15 (-1 if it isn't one). */
+  containerSignal(x: number, y: number, z: number): number {
+    const id = this.getBlock(x, y, z);
+    if (id === B.composter) { const m = this.getMeta(x, y, z); return m >= 8 ? 15 : m * 2; }
+    if (id !== B.chest && id !== B.barrel && id !== B.furnace && id !== B.furnace_lit && id !== B.smoker && id !== B.smoker_lit && id !== B.hopper && id !== B.brewing_stand && id !== B.item_frame && id !== B.campfire) return -1;
+    const be = this.getBlockEntity(x, y, z);
+    if (!be || be.kind === 'sign') return 0;
+    let fill = 0, any = false;
+    for (const s of be.inv.slots) if (s) { any = true; fill += s.count / (itemDef(s.id)?.maxStack ?? 64); }
+    return any ? Math.min(15, 1 + Math.floor((fill / be.inv.size) * 14)) : 0;
+  }
+
+  /** Signal a neighbour sends into (x, y, z): a source, live wire, or a powered block. */
+  private signalFrom(nx: number, ny: number, nz: number, x: number, y: number, z: number): number {
+    const nid = this.getBlock(nx, ny, nz);
+    if (nid === B.wire) return this.getMeta(nx, ny, nz) & 15;
+    return this.sourcePowerInto(nx, ny, nz, x, y, z);
+  }
+
+  /** A comparator's output: compare (pass the rear signal unless a side is stronger) or subtract. */
+  comparatorOutput(x: number, y: number, z: number): number {
+    const m = this.getMeta(x, y, z), v = HVEC[m & 3];
+    const bx = x - v[0], bz = z - v[2];
+    let input = this.containerSignal(bx, y, bz);
+    if (input < 0) input = Math.max(this.signalFrom(bx, y, bz, x, y, z), SOLID[this.getBlock(bx, y, bz)] && this.isPowered(bx, y, bz) ? 15 : 0);
+    const sx = -v[2], sz = v[0];
+    const side = Math.max(this.signalFrom(x + sx, y, z + sz, x, y, z), this.signalFrom(x - sx, y, z - sz, x, y, z));
+    return (m & 4) ? Math.max(0, input - side) : input >= side ? input : 0;
+  }
+
+  private tickComparators(): void {
+    for (const key of this.comparators) {
+      const [x, y, z] = key.split(',').map(Number);
+      if (this.getBlock(x, y, z) !== B.comparator) continue;
+      const m = this.getMeta(x, y, z), out = this.comparatorOutput(x, y, z);
+      if (((m >> 3) & 15) === out) continue;
+      this.setMetaQuiet(x, y, z, (m & 7) | (out << 3));
+      const v = HVEC[m & 3];
+      this.updatePower(x + v[0], y, z + v[2]);
+    }
+  }
+
   // ---------- The Astral Gate ----------
   /** If the frame at (x, y, z) completes a ring of twelve filled frames, open the gate inside it. */
   tryOpenAstralGate(x: number, y: number, z: number): boolean {
@@ -1065,7 +1146,7 @@ export class World implements ChunkSource {
     let be = this.blockEntities.get(key);
     const id = this.getBlock(x, y, z);
     if (!be) {
-      if (id === B.chest) {
+      if (id === B.chest || id === B.barrel) {
         be = { kind: 'chest', inv: new Inventory(27) };
         const m = this.getMeta(x, y, z);
         if (m & 16) {
@@ -1073,7 +1154,9 @@ export class World implements ChunkSource {
           this.setMeta(x, y, z, m & 15);
         }
       }
-      else if (id === B.furnace || id === B.furnace_lit) be = { kind: 'furnace', inv: new Inventory(3), burn: 0, burnMax: 0, cook: 0 };
+      else if (id === B.furnace || id === B.furnace_lit || id === B.smoker || id === B.smoker_lit) be = { kind: 'furnace', inv: new Inventory(3), burn: 0, burnMax: 0, cook: 0 };
+      else if (id === B.campfire) be = { kind: 'campfire', inv: new Inventory(4), cook: [0, 0, 0, 0] };
+      else if (id === B.item_frame) be = { kind: 'frame', inv: new Inventory(1) };
       else if (id === B.sign) be = { kind: 'sign', lines: ['', '', '', ''] };
       else if (id === B.brewing_stand) be = { kind: 'brewing', inv: new Inventory(5), fuel: 0, brew: 0 };
       else if (id === B.hopper) be = { kind: 'hopper', inv: new Inventory(5), cooldown: 0 };
@@ -1112,7 +1195,11 @@ export class World implements ChunkSource {
       const [x, y, z] = key.split(',').map(Number);
       if (!this.isLoaded(x, z)) continue;
       const [input, fuel, output] = be.inv.slots;
-      const result = input ? SMELTING[input.id] : undefined;
+      const blockId = this.getBlock(x, y, z);
+      const smoker = blockId === B.smoker || blockId === B.smoker_lit;
+      let result = input ? SMELTING[input.id] : undefined;
+      // A smoker only cooks food, but does it twice as fast.
+      if (smoker && result !== undefined && !itemDef(result)?.food) result = undefined;
       const canSmelt = result !== undefined && (!output || (output.id === result && output.count < (itemDef(result)?.maxStack ?? 64)));
       const wasBurning = be.burn > 0;
       if (be.burn > 0) be.burn--;
@@ -1122,7 +1209,7 @@ export class World implements ChunkSource {
         else be.inv.removeOne(1);
       }
       if (be.burn > 0 && canSmelt) {
-        be.cook++;
+        be.cook += smoker ? 2 : 1;
         if (be.cook >= 200) {
           be.cook = 0;
           be.inv.removeOne(0);
@@ -1133,8 +1220,8 @@ export class World implements ChunkSource {
       const burning = be.burn > 0;
       if (burning !== wasBurning) {
         const id = this.getBlock(x, y, z);
-        const want = burning ? B.furnace_lit : B.furnace;
-        if (id !== want && (id === B.furnace || id === B.furnace_lit)) {
+        const want = smoker ? (burning ? B.smoker_lit : B.smoker) : burning ? B.furnace_lit : B.furnace;
+        if (id !== want && (id === B.furnace || id === B.furnace_lit || id === B.smoker || id === B.smoker_lit)) {
           const m = this.getMeta(x, y, z);
           const saved = this.blockEntities.get(key)!;
           this.setBlock(x, y, z, want, m);
@@ -1170,6 +1257,8 @@ export class World implements ChunkSource {
     this.tickFurnaces();
     this.tickBrewing();
     this.tickHoppers();
+    this.tickCampfires();
+    if (this.tickCount % 2 === 0) this.tickComparators();
     if (randomTicks) {
       this.randomTicks(px, py, pz);
       // Around other players too, skipping chunks already covered.
@@ -1344,6 +1433,12 @@ export class World implements ChunkSource {
     this.chunks.set(key, chunk);
     this.light.stitch(chunk);
     for (const i of res.spawners ?? []) this.spawners.add(`${cx * 16 + (i & 15)},${i >> 8},${cz * 16 + ((i >> 4) & 15)}`);
+    // Only player-built chunks can hold comparators and campfires.
+    if (saved) for (let i = 0; i < VOLUME; i++) {
+      const b = res.blocks[i];
+      if (b !== B.comparator && b !== B.campfire) continue;
+      (b === B.comparator ? this.comparators : this.campfires).add(`${cx * 16 + (i & 15)},${i >> 8},${cz * 16 + ((i >> 4) & 15)}`);
+    }
     // Resume fluids and falling blocks that were mid-flow when saved.
     if (saved) this.rescanPending(chunk);
     if (res.spawns?.length && !this.spawnedChunks.has(key)) this.onSpawns(res.spawns);
@@ -1371,9 +1466,9 @@ export class World implements ChunkSource {
       });
     }
     this.chunks.delete(key);
-    for (const s of [...this.spawners]) {
+    for (const set of [this.spawners, this.comparators, this.campfires]) for (const s of [...set]) {
       const [sx, , sz] = s.split(',').map(Number);
-      if (sx >> 4 === c.cx && sz >> 4 === c.cz) this.spawners.delete(s);
+      if (sx >> 4 === c.cx && sz >> 4 === c.cz) set.delete(s);
     }
     if (this.lastChunk === c) this.lastChunk = undefined;
     this.onChunkUnload(c.cx, c.cz);
@@ -1483,6 +1578,8 @@ export class World implements ChunkSource {
         : be.kind === 'chest' ? { kind: 'chest', slots: be.inv.toJSON() }
           : be.kind === 'brewing' ? { kind: 'brewing', slots: be.inv.toJSON(), fuel: be.fuel, brew: be.brew }
             : be.kind === 'hopper' ? { kind: 'hopper', slots: be.inv.toJSON() }
+            : be.kind === 'campfire' ? { kind: 'campfire', slots: be.inv.toJSON(), cooks: be.cook }
+            : be.kind === 'frame' ? { kind: 'frame', slots: be.inv.toJSON() }
             : { kind: 'furnace', slots: be.inv.toJSON(), burn: be.burn, burnMax: be.burnMax, cook: be.cook };
     }
     return out;
@@ -1490,9 +1587,11 @@ export class World implements ChunkSource {
 
   loadBlockEntities(data: unknown): void {
     if (!data || typeof data !== 'object') return;
-    for (const [k, v] of Object.entries(data as Record<string, { kind: string; slots: Slot[]; burn?: number; burnMax?: number; cook?: number; lines?: string[]; fuel?: number; brew?: number }>)) {
+    for (const [k, v] of Object.entries(data as Record<string, { kind: string; slots: Slot[]; burn?: number; burnMax?: number; cook?: number; lines?: string[]; fuel?: number; brew?: number; cooks?: number[] }>)) {
       if (v.kind === 'brewing') { const inv = new Inventory(5); inv.load(v.slots); this.blockEntities.set(k, { kind: 'brewing', inv, fuel: v.fuel ?? 0, brew: v.brew ?? 0 }); continue; }
       if (v.kind === 'hopper') { const inv = new Inventory(5); inv.load(v.slots); this.blockEntities.set(k, { kind: 'hopper', inv, cooldown: 0 }); continue; }
+      if (v.kind === 'campfire') { const inv = new Inventory(4); inv.load(v.slots); this.blockEntities.set(k, { kind: 'campfire', inv, cook: (v.cooks ?? [0, 0, 0, 0]).slice(0, 4) }); continue; }
+      if (v.kind === 'frame') { const inv = new Inventory(1); inv.load(v.slots); this.blockEntities.set(k, { kind: 'frame', inv }); continue; }
       if (v.kind === 'sign') { this.blockEntities.set(k, { kind: 'sign', lines: (v.lines ?? []).slice(0, 4).map(String) }); continue; }
       if (v.kind === 'chest') {
         const inv = new Inventory(27); inv.load(v.slots);

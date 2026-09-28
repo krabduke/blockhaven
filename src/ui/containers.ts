@@ -2,6 +2,7 @@
 // crafting table, furnace, chest and the creative item palette.
 
 import { sfx } from '../audio';
+import { anvilResult, type AnvilResult } from '../anvil';
 import { SMELTING, assignPlan, craft, planFits, recipePlans, timesCraftable, type RecipePlan } from '../crafting';
 import type { Inventory, Slot } from '../inventory';
 import { BREW_TICKS, brewFuel, isBrewIngredient } from '../brewing';
@@ -17,7 +18,7 @@ import type { Player } from '../player';
 import type { BrewingBE, FurnaceBE, HopperBE } from '../world/world';
 import { slotHTML } from './hud';
 
-export type ContainerKind = 'player' | 'crafting' | 'furnace' | 'chest' | 'creative' | 'enchant' | 'trade' | 'brewing' | 'hopper';
+export type ContainerKind = 'player' | 'crafting' | 'furnace' | 'chest' | 'creative' | 'enchant' | 'trade' | 'brewing' | 'hopper' | 'anvil';
 
 interface SlotRef {
   get(): Slot;
@@ -27,6 +28,8 @@ interface SlotRef {
   group: 'player' | 'hotbar' | 'container' | 'craft' | 'armor';
   /** Armor slots accept only their piece type. */
   accepts?: (s: ItemStack) => boolean;
+  /** A result slot with its own way of being taken (the anvil). */
+  take?: () => ItemStack | null;
   el?: HTMLElement;
 }
 
@@ -42,6 +45,12 @@ export class ContainerScreen {
   private brewing: BrewingBE | null = null;
   private hopper: HopperBE | null = null;
   private chest: Inventory | null = null;
+  /** A title for chest-like and furnace-like screens (Barrel, Smoker). */
+  private title = '';
+  /** Anvil: the item, the material or second item, and the name typed in. */
+  private anvilSlots: Slot[] = [null, null];
+  private anvilName = '';
+  private anvilCostEl: HTMLElement | null = null;
   private cursorEl: HTMLElement;
   private tooltip: HTMLElement;
   private hovered: SlotRef | null = null;
@@ -109,7 +118,8 @@ export class ContainerScreen {
   private villager: { offers: TradeOffer[]; profession: string } | null = null;
   onTraded: () => void = () => {};
 
-  show(kind: ContainerKind, opts: { furnace?: FurnaceBE; chest?: Inventory; bookshelves?: number; villager?: { offers: TradeOffer[]; profession: string }; brewing?: BrewingBE; hopper?: HopperBE } = {}): void {
+  show(kind: ContainerKind, opts: { furnace?: FurnaceBE; chest?: Inventory; bookshelves?: number; villager?: { offers: TradeOffer[]; profession: string }; brewing?: BrewingBE; hopper?: HopperBE; title?: string } = {}): void {
+    this.title = opts.title ?? '';
     this.brewing = opts.brewing ?? null;
     this.hopper = opts.hopper ?? null;
     this.kind = kind;
@@ -131,7 +141,7 @@ export class ContainerScreen {
     if (!this.open) return;
     this.open = false;
     // Return crafting grid and cursor items to the inventory (drop what doesn't fit).
-    for (const s of [...this.craftGrid, this.cursor, this.enchantSlot]) {
+    for (const s of [...this.craftGrid, this.cursor, this.enchantSlot, ...this.anvilSlots]) {
       if (!s) continue;
       const left = this.player.inv.add(s);
       if (left) this.onDrop(left);
@@ -139,6 +149,8 @@ export class ContainerScreen {
     this.craftGrid = [];
     this.cursor = null;
     this.enchantSlot = null;
+    this.anvilSlots = [null, null];
+    this.anvilName = '';
     this.root.classList.remove('show');
     this.cursorEl.innerHTML = '';
     this.tooltip.style.display = 'none';
@@ -185,7 +197,7 @@ export class ContainerScreen {
     if (!s || this.cursor) { this.tooltip.style.display = 'none'; return; }
     const d = itemDef(s.id);
     const max = maxDurability(s.id);
-    let html = escapeHtml(d?.name ?? '');
+    let html = s.name ? `<i>${escapeHtml(s.name)}</i>` : escapeHtml(d?.name ?? '');
     for (const e of s.ench ?? []) html += `<br><span style="color:#b8a0f0">${ENCHANT_NAMES[e.id]} ${roman(e.level)}</span>`;
     if (d?.armor) html += `<br><span style="color:#8ab0f0">+${d.armor.points} armor</span>`;
     if (max && s.damage) html += `<br><span style="color:#b9ad95">Durability ${max - s.damage} / ${max}</span>`;
@@ -330,8 +342,11 @@ export class ContainerScreen {
       top.appendChild(Object.assign(document.createElement('div'), { className: 'arrow', textContent: '⇨' }));
       const result: SlotRef = { get: () => craft(this.craftGrid, w), set: () => {}, role: 'result', group: 'craft' };
       top.appendChild(this.slot(result, true));
+    } else if (this.kind === 'anvil') {
+      top.appendChild(this.buildAnvil());
     } else if (this.kind === 'furnace' && this.furnace) {
       const f = this.furnace;
+      if (this.title) { const h = document.createElement('h3'); h.textContent = this.title; h.className = 'furnace-title'; top.appendChild(h); }
       const col = document.createElement('div');
       col.className = 'furnace-col';
       col.appendChild(this.slot(this.invRef(f.inv, 0, 'container')));
@@ -382,7 +397,7 @@ export class ContainerScreen {
     } else if (this.kind === 'chest' && this.chest) {
       const chest = this.chest;
       const t = document.createElement('div');
-      const h = document.createElement('h3'); h.textContent = 'Chest'; h.className = 'with-sort';
+      const h = document.createElement('h3'); h.textContent = this.title || 'Chest'; h.className = 'with-sort';
       h.appendChild(this.sortButton(() => chest.sort(sortRank), 'Sort this chest'));
       t.appendChild(h);
       t.appendChild(this.grid(9, Array.from({ length: 27 }, (_, i) => this.invRef(chest, i, 'container'))));
@@ -410,6 +425,58 @@ export class ContainerScreen {
     b.title = title;
     b.addEventListener('click', () => { run(); sfx.click(); this.render(); });
     return b;
+  }
+
+  // ---------- Anvil ----------
+  private anvilJob(): AnvilResult | null { return anvilResult(this.anvilSlots[0], this.anvilSlots[1], this.anvilName); }
+
+  private buildAnvil(): HTMLElement {
+    const wrap = document.createElement('div');
+    wrap.className = 'anvil';
+    const h = document.createElement('h3');
+    h.textContent = 'Anvil';
+    const name = document.createElement('input');
+    name.className = 'field anvil-name';
+    name.maxLength = 30;
+    name.placeholder = 'Name (optional)';
+    name.setAttribute('aria-label', 'New name');
+    name.value = this.anvilName;
+    name.addEventListener('keydown', (e) => { e.stopPropagation(); if (e.key === 'Escape') { e.preventDefault(); this.close(); } else if (e.key === 'Enter') name.blur(); });
+    name.addEventListener('input', () => { this.anvilName = name.value; this.render(); });
+    const row = document.createElement('div');
+    row.className = 'anvil-row';
+    const slotRef = (i: number): SlotRef => ({ get: () => this.anvilSlots[i], set: (s) => {
+      this.anvilSlots[i] = s;
+      // Show the item's current name to edit when it goes in.
+      if (i === 0) { this.anvilName = s?.name ?? ''; const n = this.root.querySelector('input.anvil-name') as HTMLInputElement | null; if (n) n.value = this.anvilName; }
+    }, role: 'normal', group: 'container' });
+    const out: SlotRef = { get: () => { const j = this.anvilJob(); return j && this.canAfford(j) ? j.out : null; }, set: () => {}, role: 'result', group: 'container' };
+    out.take = () => this.takeAnvil();
+    row.append(this.slot(slotRef(0)), Object.assign(document.createElement('span'), { className: 'plus', textContent: '+' }), this.slot(slotRef(1)), Object.assign(document.createElement('div'), { className: 'arrow', textContent: '⇨' }), this.slot(out, true));
+    const cost = document.createElement('p');
+    cost.className = 'anvil-cost';
+    this.anvilCostEl = cost;
+    wrap.append(h, name, row, cost);
+    return wrap;
+  }
+
+  private canAfford(j: AnvilResult): boolean {
+    return !j.tooExpensive && (this.player.creative || this.player.xpLevel >= j.cost);
+  }
+
+  /** Take the anvil's result: uses up the item, some of the material, and the levels. */
+  private takeAnvil(): ItemStack | null {
+    const j = this.anvilJob();
+    if (!j || !this.canAfford(j)) return null;
+    this.anvilSlots[0] = null;
+    const b = this.anvilSlots[1];
+    if (b && j.useB) { b.count -= j.useB; if (b.count <= 0) this.anvilSlots[1] = null; }
+    if (!this.player.creative) this.player.spendLevels(j.cost);
+    this.anvilName = '';
+    const n = this.root.querySelector('input.anvil-name') as HTMLInputElement | null;
+    if (n) n.value = '';
+    sfx.anvil();
+    return j.out;
   }
 
   // ---------- Recipe book ----------
@@ -640,6 +707,13 @@ export class ContainerScreen {
     }
     this.cursorEl.innerHTML = this.cursor ? slotHTML(this.cursor.id, this.cursor.count, this.cursor.damage, !!this.cursor.ench?.length) : '';
     this.renderBook();
+    if (this.kind === 'anvil' && this.anvilCostEl) {
+      const j = this.anvilJob();
+      const el = this.anvilCostEl;
+      el.textContent = !j ? (this.anvilSlots[0] ? 'Add material to mend it, a matching item to combine, or type a new name.' : 'Put in something to mend, combine or rename.')
+        : j.tooExpensive ? 'Too expensive' : `Costs ${j.cost} level${j.cost === 1 ? '' : 's'}`;
+      el.classList.toggle('bad', !!j && !this.canAfford(j));
+    }
     if (this.brewing && this.progressEls.cook) {
       this.progressEls.cook.style.height = `${(this.brewing.brew / BREW_TICKS) * 100}%`;
       this.progressEls.burn!.style.width = `${Math.min(100, (this.brewing.fuel / 10) * 100)}%`;
@@ -668,6 +742,14 @@ export class ContainerScreen {
       const s = ref.get()!;
       if (this.cursor) this.cursor = null;
       else this.cursor = { id: s.id, count: shift ? maxStack(s.id) : button === 2 ? 1 : maxStack(s.id) };
+      this.render();
+      return;
+    }
+    if (ref.role === 'result' && ref.take) {
+      if (this.cursor || !ref.get()) return;
+      const got = ref.take();
+      if (!got) return;
+      if (shift) { const left = inv.add(got); if (left) this.onDrop(left); } else this.cursor = got;
       this.render();
       return;
     }

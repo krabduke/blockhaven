@@ -259,6 +259,10 @@ export interface ItemStack {
   charged?: boolean;
   /** A filled map: which picture it shows (kept with the world). */
   map?: number;
+  /** A name given at an anvil. */
+  name?: string;
+  /** Times it's been worked at an anvil (each makes the next job dearer). */
+  anviled?: number;
   ench?: Enchant[];
 }
 

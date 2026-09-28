@@ -1001,6 +1001,55 @@ tile('lead', (p) => {
   p.rect(11, 9, 3, 2, hex('#5a9a4a'));
 });
 
+// ---------- Workshop and home: comparator, anvil, campfire, smoker, barrel, composter, frames, pots ----------
+tile('comparator', (p) => { painters['repeater'](p); p.rect(3, 7, 10, 2, hex('#6a2a2a')); });
+tile('comparator_on', (p) => { painters['repeater'](p); p.rect(3, 7, 10, 2, hex('#e84a3a')); });
+tile('comparator_item', (p) => {
+  p.transparent();
+  p.rect(1, 9, 14, 5, hex('#8a8a8e')); p.rect(1, 9, 14, 1, hex('#a8a8ac'));
+  for (const x of [3, 11]) { p.rect(x, 4, 2, 5, hex('#6a4a2a')); p.rect(x, 3, 2, 2, hex('#e84a3a')); }
+  p.rect(7, 6, 2, 3, hex('#6a4a2a')); p.rect(7, 5, 2, 1, hex('#8a3a2a'));
+});
+const iron = (p: Painter) => { p.ramp(p.field(3, 2), [hex('#3a3a3e'), hex('#46464a'), hex('#525256')], 0.05); };
+tile('anvil_top', (p) => { iron(p); p.rect(0, 0, 16, 1, hex('#6a6a6e')); p.rect(3, 4, 10, 8, hex('#2e2e32')); p.rect(4, 5, 8, 6, hex('#3a3a3e')); });
+tile('anvil_side', (p) => { iron(p); p.rect(0, 0, 16, 1, hex('#6a6a6e')); p.rect(0, 15, 16, 1, hex('#26262a')); });
+tile('anvil_item', (p) => {
+  p.transparent();
+  p.rect(1, 3, 14, 4, hex('#4a4a4e')); p.rect(1, 3, 14, 1, hex('#6a6a6e')); p.rect(0, 4, 2, 2, hex('#4a4a4e'));
+  p.rect(5, 7, 6, 4, hex('#3e3e42')); p.rect(3, 11, 10, 3, hex('#46464a')); p.rect(3, 13, 10, 1, hex('#2a2a2e'));
+});
+tile('campfire_log', (p) => { p.fill(C.plankDark ?? hex('#5a3a22'), 0.06); for (let y = 0; y < S; y += 4) p.rect(0, y, 16, 1, hex('#3a2414')); p.speckle(hex('#1a1008'), 0.08); });
+tile('campfire_fire', (p) => {
+  p.transparent();
+  for (let x = 2; x < 14; x++) {
+    const h = 6 + Math.floor(p.rand() * 8) - Math.abs(x - 8);
+    for (let y = S - 1; y >= S - h; y--) { const t = (S - 1 - y) / h; p.set(x, y, hex(t < 0.35 ? '#fff0a0' : t < 0.7 ? '#f8a030' : '#d8482a')); }
+  }
+});
+tile('campfire_item', (p) => {
+  p.transparent();
+  for (let x = 3; x < 13; x++) { const h = 3 + Math.floor(p.rand() * 5) - (Math.abs(x - 8) >> 1); for (let y = 10; y > 10 - h; y--) p.set(x, y, hex(y > 8 ? '#f8a030' : '#fff0a0')); }
+  p.rect(1, 11, 14, 2, hex('#6a4428')); p.rect(2, 13, 12, 2, hex('#5a3a22')); p.rect(1, 11, 14, 1, hex('#8a5a34'));
+});
+tile('smoker_top', (p) => { p.fill(hex('#5a4a3a'), 0.06); p.border(hex('#3a2e24')); p.rect(5, 5, 6, 6, hex('#2a2018')); });
+tile('smoker_side', (p) => { p.bevelStones([hex('#6a6a6e'), hex('#7a7a7e'), hex('#88888c')], hex('#4a4a4e'), 6); p.rect(0, 0, 16, 3, hex('#5a4a3a')); p.rect(0, 13, 16, 3, hex('#5a4a3a')); });
+const smokerFront = (lit: boolean) => (p: Painter) => { painters['smoker_side'](p); p.rect(3, 6, 10, 6, hex('#1a1410')); if (lit) for (let x = 4; x < 12; x++) { const h = 2 + Math.floor(p.rand() * 3); p.rect(x, 12 - h, 1, h, hex(h > 3 ? '#f8a030' : '#d8482a')); } p.rect(3, 5, 10, 1, hex('#3a3a3e')); };
+tile('smoker_front', smokerFront(false));
+tile('smoker_front_lit', smokerFront(true));
+tile('barrel_side', (p) => { p.fill(hex('#8a5e34'), 0.05); for (let x = 0; x < S; x += 4) p.rect(x, 0, 1, 16, hex('#6a4424')); for (const y of [2, 13]) p.rect(0, y, 16, 1, hex('#4a4a4e')); });
+tile('barrel_top', (p) => { p.fill(hex('#9a6a3c'), 0.05); p.border(hex('#6a4424')); p.rect(3, 3, 10, 10, hex('#8a5e34')); p.rect(6, 7, 4, 2, hex('#4a3018')); });
+tile('barrel_bottom', (p) => { p.fill(hex('#8a5e34'), 0.05); p.border(hex('#6a4424')); });
+tile('composter_side', (p) => { p.fill(hex('#8a6a3c'), 0.05); for (let y = 0; y < S; y += 5) p.rect(0, y, 16, 1, hex('#5a4020')); p.border(hex('#5a4020')); });
+tile('composter_top', (p) => { p.fill(hex('#8a6a3c'), 0.05); p.border(hex('#5a4020')); });
+tile('composter_bottom', (p) => { p.fill(hex('#7a5a30'), 0.05); });
+tile('composter_item', (p) => { p.transparent(); p.rect(2, 4, 12, 10, hex('#8a6a3c')); p.rect(4, 4, 8, 3, hex('#4a6a2a')); for (const y of [7, 10]) p.rect(2, y, 12, 1, hex('#5a4020')); });
+tile('compost', (p) => { p.fill(hex('#4a3a24'), 0.1); p.speckle(hex('#5a7a2a'), 0.25, 0.1); });
+tile('compost_ready', (p) => { p.fill(hex('#5a4a34'), 0.1); p.speckle(hex('#e8e0c8'), 0.3, 0.05); });
+tile('item_frame', (p) => { p.fill(hex('#c8a878'), 0.05); p.border(hex('#6a4a28')); p.rect(1, 1, 14, 1, hex('#8a6a3c')); p.rect(1, 14, 14, 1, hex('#8a6a3c')); p.rect(2, 2, 12, 12, hex('#b89868')); });
+tile('item_frame_item', (p) => { p.transparent(); p.rect(1, 1, 14, 14, hex('#8a6a3c')); p.rect(2, 2, 12, 12, hex('#c8a878')); p.rect(5, 5, 6, 6, hex('#6a9a4a')); });
+tile('flower_pot', (p) => { p.fill(hex('#a0583a'), 0.06); p.rect(0, 0, 16, 2, hex('#b86a48')); p.speckle(hex('#8a4a30'), 0.08); });
+tile('flower_pot_item', (p) => { p.transparent(); p.rect(4, 7, 8, 8, hex('#a0583a')); p.rect(3, 7, 10, 2, hex('#b86a48')); p.rect(5, 8, 6, 1, hex('#4a3020')); });
+
 // ---------- Batch 3: Emberdeep, villages, building blocks ----------
 tile('portal', (p) => {
   for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) {

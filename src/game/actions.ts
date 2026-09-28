@@ -2,7 +2,8 @@
 // blocks, fishing, archery, sleeping and dropping items.
 
 import { sfx, spatial } from '../audio';
-import { B, BLOCKS, DYE_COLORS, SOLID, WOOL_KEY, isLeaves, isLog, isRail } from '../blocks';
+import { B, BLOCKS, DYE_COLORS, POTTED, SOLID, WOOL_KEY, isLeaves, isLog, isRail } from '../blocks';
+import { SMELTING } from '../crafting';
 import { Bobber, SeekerOrb, TntEntity } from '../entities/entities';
 import { Boat, Minecart } from '../entities/vehicles';
 import { I, coloredItem, enchLevel, itemDef, maxStack, type ItemStack } from '../items';
@@ -428,7 +429,7 @@ export class Actions {
         sfx.place('wood');
         this.renderer.swingHand();
         let smoked = false;
-        for (let dy = 1; dy <= 5 && !smoked; dy++) for (let dx = -1; dx <= 1; dx++) for (let dz = -1; dz <= 1; dz++) { const b = w.getBlock(x + dx, y - dy, z + dz); if (b === B.torch || b === B.fire || b === B.lantern) smoked = true; }
+        for (let dy = 1; dy <= 5 && !smoked; dy++) for (let dx = -1; dx <= 1; dx++) for (let dz = -1; dz <= 1; dz++) { const b = w.getBlock(x + dx, y - dy, z + dz); if (b === B.torch || b === B.fire || b === B.lantern || b === B.campfire) smoked = true; }
         if (!smoked) for (const b of this.entities.mobs()) if (b.spec.kind === 'bee' && Math.hypot(b.body.pos[0] - x, b.body.pos[2] - z) < 16) b.beeAnger = 400;
         return;
       }
@@ -439,7 +440,8 @@ export class Actions {
         return;
       }
       // In someone else's world, containers stay with the host for now.
-      if (this.g.net && 'guest' in this.g.net && (id === B.hopper || id === B.brewing_stand || id === B.furnace || id === B.furnace_lit || id === B.chest)) { this.g.toast('Only the host can open this in a shared world.', 3); return; }
+      if (this.g.net && 'guest' in this.g.net && (id === B.hopper || id === B.brewing_stand || id === B.furnace || id === B.furnace_lit || id === B.chest || id === B.barrel || id === B.smoker || id === B.smoker_lit || id === B.campfire || id === B.item_frame)) { this.g.toast('Only the host can use this in a shared world.', 3); return; }
+      if (this.useWorkshopBlock(x, y, z, id, held, consume)) return;
       if (id === B.hopper) { const be = w.getBlockEntity(x, y, z); if (be?.kind === 'hopper') { document.exitPointerLock(); this.containers.show('hopper', { hopper: be }); } return; }
       if (id === B.brewing_stand) { const be = w.getBlockEntity(x, y, z); if (be?.kind === 'brewing') { document.exitPointerLock(); this.containers.show('brewing', { brewing: be }); } return; }
       if (id === B.furnace || id === B.furnace_lit) { const be = w.getBlockEntity(x, y, z); if (be?.kind === 'furnace') { document.exitPointerLock(); this.containers.show('furnace', { furnace: be }); } return; }
@@ -619,7 +621,7 @@ export class Actions {
     } else if (d.shape === 'ladder') {
       if (n[1] !== 0) return;
       meta = n[2] === 1 ? 0 : n[2] === -1 ? 2 : n[0] === 1 ? 3 : 1;
-    } else if (blockId === B.furnace || blockId === B.chest || blockId === B.crafting_table || blockId === B.pumpkin) {
+    } else if (blockId === B.furnace || blockId === B.smoker || blockId === B.chest || blockId === B.crafting_table || blockId === B.pumpkin) {
       meta = [0, 3, 2, 1][q];
     } else if (isLeaves(blockId)) {
       meta = 1; // player-placed leaves never decay
@@ -641,9 +643,14 @@ export class Actions {
     } else if (blockId === B.sign) {
       if (n[1] === -1) return;
       meta = n[1] === 1 ? [0, 3, 2, 1][q] : (n[2] === 1 ? 0 : n[2] === -1 ? 2 : n[0] === 1 ? 3 : 1) | 4;
-    } else if (blockId === B.repeater) {
+    } else if (blockId === B.repeater || blockId === B.comparator) {
       if (n[1] !== 1) return;
       meta = [2, 1, 0, 3][q];
+    } else if (blockId === B.anvil) {
+      meta = q % 2 === 0 ? 0 : 1;
+    } else if (blockId === B.item_frame) {
+      if (n[1] !== 0) return;
+      meta = n[2] === 1 ? 0 : n[2] === -1 ? 2 : n[0] === 1 ? 3 : 1;
     } else if (blockId === B.piston || blockId === B.sticky_piston || blockId === B.watcher) {
       // Pistons face you (so they push away from where you stand); watchers look where you look.
       const d = p.lookDir();
@@ -706,6 +713,85 @@ export class Actions {
     consume();
     this.renderer.swingHand();
     p.stat('placed');
+  }
+
+  /** Right-click on the newer blocks: comparators, anvils, barrels, smokers, campfires, composters, frames and pots. */
+  private useWorkshopBlock(x: number, y: number, z: number, id: number, held: ItemStack | null, consume: () => void): boolean {
+    const w = this.world!, p = this.player;
+    if (id === B.comparator) {
+      w.setMeta(x, y, z, w.getMeta(x, y, z) ^ 4);
+      sfx.click();
+      return true;
+    }
+    if (id === B.anvil) { document.exitPointerLock(); this.containers.show('anvil'); return true; }
+    if (id === B.barrel) { const be = w.getBlockEntity(x, y, z); if (be?.kind === 'chest') { document.exitPointerLock(); this.containers.show('chest', { chest: be.inv, title: 'Barrel' }); } return true; }
+    if (id === B.smoker || id === B.smoker_lit) { const be = w.getBlockEntity(x, y, z); if (be?.kind === 'furnace') { document.exitPointerLock(); this.containers.show('furnace', { furnace: be, title: 'Smoker' }); } return true; }
+    if (id === B.campfire) {
+      // Lay raw food on the fire.
+      const be = w.getBlockEntity(x, y, z);
+      if (!held || be?.kind !== 'campfire' || SMELTING[held.id] === undefined || !itemDef(SMELTING[held.id])?.food) return false;
+      const i = be.inv.slots.findIndex((s) => !s);
+      if (i < 0) return true;
+      be.inv.slots[i] = { id: held.id, count: 1 };
+      be.cook[i] = 0;
+      consume();
+      sfx.place('wood'); this.renderer.swingHand();
+      return true;
+    }
+    if (id === B.composter) {
+      const m = w.getMeta(x, y, z);
+      if (m >= 8) {
+        w.setMeta(x, y, z, 0);
+        this.entities!.dropItem(x + 0.5, y + 1.1, z + 0.5, { id: I.bone_meal, count: 1 });
+        sfx.place('gravel');
+        return true;
+      }
+      const chance = held ? compostChance(held.id) : 0;
+      if (!chance || m >= 7) return !!chance;
+      consume();
+      this.renderer.swingHand();
+      if (Math.random() < chance) {
+        // The seventh layer ripens into bone meal after a moment.
+        w.setMeta(x, y, z, m + 1);
+        if (m + 1 === 7) setTimeout(() => { if (w.getBlock(x, y, z) === B.composter && w.getMeta(x, y, z) === 7) w.setMeta(x, y, z, 8); }, 1000);
+      }
+      sfx.place('grass');
+      return true;
+    }
+    if (id === B.item_frame) {
+      const be = w.getBlockEntity(x, y, z);
+      if (be?.kind !== 'frame') return true;
+      const cur = be.inv.slots[0];
+      if (cur) {
+        // Take it back out.
+        be.inv.slots[0] = null;
+        const left = p.inv.add(cur);
+        if (left) this.throwStack(left);
+      } else if (held) {
+        be.inv.slots[0] = { ...held, count: 1 };
+        consume();
+      } else return true;
+      const c = w.getChunk(x >> 4, z >> 4);
+      if (c) { c.modified = true; c.version++; }
+      sfx.place('wood'); this.renderer.swingHand();
+      return true;
+    }
+    if (id === B.flower_pot) {
+      const m = w.getMeta(x, y, z);
+      if (m) {
+        w.setMeta(x, y, z, 0);
+        const left = p.inv.add({ id: POTTED[m], count: 1 });
+        if (left) this.throwStack(left);
+        return true;
+      }
+      const k = held ? POTTED.indexOf(held.id) : -1;
+      if (k <= 0) return false;
+      w.setMeta(x, y, z, k);
+      consume();
+      sfx.place('grass'); this.renderer.swingHand();
+      return true;
+    }
+    return false;
   }
 
   private supportOk(x: number, y: number, z: number, id: number, meta: number): boolean {
@@ -812,4 +898,15 @@ export class Actions {
     document.exitPointerLock();
     this.containers.show(kind);
   }
+}
+
+/** How likely an item is to add a layer of compost (0 = it can't be composted). */
+function compostChance(id: number): number {
+  const d = itemDef(id);
+  if (!d) return 0;
+  const k = d.key;
+  if (/seeds|leaves|sapling|tall_grass|fern|kelp|seagrass|cattail|vine|moss/.test(k) || isLeaves(id)) return 0.3;
+  if (/flower|poppy|dandelion|mushroom|melon|pumpkin|cactus|sugar_cane|bamboo|bush|wheat|carrot|potato|redroot|apple|berries|hay/.test(k)) return 0.65;
+  if (/bread|cake|baked_potato|stew|cookie|pie/.test(k)) return 0.85;
+  return 0;
 }

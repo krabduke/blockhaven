@@ -12,7 +12,7 @@ export interface Offer {
   enchant: Enchant;
 }
 
-const MAX_LEVEL: Record<EnchantId, number> = { efficiency: 5, sharpness: 5, protection: 4, unbreaking: 3, power: 5, feather_falling: 4 };
+export const MAX_LEVEL: Record<EnchantId, number> = { efficiency: 5, sharpness: 5, protection: 4, unbreaking: 3, power: 5, feather_falling: 4 };
 
 export function applicable(stack: ItemStack): EnchantId[] {
   const d = itemDef(stack.id);

@@ -2,7 +2,7 @@
 // lighting, mining and world generation all read from it.
 
 export type RenderShape = 'none' | 'cube' | 'cross' | 'liquid' | 'torch' | 'door' | 'bed' | 'cactus' | 'ladder' | 'slabBottom' | 'stairs' | 'fence' | 'gate' | 'table'
-  | 'pane' | 'trapdoor' | 'lantern' | 'wire' | 'button' | 'plate' | 'sign' | 'flat' | 'vine' | 'cake' | 'carpet' | 'portal' | 'fire' | 'layer' | 'frame' | 'astralpool'
+  | 'pane' | 'trapdoor' | 'lantern' | 'wire' | 'button' | 'plate' | 'sign' | 'flat' | 'vine' | 'cake' | 'carpet' | 'portal' | 'fire' | 'layer' | 'frame' | 'astralpool' | 'comparator' | 'anvil' | 'campfire' | 'composter' | 'itemframe' | 'pot'
   | 'banner' | 'painting' | 'rail' | 'repeater' | 'piston' | 'piston_head' | 'hopper' | 'facing6';
 export type Layer = 'opaque' | 'cutout' | 'translucent';
 export type Tool = 'pickaxe' | 'axe' | 'shovel' | 'sword' | null;
@@ -336,8 +336,23 @@ def(187, 'hollowstone', 'Hollowstone', { hardness: 3, tool: 'pickaxe', harvestTi
 def(188, 'hollow_bricks', 'Hollow Bricks', { hardness: 3, tool: 'pickaxe', harvestTier: 0, tiles: 'hollow_bricks' });
 def(189, 'anchor_stone', 'Anchor Stone', { emit: 15, hardness: 1, drop: 'none', sound: 'glass', tiles: 'anchor_stone' });
 def(190, 'starbloom', 'Starbloom', { ...plant, emit: 7, tiles: 'starbloom' });
+// Comparator: meta = facing (bits 0-1) | subtract mode (bit 2) | output level << 3.
+def(191, 'comparator', 'Comparator', { shape: 'comparator', layer: 'cutout', solid: false, opaque: false, hardness: 0, sound: 'stone', needsSupport: true, tiles: 'comparator', icon: 'comparator_item' });
+def(192, 'anvil', 'Anvil', { shape: 'anvil', opaque: false, lightOpacity: 0, hardness: 5, tool: 'pickaxe', harvestTier: 0, sound: 'stone', tiles: { top: 'anvil_top', side: 'anvil_side', bottom: 'anvil_side' }, icon: 'anvil_item' });
+def(193, 'campfire', 'Campfire', { shape: 'campfire', layer: 'cutout', opaque: false, lightOpacity: 0, emit: 15, hardness: 2, tool: 'axe', sound: 'wood', tiles: 'campfire_log', icon: 'campfire_item', drop: () => [257 /* coal */, 2] });
+def(194, 'smoker', 'Smoker', { tiles: { top: 'smoker_top', side: 'smoker_side', front: 'smoker_front' }, hardness: 3.5, tool: 'pickaxe', harvestTier: 0 });
+def(195, 'smoker_lit', 'Smoker', { tiles: { top: 'smoker_top', side: 'smoker_side', front: 'smoker_front_lit' }, emit: 13, hardness: 3.5, tool: 'pickaxe', harvestTier: 0, drop: () => [194, 1] });
+def(196, 'barrel', 'Barrel', { tiles: { top: 'barrel_top', side: 'barrel_side', bottom: 'barrel_bottom' }, hardness: 2.5, tool: 'axe', sound: 'wood' });
+// Composter: meta is how full it is (0-7), 8 = ready to empty.
+def(197, 'composter', 'Composter', { shape: 'composter', opaque: false, lightOpacity: 0, hardness: 0.6, tool: 'axe', sound: 'wood', tiles: { top: 'composter_top', side: 'composter_side', bottom: 'composter_bottom' }, icon: 'composter_item' });
+def(198, 'item_frame', 'Item Frame', { shape: 'itemframe', layer: 'cutout', solid: false, opaque: false, hardness: 0.3, sound: 'wood', needsSupport: true, tiles: 'item_frame', icon: 'item_frame_item' });
+// Flower pot: meta picks the plant in it (see POTTED).
+def(199, 'flower_pot', 'Flower Pot', { shape: 'pot', layer: 'cutout', opaque: false, lightOpacity: 0, hardness: 0, sound: 'stone', tiles: 'flower_pot', icon: 'flower_pot_item' });
 def(160, 'brewing_stand', 'Brewing Stand', { shape: 'table', opaque: false, lightOpacity: 0, emit: 3, tiles: { top: 'brewing_top', side: 'brewing_side', bottom: 'cobblestone' }, hardness: 0.5, tool: 'pickaxe', harvestTier: 0, icon: 'brewing_item' });
 def(115, 'bell', 'Village Bell', { shape: 'lantern', layer: 'cutout', opaque: false, hardness: 5, tool: 'pickaxe', tiles: 'bell', icon: 'bell_item', sound: 'stone' });
+
+/** What a flower pot can hold, by meta (0 = empty). */
+export const POTTED = [0, B.poppy, B.dandelion, B.blue_flower, B.white_flower, B.purple_flower, B.sapling, B.red_mushroom, B.brown_mushroom, B.fern, B.dead_bush, B.cactus, B.bush, B.starbloom, B.bamboo, B.berry_bush];
 
 /** Spawner meta picks its creature (0 = chosen by position, as in dungeons). */
 export const SPAWNER_KINDS = ['', 'zombie', 'skeleton', 'shellcrawler', 'mirewalker', 'brambler', 'cinderbrute', 'emberwisp'];

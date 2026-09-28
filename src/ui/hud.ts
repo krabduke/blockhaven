@@ -137,7 +137,7 @@ export class Hud {
     if (p.selected !== this.lastSel) {
       this.lastSel = p.selected;
       const s = p.held;
-      this.heldName.textContent = s ? itemDef(s.id)?.name ?? '' : '';
+      this.heldName.textContent = s ? s.name ?? itemDef(s.id)?.name ?? '' : '';
       this.heldName.classList.remove('fade');
       this.nameTimer = 2;
     }
