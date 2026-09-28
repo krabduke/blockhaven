@@ -5,9 +5,18 @@ import { B, BLOCKS } from '../blocks';
 import { MOBS } from '../entities/entities';
 import { ITEMS, maxStack, type ItemDef } from '../items';
 import { WorldGen } from '../world/worldgen';
-import { nearestStructure, type StructureKind } from '../world/structures';
+import { STRUCTURES, nearestStructure, structureByName } from '../world/structures';
+import { STRUCTURE_KINDS, type Dim, type StructureKind } from '../world/structure-kinds';
 import { nearestVillage } from '../world/villages';
 import type { Game } from '../game';
+
+const DIM_NAMES: Record<Dim, string> = { overworld: 'the Overworld', ember: 'the Emberdeep', hollow: 'the Hollow' };
+/** Structures that sit on the ground: /locate gives just their x and z. */
+const SURFACE = new Set<StructureKind>(['temple', 'shipwreck', 'treasure', 'outpost', 'manor', 'citadel', 'ziggurat', 'frostkeep', 'witchhut', 'igloo', 'well', 'ruinedgate', 'oceanruin', 'campsite', 'stones', 'cabin']);
+/** What /locate can find in a dimension. */
+function locatable(dim: string): string[] {
+  return [...(dim === 'overworld' ? ['village'] : []), ...STRUCTURE_KINDS.filter((k) => STRUCTURES[k].dim === dim)];
+}
 
 export interface Command {
   name: string;
@@ -141,21 +150,31 @@ export const COMMANDS: Command[] = [
     },
   },
   {
-    name: 'locate', usage: '/locate village|temple|shipwreck|mine|sanctum|treasure', help: 'Finds the nearest village or structure',
-    complete: (i) => (i === 0 ? ['village', 'temple', 'shipwreck', 'mine', 'sanctum', 'treasure'] : []),
+    name: 'locate', usage: '/locate <structure>', help: 'Finds the nearest village or structure in this dimension (/locate list names them all)',
+    complete: (i, g) => (i === 0 ? ['list', ...locatable(g.world?.dimension ?? 'overworld')] : []),
     run(g, a) {
       const w = g.world!, p = g.player;
-      const what = a[0];
-      const kinds = ['temple', 'shipwreck', 'mine', 'sanctum', 'treasure'];
-      if (what !== 'village' && !kinds.includes(what)) { g.chat.say('Usage: ' + this.usage); return; }
-      if (w.dimension !== 'overworld') { g.chat.say('There are none in this dimension.'); return; }
-      const gen = new WorldGen(w.seed);
+      const dim = w.dimension as Dim;
+      const what = a.join(' ').trim();
+      if (!what || what === 'list') { g.chat.say(`Structures here: ${locatable(dim).join(', ')}`); return; }
       const [px, , pz] = p.body.pos;
-      const found = what === 'village' ? nearestVillage(gen, px, pz) : nearestStructure(gen, what as StructureKind, px, pz);
-      if (!found) { g.chat.say(`No ${what} found nearby.`); return; }
-      const fx = 'cx' in found ? found.cx : found.x, fz = 'cz' in found ? found.cz : found.z;
-      const name = { village: 'village', temple: 'sun temple', shipwreck: 'shipwreck', mine: 'abandoned mine', sanctum: 'sanctum', treasure: 'buried treasure' }[what];
-      g.chat.say(`Nearest ${name} is at ${fx}, ${'y' in found && what !== 'temple' && what !== 'shipwreck' && what !== 'treasure' ? found.y + ', ' : ''}${fz} (${Math.round(Math.hypot(fx - px, fz - pz))} blocks away)`);
+      if (what === 'village') {
+        if (dim !== 'overworld') { g.chat.say('There are no villages in this dimension.'); return; }
+        const v = nearestVillage(new WorldGen(w.seed), px, pz);
+        if (!v) { g.chat.say('No village found nearby.'); return; }
+        g.chat.say(`Nearest village is at ${v.cx}, ${v.cz} (${Math.round(Math.hypot(v.cx - px, v.cz - pz))} blocks away)`);
+        return;
+      }
+      const kind = structureByName(what);
+      if (!kind) { g.chat.say(`Unknown structure "${what}". Try /locate list`); return; }
+      const info = STRUCTURES[kind];
+      if (info.dim !== dim) { g.chat.say(`The ${info.name} is found in ${DIM_NAMES[info.dim]}, not here.`); return; }
+      const gen = dim === 'overworld' ? new WorldGen(w.seed) : { seed: w.seed };
+      const found = nearestStructure(gen, kind, px, pz, dim === 'overworld' ? 8 : 12);
+      if (!found) { g.chat.say(`No ${info.name} found nearby.`); return; }
+      // Surface structures give just x and z; buried and floating ones give their height too.
+      const showY = !SURFACE.has(kind);
+      g.chat.say(`Nearest ${info.name} is at ${found.x}, ${showY ? found.y + ', ' : ''}${found.z} (${Math.round(Math.hypot(found.x - px, found.z - pz))} blocks away)`);
     },
   },
   {

@@ -355,7 +355,7 @@ def(115, 'bell', 'Village Bell', { shape: 'lantern', layer: 'cutout', opaque: fa
 export const POTTED = [0, B.poppy, B.dandelion, B.blue_flower, B.white_flower, B.purple_flower, B.sapling, B.red_mushroom, B.brown_mushroom, B.fern, B.dead_bush, B.cactus, B.bush, B.starbloom, B.bamboo, B.berry_bush];
 
 /** Spawner meta picks its creature (0 = chosen by position, as in dungeons). */
-export const SPAWNER_KINDS = ['', 'zombie', 'skeleton', 'shellcrawler', 'mirewalker', 'brambler', 'cinderbrute', 'emberwisp'];
+export const SPAWNER_KINDS = ['', 'zombie', 'skeleton', 'shellcrawler', 'mirewalker', 'brambler', 'cinderbrute', 'emberwisp', 'raider', 'witch', 'frostling', 'dunescuttler'];
 
 // Fill gaps so lookups never return undefined.
 for (let i = 0; i < 256; i++) if (!defs[i]) defs[i] = { ...defs[0], id: i, key: 'unknown_' + i };

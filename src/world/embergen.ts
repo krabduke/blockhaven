@@ -4,7 +4,8 @@
 import { B } from '../blocks';
 import { Simplex, hash3, mulberry32 } from '../noise';
 import { CH, CS, idx } from './chunk';
-import { BIOME, type GenResult } from './worldgen';
+import { buildStructure, structuresNear } from './structures';
+import { BIOME, type GenResult, type Spawn } from './worldgen';
 
 export const EMBER_LAVA_LEVEL = 31;
 export const EMBER_CEILING = 127;
@@ -122,7 +123,9 @@ export class EmberGen {
       }
     }
     if (rand() < 0.1) this.keep(blocks, meta, rand);
-    return { blocks, meta, biomes, spawns: [] };
+    const spawns: Spawn[] = [];
+    for (const st of structuresNear(this, cx, cz, 'ember')) spawns.push(...buildStructure(this, st, blocks, meta, cx, cz));
+    return { blocks, meta, biomes, spawns };
   }
 
   /** A small ruined keep of cinder bricks with a monster cage and loot. */

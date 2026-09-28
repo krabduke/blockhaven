@@ -7,7 +7,10 @@
 import { B } from '../blocks';
 import { Simplex, hash3, mulberry32 } from '../noise';
 import { CH, CS, idx } from './chunk';
-import { BIOME, type GenResult } from './worldgen';
+import { chestMeta } from './builder';
+import { LOOT } from './structure-kinds';
+import { buildStructure, structuresNear } from './structures';
+import { BIOME, type GenResult, type Spawn } from './worldgen';
 
 /** Height of the central island's surface. */
 export const HOLLOW_TOP = 64;
@@ -112,7 +115,9 @@ export class HollowGen {
       island(o.x, o.z, o.r, o.y, o.r * 1.4, gx * 7 + gz * 13);
       if (o.ruin) this.ruin(o.x, o.y, o.z, put);
     }
-    return { blocks, meta, biomes, spawns: [] };
+    const spawns: Spawn[] = [];
+    for (const st of structuresNear(this, cx, cz, 'hollow')) spawns.push(...buildStructure(this, st, blocks, meta, cx, cz));
+    return { blocks, meta, biomes, spawns };
   }
 
   /** A broken watchtower of hollow bricks with a chest at the top. */
@@ -125,7 +130,7 @@ export class HollowGen {
       put(x + dx, y + dy, z + dz, wall && !broken && !door ? B.hollow_bricks : dy === h - 4 && !wall && !(dx === 0 && dz === -1) ? B.hollow_bricks : 0);
     }
     for (let dy = 1; dy <= h - 4; dy++) put(x, y + dy, z - 1, B.ladder, 0);
-    put(x - 1, y + h - 3, z, B.chest, 16 | (5 << 5));
+    put(x - 1, y + h - 3, z, B.chest, chestMeta(0, LOOT.hollowRuin));
     put(x + 1, y + h - 3, z, B.lantern);
   }
 }

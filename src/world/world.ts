@@ -14,6 +14,7 @@ import { LightEngine, type ChunkSource } from './light';
 import { P, pidx, type SubMesh } from './mesher';
 import type { WorkerPool } from './pool';
 import type { Spawn } from './worldgen';
+import { lootTableOf } from './builder';
 
 export interface ChestBE { kind: 'chest'; inv: Inventory }
 export interface FurnaceBE { kind: 'furnace'; inv: Inventory; burn: number; burnMax: number; cook: number }
@@ -35,8 +36,9 @@ const HVEC: [number, number, number][] = [[0, 0, 1], [-1, 0, 0], [0, 0, -1], [1,
 const HORIZ: [number, number][] = [[1, 0], [-1, 0], [0, 1], [0, -1]];
 
 type LootRow = [id: number, min: number, max: number, weight: number];
-/** Chest loot by table (chest meta bits 5-7): dungeon, sun temple, shipwreck, mine, sanctum, Hollow ruin, buried treasure. */
-const LOOT: { rows: LootRow[]; rolls: [number, number] }[] = [
+/** Chest loot by table (numbered as LOOT in structure-kinds.ts; chest metadata carries the number, see chestMeta). */
+type LootTable = { rows: LootRow[]; rolls: [number, number] };
+const LOOT: LootTable[] = ([
   { rows: [
     [I.iron_ingot, 1, 4, 10], [I.bread, 1, 3, 15], [I.seeds, 2, 4, 10], [I.bone, 2, 6, 15], [I.string, 1, 4, 12],
     [I.gold_ingot, 1, 3, 5], [I.diamond, 1, 2, 2], [I.bucket, 1, 1, 8], [I.arrow, 2, 8, 10], [I.bone_meal, 2, 6, 10],
@@ -70,7 +72,103 @@ const LOOT: { rows: LootRow[]; rolls: [number, number] }[] = [
     [I.diamond, 1, 3, 8], [I.gold_ingot, 3, 8, 14], [I.iron_ingot, 3, 8, 12], [I.amber, 3, 9, 12], [I.golden_apple, 1, 2, 5],
     [I.crystal_shard, 2, 6, 8], [I.glimmerfish, 1, 3, 6], [I.cooked_salmon, 2, 5, 8], [I.saddle, 1, 1, 3], [I.gunpowder, 2, 6, 6], [I.name_tag, 1, 1, 4],
   ], rolls: [5, 9] },
-];
+  // 7 raider outpost
+  { rows: [
+    [I.arrow, 4, 12, 16], [I.crossbow, 1, 1, 5], [I.iron_ingot, 1, 4, 12], [I.amber, 1, 4, 12], [I.bread, 2, 4, 12], [I.potato, 2, 5, 8],
+    [I.carrot, 2, 5, 8], [I.leather, 1, 4, 8], [I.iron_sword, 1, 1, 4], [I.iron_helmet, 1, 1, 3], [I.shield, 1, 1, 3], [I.lead, 1, 2, 4],
+  ], rolls: [3, 7] },
+  // 8 thornwood manor
+  { rows: [
+    [I.gold_ingot, 1, 4, 12], [I.diamond, 1, 2, 5], [I.book, 1, 4, 12], [I.paper, 2, 8, 8], [I.golden_apple, 1, 1, 4], [I.name_tag, 1, 1, 5],
+    [I.lead, 1, 2, 5], [I.potion_healing, 1, 1, 6], [I.potion_swiftness, 1, 1, 4], [I.splash_potion_poison, 1, 2, 4], [I.redroot_stew, 1, 1, 5],
+    [I.diamond_chestplate, 1, 1, 1], [I.iron_axe, 1, 1, 4], [I.clock, 1, 1, 3], [I.empty_map, 1, 2, 4], [I.honey_bottle, 1, 2, 5],
+  ], rolls: [4, 8] },
+  // 9 tidewatch citadel
+  { rows: [
+    [I.gold_ingot, 2, 8, 14], [I.amber, 3, 9, 12], [I.diamond, 1, 3, 6], [I.crystal_shard, 2, 6, 10], [I.glimmerfish, 1, 3, 8],
+    [I.potion_water_breathing, 1, 2, 8], [I.golden_apple, 1, 2, 4], [I.treasure_map, 1, 1, 6], [I.cooked_salmon, 2, 5, 8], [I.diamond_helmet, 1, 1, 2], [B.amber_block, 1, 1, 3],
+  ], rolls: [4, 8] },
+  // 10 vinecrown ziggurat
+  { rows: [
+    [I.gold_ingot, 2, 7, 14], [I.diamond, 1, 3, 5], [I.amber, 2, 6, 10], [I.bone, 2, 6, 12], [I.emerald ?? I.crystal_shard, 1, 4, 8], [I.saddle, 1, 1, 5],
+    [I.golden_apple, 1, 1, 4], [I.melon_slice, 2, 6, 8], [B.bamboo, 2, 8, 6], [I.potion_leaping, 1, 1, 5], [I.golden_sword, 1, 1, 4],
+  ], rolls: [3, 7] },
+  // 11 frost keep
+  { rows: [
+    [I.iron_ingot, 2, 7, 14], [I.diamond, 1, 2, 5], [B.packed_ice, 2, 8, 8], [I.snowball, 4, 16, 10], [I.cooked_mutton, 2, 5, 10], [I.potion_fire_resistance, 1, 1, 5],
+    [I.iron_chestplate, 1, 1, 4], [I.iron_boots, 1, 1, 4], [I.diamond_sword, 1, 1, 2], [I.golden_apple, 1, 1, 3], [I.spyglass, 1, 1, 4], [I.crossbow, 1, 1, 3],
+  ], rolls: [4, 8] },
+  // 12 echo vault
+  { rows: [
+    [I.diamond, 1, 4, 10], [I.crystal_shard, 3, 8, 12], [I.spark_dust, 4, 12, 10], [I.gold_ingot, 2, 6, 10], [I.golden_apple, 1, 2, 6], [I.diamond_pickaxe, 1, 1, 3],
+    [I.diamond_leggings, 1, 1, 2], [I.potion_night_vision, 1, 2, 8], [I.book, 2, 5, 8], [B.powered_rail, 2, 6, 5], [I.name_tag, 1, 1, 4], [I.starseeker, 1, 2, 5],
+  ], rolls: [5, 9] },
+  // 13 witch hut
+  { rows: [
+    [I.glow_dust, 2, 6, 12], [I.sugar, 2, 6, 12], [I.bog_slime, 1, 4, 10], [I.glass_bottle, 1, 4, 10], [B.red_mushroom, 1, 3, 8], [B.brown_mushroom, 1, 3, 8],
+    [I.potion_healing, 1, 1, 6], [I.potion_night_vision, 1, 1, 5], [I.splash_potion_poison, 1, 2, 6], [I.potion_slow_falling, 1, 1, 4], [I.rotten_flesh, 1, 4, 6],
+  ], rolls: [3, 6] },
+  // 14 igloo
+  { rows: [
+    [I.golden_apple, 1, 1, 10], [I.apple, 1, 3, 12], [I.coal, 1, 4, 12], [I.gold_ingot, 1, 3, 8], [I.cooked_fish, 1, 4, 10], [I.bread, 1, 3, 10],
+    [B.packed_ice, 1, 4, 6], [I.potion_fire_resistance, 1, 1, 4], [I.spyglass, 1, 1, 3],
+  ], rolls: [3, 6] },
+  // 15 camps, standing stones and hunters' cabins
+  { rows: [
+    [I.bread, 1, 4, 14], [I.cooked_pork, 1, 3, 10], [I.leather, 1, 4, 12], [I.arrow, 2, 8, 10], [I.coal, 2, 6, 8], [B.torch, 2, 8, 10], [I.bow, 1, 1, 4],
+    [I.fishing_rod, 1, 1, 4], [I.empty_map, 1, 1, 4], [I.compass, 1, 1, 3], [I.red_berries, 2, 6, 8], [I.iron_ingot, 1, 3, 6], [I.lead, 1, 1, 3],
+  ], rolls: [3, 6] },
+  // 16 ocean ruin
+  { rows: [
+    [I.raw_fish, 2, 6, 12], [I.salmon, 1, 4, 10], [I.gold_ingot, 1, 3, 10], [I.amber, 1, 3, 10], [I.treasure_map, 1, 1, 12], [I.coal, 1, 4, 8],
+    [I.glimmerfish, 1, 2, 6], [I.fishing_rod, 1, 1, 4], [I.crystal_shard, 1, 2, 6], [I.potion_water_breathing, 1, 1, 5],
+  ], rolls: [3, 6] },
+  // 17 cinder bastion
+  { rows: [
+    [I.gold_ingot, 3, 10, 16], [B.gold_block, 1, 2, 5], [I.diamond, 1, 3, 6], [I.emberquartz, 3, 10, 12], [I.ember_core, 1, 3, 8], [I.golden_apple, 1, 2, 5],
+    [I.diamond_sword, 1, 1, 2], [I.golden_chestplate, 1, 1, 5], [I.fire_charge, 1, 4, 8], [I.potion_fire_resistance, 1, 2, 6], [I.cinder_brick, 4, 12, 8],
+  ], rolls: [4, 9] },
+  // 18 great forge
+  { rows: [
+    [I.iron_ingot, 3, 10, 16], [I.gold_ingot, 2, 6, 10], [B.iron_block, 1, 1, 4], [I.coal, 4, 12, 12], [I.iron_pickaxe, 1, 1, 5], [I.iron_sword, 1, 1, 5],
+    [I.diamond_axe, 1, 1, 2], [I.iron_chestplate, 1, 1, 4], [B.anvil, 1, 1, 3], [I.lava_bucket, 1, 1, 4], [I.emberquartz, 2, 8, 8], [I.shield, 1, 1, 3],
+  ], rolls: [4, 8] },
+  // 19 ashen spire and ember cathedral
+  { rows: [
+    [I.diamond, 1, 4, 10], [I.gold_ingot, 2, 8, 12], [I.ember_core, 1, 4, 10], [I.golden_apple, 1, 2, 6], [I.emberquartz, 4, 12, 10], [I.book, 1, 4, 8],
+    [I.diamond_helmet, 1, 1, 2], [I.diamond_boots, 1, 1, 2], [I.potion_strength, 1, 2, 6], [I.potion_fire_resistance, 1, 2, 6], [I.starseeker, 1, 2, 4],
+  ], rolls: [4, 8] },
+  // 20 ember shrines, camps, wells and cages (and ruined gates in the overworld)
+  { rows: [
+    [I.gold_ingot, 1, 5, 14], [I.emberquartz, 2, 8, 12], [B.obsidian, 1, 3, 8], [I.flint_and_steel, 1, 1, 6], [I.fire_charge, 1, 3, 8], [I.ember_core, 1, 2, 5],
+    [I.golden_apple, 1, 1, 3], [I.golden_sword, 1, 1, 5], [I.golden_helmet, 1, 1, 4], [B.magma, 1, 4, 6], [I.cinder_brick, 2, 8, 6],
+  ], rolls: [3, 6] },
+  // 21 astral spires
+  { rows: [
+    [I.diamond, 2, 5, 12], [I.crystal_shard, 3, 8, 12], [I.starseeker, 1, 3, 8], [I.glider, 1, 1, 2], [I.golden_apple, 1, 2, 6], [B.starbloom, 1, 4, 8],
+    [I.diamond_chestplate, 1, 1, 2], [I.potion_slow_falling, 1, 2, 8], [I.gold_ingot, 3, 8, 10], [I.book, 1, 4, 6],
+  ], rolls: [4, 8] },
+  // 22 floating observatory
+  { rows: [
+    [I.spyglass, 1, 1, 10], [I.compass, 1, 1, 8], [I.clock, 1, 1, 8], [I.empty_map, 1, 3, 10], [I.treasure_map, 1, 1, 6], [I.book, 2, 6, 12],
+    [I.paper, 3, 9, 10], [I.crystal_shard, 2, 5, 8], [I.diamond, 1, 2, 4], [I.potion_night_vision, 1, 2, 6], [I.glow_dust, 2, 6, 6],
+  ], rolls: [4, 8] },
+  // 23 sky garden
+  { rows: [
+    [B.starbloom, 2, 6, 12], [B.sapling, 1, 4, 10], [I.seeds, 3, 9, 10], [I.redroot_seeds, 2, 6, 8], [I.honey_bottle, 1, 3, 8], [I.honeycomb, 1, 4, 8],
+    [I.bone_meal, 3, 9, 10], [I.apple, 2, 5, 10], [I.golden_apple, 1, 1, 4], [B.blossom_log, 2, 6, 6], [I.potion_regeneration, 1, 1, 4],
+  ], rolls: [4, 8] },
+  // 24 star forge
+  { rows: [
+    [I.diamond, 2, 6, 12], [B.diamond_block, 1, 1, 2], [I.crystal_shard, 3, 9, 12], [I.gold_ingot, 3, 9, 10], [I.glider, 1, 1, 3], [I.diamond_pickaxe, 1, 1, 3],
+    [I.diamond_sword, 1, 1, 3], [I.ember_core, 1, 3, 6], [I.starseeker, 1, 3, 6], [I.golden_apple, 1, 2, 5],
+  ], rolls: [4, 8] },
+  // 25 the Hollow's smaller finds
+  { rows: [
+    [I.crystal_shard, 2, 6, 14], [I.diamond, 1, 2, 6], [I.gold_ingot, 1, 4, 10], [B.starbloom, 1, 3, 10], [I.starseeker, 1, 2, 6], [I.golden_apple, 1, 1, 4],
+    [I.potion_slow_falling, 1, 1, 6], [I.book, 1, 3, 6], [I.iron_ingot, 2, 6, 8],
+  ], rolls: [3, 6] },
+] as LootTable[]).map((t) => ({ ...t, rows: t.rows.filter((r) => r[0] !== undefined) }));
 
 function fillLoot(inv: Inventory, rand: () => number, table = 0): void {
   const { rows, rolls: [lo0, hi0] } = LOOT[table] ?? LOOT[0];
@@ -1150,8 +1248,8 @@ export class World implements ChunkSource {
         be = { kind: 'chest', inv: new Inventory(27) };
         const m = this.getMeta(x, y, z);
         if (m & 16) {
-          fillLoot(be.inv, this.rand, (m >> 5) & 7);
-          this.setMeta(x, y, z, m & 15);
+          fillLoot(be.inv, this.rand, lootTableOf(m));
+          this.setMeta(x, y, z, m & 3);
         }
       }
       else if (id === B.furnace || id === B.furnace_lit || id === B.smoker || id === B.smoker_lit) be = { kind: 'furnace', inv: new Inventory(3), burn: 0, burnMax: 0, cook: 0 };

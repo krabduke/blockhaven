@@ -487,6 +487,15 @@ check('flint-and-steel lights an obsidian frame into a 2x3 gate', ember.lit && e
 check('standing in a gate takes you to the Emberdeep', ember.dim === 'ember' && ember.mode === 'playing', JSON.stringify({ dim: ember.dim, mode: ember.mode }));
 check('the Emberdeep has cinderstone, a lava sea and a bedrock ceiling', ember.cinder > 50 && ember.lava > 50 && ember.ceiling === 6, JSON.stringify(ember));
 check('you arrive standing in a gate', ember.standingInGate);
+const emberFinds = await g(() => {
+  const G = window.blockhaven, log = [];
+  const orig = G.chat.say.bind(G.chat); G.chat.say = (t) => { log.push(t); orig(t); };
+  const kinds = ['bastion', 'forge', 'spire', 'cathedral', 'shrine', 'monoliths', 'ashcamp', 'lavawell', 'cage'];
+  const found = kinds.filter((k) => { log.length = 0; G.runCommand('/locate ' + k); return /Nearest .* is at -?\d+, -?\d+, -?\d+/.test(log.join(' ')); });
+  G.chat.say = orig;
+  return found;
+});
+check('/locate finds the Emberdeep\'s bastions, forges, spires, cathedrals and smaller finds', emberFinds.length === 9, JSON.stringify(emberFinds));
 
 // Emberwisp fireball hurts the player.
 const wisp = await g(async () => {
@@ -1451,6 +1460,40 @@ await wait(300);
   });
   check('temples, shipwrecks, mines and sanctums generate; a mine has rails and webs; a sanctum holds a ring of twelve Astral Frames', found.temple && found.shipwreck && found.mine?.rails > 10 && found.mine?.webs > 0 && found.frames === 12, JSON.stringify(found));
 
+  const more = await g(async () => {
+    const G = window.blockhaven, p = G.player, w = G.world, B = G.ids;
+    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+    const log = [];
+    const orig = G.chat.say.bind(G.chat); G.chat.say = (t) => { log.push(t); orig(t); };
+    const where = (kind) => { log.length = 0; G.runCommand('/locate ' + kind); const m = /at (-?\d+), (-?\d+)(?:, (-?\d+))? /.exec(log.join(' ')); return m ? (m[3] !== undefined ? [+m[1], +m[2], +m[3]] : [+m[1], null, +m[2]]) : null; };
+    log.length = 0; G.runCommand('/locate list');
+    const listed = (log.join(' ').split(':')[1] ?? '').split(',').length;
+    const kinds = ['outpost', 'manor', 'citadel', 'frostkeep', 'vault', 'witchhut', 'igloo', 'well', 'ruinedgate', 'fossil', 'oceanruin', 'campsite', 'stones', 'cabin'];
+    const found = kinds.filter((k) => where(k));
+    log.length = 0; G.runCommand('/locate bastion');
+    const wrongDim = /Emberdeep/.test(log.join(' '));
+    // Visit an outpost: its watchtower, loot and garrison should be there.
+    const out = { listed, found, wrongDim };
+    const o = where('outpost');
+    if (o) {
+      const [x, , z] = o;
+      p.creative = true; p.flying = true; p.body.pos = [x + 0.5, 150, z + 0.5];
+      for (let i = 0; i < 60; i++) { await sleep(500); if (w.isLoaded(x, z) && w.getChunk(x >> 4, z >> 4)?.dirty.size === 0) break; }
+      await sleep(2500);
+      let chests = 0, logs = 0;
+      const gy = w.groundY(x + 20, z + 20);
+      for (let dx = -12; dx <= 12; dx++) for (let dz = -12; dz <= 12; dz++) for (let dy = -10; dy <= 40; dy++) {
+        const b = w.getBlock(x + dx, gy + dy, z + dz);
+        if (b === B.chest) chests++; else if (b === B.spruce_log) logs++;
+      }
+      const raiders = G.entities.mobs().filter((m) => m.spec.kind === 'raider' && Math.hypot(m.body.pos[0] - x, m.body.pos[2] - z) < 20).length;
+      Object.assign(out, { chests, logs, raiders });
+    }
+    G.chat.say = orig;
+    return out;
+  });
+  check('/locate lists and finds the new overworld structures (and knows which belong to other dimensions); an outpost stands with its chests and raiders', more.listed >= 20 && more.found.length >= 12 && more.wrongDim && (more.chests ?? 0) >= 2 && (more.logs ?? 0) > 40 && (more.raiders ?? 0) >= 2, JSON.stringify(more));
+
   const gate = await g(async (sanctum) => {
     const G = window.blockhaven, p = G.player, w = G.world, B = G.ids, It = G.items, E = G.entities;
     const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -1515,11 +1558,15 @@ await wait(300);
     out.gone = !E.list.some((e) => e.spec?.boss && !e.dead);
     out.portal = w.getBlock(1, 65, 0) === G.ids.astral_portal;
     out.glider = E.list.some((e) => e.stack?.id === G.items.glider);
+    const log = [], say = G.chat.say.bind(G.chat); G.chat.say = (t) => { log.push(t); say(t); };
+    out.hollowFinds = ['spires', 'observatory', 'garden', 'starforge', 'crystalshrine', 'bridge', 'crater', 'waystones', 'statue'].filter((k) => { log.length = 0; G.runCommand('/locate ' + k); return /Nearest .* is at /.test(log.join(' ')); }).length;
+    G.chat.say = say;
     out.achieved = p.achievements.has('colossus');
     return out;
   }, found.sanctum);
   check('the Astral Gate leads to the Hollow, where the Colossus fires shards and is mended by anchor stones until it falls', hollow.dim === 'hollow' && hollow.stood && hollow.boss && hollow.shards > 0 && hollow.hurt && hollow.healing && hollow.anchors[1] === hollow.anchors[0] - 1 && hollow.bar, JSON.stringify(hollow));
   check('beating the Colossus opens the way home and leaves a glider', hollow.gone && hollow.portal && hollow.glider && hollow.achieved, JSON.stringify(hollow));
+  check('/locate finds all nine kinds of Hollow structure', hollow.hollowFinds === 9, JSON.stringify({ finds: hollow.hollowFinds }));
 
   const glide = await g(async () => {
     const G = window.blockhaven, p = G.player;

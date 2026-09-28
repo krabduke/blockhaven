@@ -310,9 +310,9 @@ export class WorldGen {
       if (blocks[i] === B.water && blocks[idx(x, SEA_LEVEL + 1, z)] === 0 && hash3(seed + 91, x0 + x, 0, z0 + z) < 0.05) blocks[idx(x, SEA_LEVEL + 1, z)] = B.lily_pad;
     }
 
-    // Temples, wrecks, mines and sanctums, then villages last so they clear trees and flowers in their way.
-    for (const st of structuresNear(this, cx, cz)) buildStructure(this, st, blocks, meta, cx, cz);
+    // Structures, then villages last so they clear trees and flowers in their way.
     const spawns: Spawn[] = this.nestBees.splice(0);
+    for (const st of structuresNear(this, cx, cz)) spawns.push(...buildStructure(this, st, blocks, meta, cx, cz));
     for (const v of villagesNear(this, cx, cz)) spawns.push(...buildVillage(this, v, blocks, meta, cx, cz));
 
     return { blocks, meta, biomes, spawns };

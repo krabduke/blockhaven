@@ -9,6 +9,8 @@ import { Boat, Minecart } from '../entities/vehicles';
 import { I, coloredItem, enchLevel, itemDef, maxStack, type ItemStack } from '../items';
 import { raycast, selectionBox, type RayHit } from '../physics';
 import { nearestStructure } from '../world/structures';
+import { lootTableOf } from '../world/builder';
+import { LOOT } from '../world/structure-kinds';
 import { askText } from '../ui/prompt';
 import { WorldGen } from '../world/worldgen';
 import type { Game } from '../game';
@@ -450,7 +452,7 @@ export class Actions {
         const led = this.entities.mobs().filter((m) => m.leash === 'player' && Math.hypot(m.body.pos[0] - p.body.pos[0], m.body.pos[2] - p.body.pos[2]) < 12);
         if (led.length) { for (const m of led) m.leash = [x, y, z]; sfx.click(); this.renderer.swingHand(); return; }
       }
-      if (id === B.chest && (w.getMeta(x, y, z) & 16) && ((w.getMeta(x, y, z) >> 5) & 7) === 6) p.achieve('treasure');
+      if (id === B.chest && (w.getMeta(x, y, z) & 16) && lootTableOf(w.getMeta(x, y, z)) === LOOT.treasure) p.achieve('treasure');
       if (id === B.chest) { const be = w.getBlockEntity(x, y, z); if (be?.kind === 'chest') { document.exitPointerLock(); this.containers.show('chest', { chest: be.inv }); } return; }
       if (id === B.door) {
         const m = w.getMeta(x, y, z);

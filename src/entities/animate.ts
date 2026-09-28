@@ -140,7 +140,10 @@ const ANIMATORS: Record<string, Animator> = {
     head(c, c.a.graze * 0.75 + sniff + Math.sin(c.phase * 2) * 0.05 * c.amp);
     ears(c, 'earL', 'earR', 0.5);
     tailWag(c, 'tail', -c.amp * 0.4, 0.35, 5);
+    rot(c.parts.tail2, Math.sin(c.t * 3 + c.a.seed) * 0.15, 0, 0);
     rot(c.parts.mane, 0, 0, Math.sin(c.phase) * 0.04 * c.amp);
+    // Chewing while it grazes, and a snuffle now and then otherwise.
+    rot(c.parts.jaw, c.a.graze > 0.5 ? Math.max(0, Math.sin(c.t * 10)) * 0.25 : Math.max(0, Math.sin(c.t * 1.3 + c.a.seed)) * 0.05);
   },
   hen(c) {
     const s = Math.sin(c.phase * 1.2) * 0.9 * c.amp;
@@ -156,6 +159,7 @@ const ANIMATORS: Record<string, Animator> = {
     rot(c.parts.tailFan, Math.sin(c.t * 3 + c.a.seed) * 0.08, Math.sin(c.phase) * 0.15 * c.amp, 0);
     rot(c.parts.crest, Math.sin(c.phase * 2.4) * 0.2 * c.amp, 0, Math.sin(c.t * 2 + c.a.seed) * 0.1);
     rot(c.parts.wattle, Math.sin(c.phase * 2.4 + 1) * 0.35 * c.amp + peck * 0.4);
+    rot(c.parts.jaw, peck * 0.3 + Math.max(0, Math.sin(c.t * 0.9 + c.a.seed)) * 0.08);
   },
   woolback(c) {
     quadLegs(c, 0.6); bob(c, 0.7, 0.02); breathe(c, 'wool', 0.02, 1.6);
@@ -185,6 +189,7 @@ const ANIMATORS: Record<string, Animator> = {
       c.parts.body.rotation.x = 0.35;
       head(c, -0.3, Math.sin(c.t * 0.8 + c.a.seed) * 0.15);
       rot(c.parts.tail, -0.2, 0.9, 0);
+      rot(c.parts.tail2, 0, 0.6, 0); rot(c.parts.tail3, 0, 0.5, 0);
       return;
     }
     quadLegs(c, 0.85); bob(c, 0.9, 0.03); breathe(c);
@@ -193,6 +198,10 @@ const ANIMATORS: Record<string, Animator> = {
     head(c, c.a.graze * 0.6, tilt);
     ears(c, 'earL', 'earR', 0.3);
     tailWag(c, 'tail', -c.amp * 0.3 + Math.sin(c.t * 2.2) * 0.06, 0.3 + 0.2 * c.amp, 1.7);
+    // The brush follows through, each segment a beat behind the last.
+    rot(c.parts.tail2, Math.sin(c.t * 1.7 - 0.6) * 0.08, Math.sin(c.t * 1.7 + c.a.seed - 0.7) * (0.25 + 0.15 * c.amp), 0);
+    rot(c.parts.tail3, Math.sin(c.t * 1.7 - 1.2) * 0.1, Math.sin(c.t * 1.7 + c.a.seed - 1.4) * (0.3 + 0.15 * c.amp), 0);
+    rot(c.parts.whiskers, 0, 0, Math.sin(c.t * 7 + c.a.seed) * 0.04 * (c.idle ? 1 : 0));
   },
   bogfrog(c) {
     const vy = c.mob.body.vel[1];
@@ -213,6 +222,9 @@ const ANIMATORS: Record<string, Animator> = {
     c.parts.body.position.y = Math.sin(c.t * 5 + c.a.seed) * 0.03;
     rot(c.parts.torso, c.mob.beeAnger > 0 ? 0.25 : Math.sin(c.t * 2) * 0.06, 0, 0);
     rot(c.parts.antennaL, -0.5 + Math.sin(c.t * 4) * 0.15); rot(c.parts.antennaR, -0.5 + Math.sin(c.t * 4 + 1) * 0.15);
+    // The abdomen pumps as it flies, and curls under when angry.
+    rot(c.parts.abdomen, (c.mob.beeAnger > 0 ? 0.5 : 0) + Math.sin(c.t * 8 + c.a.seed) * 0.08);
+    for (const s of ['L', 'R']) for (let i = 0; i < 3; i++) rot(c.parts[`leg${s}${i}`], Math.sin(c.t * 3 + i) * 0.1);
   },
   cavemoth(c) {
     const f = Math.sin(c.t * 26 + c.a.seed);
@@ -229,6 +241,7 @@ const ANIMATORS: Record<string, Animator> = {
     rot(c.parts.dorsal, 0, 0, s * 0.3);
     const fin = Math.sin(c.t * 6 + c.a.seed) * 0.4;
     rot(c.parts.finL, 0, 0, fin); rot(c.parts.finR, 0, 0, -fin);
+    rot(c.parts.anal, 0, 0, s * 0.3);
     rot(c.parts.jaw, Math.max(0, Math.sin(c.t * 2.5)) * 0.25);
   },
   villager(c) {
@@ -287,6 +300,7 @@ const ANIMATORS: Record<string, Animator> = {
     // The cloak streams out behind when it runs.
     rot(c.parts.cloak, -clamp(c.a.speed * 5, 0, 0.6) - Math.abs(Math.sin(c.phase)) * 0.1 * c.amp + Math.sin(c.t * 2.5 + c.a.seed) * 0.04);
     rot(c.parts.jaw, Math.max(0, Math.sin(c.t * (c.mob.aiming ? 18 : 3))) * (c.mob.aiming ? 0.25 : 0.06));
+    rot(c.parts.quiver, Math.sin(c.phase) * 0.06 * c.amp, 0, Math.sin(c.phase * 2) * 0.04 * c.amp);
     head(c, 0, jitter * 2);
   },
   raider(c) {
@@ -353,6 +367,10 @@ const ANIMATORS: Record<string, Animator> = {
     if (fuse > 0) { const j = fuse * 0.6; c.parts.body.position.x = (Math.random() - 0.5) * j / 16; c.parts.body.position.z = (Math.random() - 0.5) * j / 16; }
     else c.parts.body.position.x = c.parts.body.position.z = 0;
     rot(c.parts.torso, 0, c.look * 0.3, 0);
+    // The fuse smoulders, then flares as it swells.
+    const spark = 1 + Math.abs(Math.sin(c.t * 9 + c.a.seed)) * 0.12 + fuse * 0.6;
+    rot(c.parts.fuse, Math.sin(c.t * 2) * 0.1, 0, Math.sin(c.t * 1.7) * 0.1);
+    scale(c.parts.fuse, spark, 1, spark);
   },
   mirewalker(c) {
     bipedLegs(c, 0.55); bob(c, 1.1, 0.07); breathe(c, 'torso', 0.03, 1.1);
@@ -423,7 +441,8 @@ const ANIMATORS: Record<string, Animator> = {
     c.parts.body.rotation.z = Math.sin(c.t * 1.3) * 0.08;
     const f = Math.sin(c.t * 5 + c.a.seed);
     rot(c.parts.wingL, 0, 0, 0.2 + f * 0.5); rot(c.parts.wingR, 0, 0, -0.2 - f * 0.5);
-    for (const n of ['flame1', 'flame2', 'flame3']) scale(c.parts[n], 1, 0.75 + Math.abs(Math.sin(c.t * 7 + n.length * 1.7)) * 0.45, 1);
+    ['flame1', 'flame2', 'flame3', 'flame4', 'flame5'].forEach((n, i) => scale(c.parts[n], 1, 0.75 + Math.abs(Math.sin(c.t * 7 + i * 1.7)) * 0.45, 1));
+    rot(c.parts.embers, 0, c.t * 1.4, Math.sin(c.t) * 0.1);
     rot(c.parts.jaw, c.a.attack * 0.7 + Math.max(0, Math.sin(c.t * 3)) * 0.08);
     rot(c.parts.core, 0, c.t * 2, 0);
     rot(c.parts.torso, c.pitch * 0.4, 0, 0);

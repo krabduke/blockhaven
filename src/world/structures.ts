@@ -1,43 +1,91 @@
-// Structures scattered across the overworld, each laid out deterministically
-// from the seed and built into whichever chunks it overlaps (like villages):
+// Structures scattered through every dimension, each laid out deterministically from the seed
+// and built into whichever chunks it overlaps (like villages). The catalogue of kinds is in
+// structure-kinds.ts; the newer builders are in structures-overworld.ts, structures-ember.ts and
+// structures-hollow.ts. The four oldest overworld builders live here:
 //
 //   Sun temple     a stepped sandstone pyramid in the desert, with a vault under its floor
 //   Shipwreck      a broken hull on the sea floor, with a hold and a captain's chest
 //   Abandoned mine timbered tunnels with old rails, cobwebs, a nest of crawlers and supply chests
 //   Sanctum        a buried stone hall around the Astral Gate, the way into the Hollow
 //
-// Chest meta carries the loot table in bits 5-7 (see LOOT in world.ts).
+// Chest metadata carries the loot table (see chestMeta in builder.ts and LOOT in world.ts).
 
 import { B, SPAWNER_KINDS } from '../blocks';
-import { hash3, mulberry32 } from '../noise';
-import { CH, CS, SEA_LEVEL, idx } from './chunk';
+import { mulberry32 } from '../noise';
+import { CS, SEA_LEVEL } from './chunk';
+import { Builder, chestMeta } from './builder';
+import { STRUCTURES, overlaps, square, type Dim, type Rect, type Structure, type StructureKind, type Tunnel } from './structure-kinds';
+import * as OW from './structures-overworld';
+import * as EM from './structures-ember';
+import * as HO from './structures-hollow';
 import { villageInRegion } from './villages';
-import type { WorldGen } from './worldgen';
+import type { Spawn, WorldGen } from './worldgen';
 import { BIOME } from './worldgen';
 
-export type StructureKind = 'temple' | 'shipwreck' | 'mine' | 'sanctum' | 'treasure';
-export const LOOT_TABLE: Record<StructureKind | 'dungeon', number> = { dungeon: 0, temple: 1, shipwreck: 2, mine: 3, sanctum: 4, treasure: 6 };
+export type { Structure, StructureKind } from './structure-kinds';
+export { STRUCTURES } from './structure-kinds';
 
 const REGION = 256;
-/** Each 3x3 block of regions holds exactly one sanctum. */
+/** Each 3x3 block of regions holds exactly one sanctum; each 2x2 one Echo Vault. */
 const SANCTUM_SECTOR = 3;
-
-interface Rect { x0: number; z0: number; x1: number; z1: number }
-interface Tunnel extends Rect { axis: 'x' | 'z' }
-export interface Structure {
-  kind: StructureKind;
-  x: number; y: number; z: number;
-  rot: number;
-  seed: number;
-  bounds: Rect;
-  tunnels?: Tunnel[];
-  /** Mine dead ends: [x, z, direction the tunnel ran]. */
-  ends?: [number, number, number][];
-}
+const VAULT_SECTOR = 2;
+/** Surface structures keep this far inside their region, so none straddles two. */
+const INSET = 26;
 
 const DIRS: [number, number][] = [[1, 0], [0, 1], [-1, 0], [0, -1]];
 const floorDiv = (a: number, b: number) => Math.floor(a / b);
 const cache = new Map<string, Structure[]>();
+
+/** Surface kinds, what they need, and how big a yard they take. */
+interface Site { kind: StructureKind; r: number; flat: number; water?: [number, number] }
+const SITES: Record<string, Site> = {
+  temple: { kind: 'temple', r: 14, flat: 7 },
+  shipwreck: { kind: 'shipwreck', r: 10, flat: 99, water: [6, 99] },
+  outpost: { kind: 'outpost', r: 13, flat: 8 },
+  manor: { kind: 'manor', r: 21, flat: 12 },
+  citadel: { kind: 'citadel', r: 19, flat: 99, water: [13, 99] },
+  ziggurat: { kind: 'ziggurat', r: 22, flat: 18 },
+  frostkeep: { kind: 'frostkeep', r: 16, flat: 9 },
+  witchhut: { kind: 'witchhut', r: 7, flat: 99 },
+  igloo: { kind: 'igloo', r: 12, flat: 5 },
+  well: { kind: 'well', r: 3, flat: 3 },
+  ruinedgate: { kind: 'ruinedgate', r: 6, flat: 6 },
+  oceanruin: { kind: 'oceanruin', r: 11, flat: 99, water: [4, 30] },
+  campsite: { kind: 'campsite', r: 6, flat: 4 },
+  stones: { kind: 'stones', r: 10, flat: 5 },
+  cabin: { kind: 'cabin', r: 9, flat: 6 },
+};
+
+/**
+ * What each biome might hold, with a chance per attempt. Built on first use: worldgen.ts (where
+ * BIOME lives) imports this module, so BIOME isn't ready while this module first loads.
+ */
+let byBiome: Record<number, [keyof typeof SITES, number][]> | null = null;
+const BY_BIOME = (): Record<number, [keyof typeof SITES, number][]> => (byBiome ??= {
+  [BIOME.desert]: [['temple', 0.3], ['well', 0.25], ['ruinedgate', 0.05]],
+  [BIOME.ocean]: [['shipwreck', 0.18], ['citadel', 0.12], ['oceanruin', 0.15]],
+  [BIOME.plains]: [['outpost', 0.12], ['campsite', 0.15], ['stones', 0.12], ['ruinedgate', 0.05]],
+  [BIOME.savanna]: [['outpost', 0.15], ['campsite', 0.15], ['stones', 0.08], ['ruinedgate', 0.05]],
+  [BIOME.forest]: [['manor', 0.2], ['cabin', 0.22], ['stones', 0.06], ['ruinedgate', 0.04]],
+  [BIOME.birch_forest]: [['manor', 0.22], ['cabin', 0.18], ['stones', 0.06]],
+  [BIOME.taiga]: [['frostkeep', 0.18], ['igloo', 0.25], ['cabin', 0.15], ['outpost', 0.05]],
+  [BIOME.mountains]: [['ruinedgate', 0.08], ['cabin', 0.06]],
+  [BIOME.swamp]: [['witchhut', 0.35], ['ruinedgate', 0.04]],
+  [BIOME.jungle]: [['ziggurat', 0.4], ['ruinedgate', 0.05]],
+  [BIOME.blossom]: [['stones', 0.2], ['campsite', 0.15]],
+  [BIOME.badlands]: [['ruinedgate', 0.12], ['outpost', 0.1], ['well', 0.1]],
+  [BIOME.beach]: [['campsite', 0.1]],
+});
+
+function groundFor(biome: number): number {
+  switch (biome) {
+    case BIOME.desert: case BIOME.beach: return B.sand;
+    case BIOME.badlands: return B.red_sand;
+    case BIOME.taiga: return B.snowy_grass;
+    case BIOME.mountains: return B.stone;
+    default: return B.grass;
+  }
+}
 
 export function structuresInRegion(gen: WorldGen, rx: number, rz: number): Structure[] {
   const key = `${gen.seed}:${rx},${rz}`;
@@ -46,21 +94,41 @@ export function structuresInRegion(gen: WorldGen, rx: number, rz: number): Struc
   const out: Structure[] = [];
   const rand = mulberry32((gen.seed ^ Math.imul(rx, 0x3c6ef372) ^ Math.imul(rz, 0x1b873593) ^ 0x5717) >>> 0);
   const seed = (gen.seed ^ Math.imul(rx, 7919) ^ Math.imul(rz, 104729)) >>> 0;
+  // Villages nearby, which nothing else may crowd.
+  const villages: Rect[] = [];
+  const vx = floorDiv(rx * REGION + REGION / 2, 320), vz = floorDiv(rz * REGION + REGION / 2, 320);
+  for (let dz = -1; dz <= 1; dz++) for (let dx = -1; dx <= 1; dx++) { const v = villageInRegion(gen, vx + dx, vz + dz); if (v) villages.push(v.bounds); }
 
-  // A surface structure where the biome suits one.
-  const sx = rx * REGION + 40 + Math.floor(rand() * (REGION - 80));
-  const sz = rz * REGION + 40 + Math.floor(rand() * (REGION - 80));
-  const roll = rand();
-  const col = gen.column(sx, sz);
-  if (col.biome === BIOME.desert && roll < 0.7 && col.height > SEA_LEVEL + 1) {
-    let lo = col.height, hi = col.height;
-    for (const [dx, dz] of [[-10, -10], [10, 10], [-10, 10], [10, -10]]) { const h = gen.column(sx + dx, sz + dz).height; lo = Math.min(lo, h); hi = Math.max(hi, h); }
-    const v = villageInRegion(gen, floorDiv(sx, 320), floorDiv(sz, 320));
-    const nearVillage = !!v && Math.hypot(v.cx - sx, v.cz - sz) < 90;
-    if (hi - lo <= 6 && !nearVillage) out.push({ kind: 'temple', x: sx, y: col.height, z: sz, rot: 0, seed, bounds: { x0: sx - 14, z0: sz - 14, x1: sx + 14, z1: sz + 14 } });
-  } else if (col.biome === BIOME.ocean && roll < 0.6 && col.height < SEA_LEVEL - 5) {
-    const rot = Math.floor(rand() * 4);
-    out.push({ kind: 'shipwreck', x: sx, y: col.height + 1, z: sz, rot, seed, bounds: { x0: sx - 10, z0: sz - 10, x1: sx + 10, z1: sz + 10 } });
+  // Surface structures: a handful of spots, each offered to whatever its biome might hold.
+  for (let attempt = 0; attempt < 10; attempt++) {
+    const sx = rx * REGION + INSET + Math.floor(rand() * (REGION - 2 * INSET));
+    const sz = rz * REGION + INSET + Math.floor(rand() * (REGION - 2 * INSET));
+    const roll = rand(), rot = Math.floor(rand() * 4), variant = Math.floor(rand() * 1000);
+    const col = gen.column(sx, sz);
+    const options = BY_BIOME()[col.biome];
+    if (!options) continue;
+    let acc = 0, pick: Site | null = null;
+    for (const [k, p] of options) { acc += p; if (roll < acc) { pick = SITES[k]; break; } }
+    if (!pick) continue;
+    const bounds = square(sx, sz, pick.r);
+    if (out.some((o) => overlaps(o.bounds, bounds, 8)) || villages.some((v) => overlaps(v, bounds, 12))) continue;
+    // Water depth (for the sea's structures) or flat enough dry ground (for the rest).
+    const depth = SEA_LEVEL - col.height;
+    if (pick.water) { if (depth < pick.water[0] || depth > pick.water[1]) continue; }
+    else if (col.height <= SEA_LEVEL && pick.kind !== 'witchhut') continue;
+    // On land it stands at the average ground height (its yard is levelled to that), so long as
+    // the ground doesn't rise and fall too much across it.
+    let y = pick.kind === 'shipwreck' ? col.height + 1 : col.height;
+    if (pick.flat < 99) {
+      let lo = col.height, hi = col.height, sum = col.height;
+      const r = Math.max(2, Math.round(pick.r * 0.75));
+      for (const [dx, dz] of [[-r, -r], [r, r], [-r, r], [r, -r], [0, r], [0, -r], [r, 0], [-r, 0]]) {
+        const h = gen.column(sx + dx, sz + dz).height; lo = Math.min(lo, h); hi = Math.max(hi, h); sum += h;
+      }
+      if (hi - lo > pick.flat || lo <= SEA_LEVEL) continue;
+      if (pick.kind !== 'temple') y = Math.round(sum / 9);
+    }
+    out.push({ kind: pick.kind, x: sx, y, z: sz, rot, seed: (seed + attempt * 7349) >>> 0, bounds, ground: groundFor(col.biome), variant });
   }
 
   // An abandoned mine underground.
@@ -83,6 +151,14 @@ export function structuresInRegion(gen: WorldGen, rx: number, rz: number): Struc
     }
   }
 
+  // A fossil, deep in the rock.
+  if (rand() < 0.35) {
+    const fx = rx * REGION + 30 + Math.floor(rand() * (REGION - 60)), fz = rz * REGION + 30 + Math.floor(rand() * (REGION - 60));
+    const h = gen.column(fx, fz).height;
+    const fy = h - 18 - Math.floor(rand() * 14);
+    if (fy >= 14) out.push({ kind: 'fossil', x: fx, y: fy, z: fz, rot: Math.floor(rand() * 4), seed: seed ^ 0xf055, bounds: square(fx, fz, 16) });
+  }
+
   // The sanctum for this sector, if it falls in this region.
   const sxr = floorDiv(rx, SANCTUM_SECTOR), szr = floorDiv(rz, SANCTUM_SECTOR);
   const srand = mulberry32((gen.seed ^ Math.imul(sxr, 0x2545f491) ^ Math.imul(szr, 0x61c88647) ^ 0x5a9c) >>> 0);
@@ -92,6 +168,16 @@ export function structuresInRegion(gen: WorldGen, rx: number, rz: number): Struc
     const z = rz * REGION + 60 + Math.floor(srand() * (REGION - 120));
     const y = 20 + Math.floor(srand() * 6);
     out.push({ kind: 'sanctum', x, y, z, rot: 0, seed: seed ^ 0x51, bounds: { x0: x - 40, z0: z - 40, x1: x + 40, z1: z + 40 } });
+  }
+
+  // The Echo Vault for this sector, far below everything else.
+  const vxr = floorDiv(rx, VAULT_SECTOR), vzr = floorDiv(rz, VAULT_SECTOR);
+  const vrand = mulberry32((gen.seed ^ Math.imul(vxr, 0x68e31da4) ^ Math.imul(vzr, 0x1b56c4e9) ^ 0xec40) >>> 0);
+  if (rx - vxr * VAULT_SECTOR === Math.floor(vrand() * VAULT_SECTOR) && rz - vzr * VAULT_SECTOR === Math.floor(vrand() * VAULT_SECTOR)) {
+    const x = rx * REGION + 60 + Math.floor(vrand() * (REGION - 120));
+    const z = rz * REGION + 60 + Math.floor(vrand() * (REGION - 120));
+    const bounds = square(x, z, 53);
+    if (!out.some((o) => o.kind === 'sanctum' && overlaps(o.bounds, bounds))) out.push({ kind: 'vault', x, y: 6, z, rot: Math.floor(vrand() * 4), seed: seed ^ 0xec, bounds });
   }
 
   cache.set(key, out);
@@ -127,64 +213,88 @@ function mineLayout(mx: number, my: number, mz: number, seed: number, rand: () =
   return { kind: 'mine', x: mx, y: my, z: mz, rot: 0, seed, bounds, tunnels, ends };
 }
 
-function overlaps(a: Rect, b: Rect): boolean {
-  return a.x0 <= b.x1 && a.x1 >= b.x0 && a.z0 <= b.z1 && a.z1 >= b.z0;
+// ---------------------------------------------------------------- Finding structures, in any dimension
+
+interface GenLike { readonly seed: number }
+const REGION_OF: Record<Dim, number> = { overworld: REGION, ember: EM.EMBER_REGION, hollow: HO.HOLLOW_REGION };
+
+function regionStructures(dim: Dim, gen: GenLike, rx: number, rz: number): Structure[] {
+  if (dim === 'ember') return EM.emberStructuresInRegion(gen.seed, rx, rz);
+  if (dim === 'hollow') return HO.hollowStructuresInRegion(gen.seed, rx, rz);
+  return structuresInRegion(gen as WorldGen, rx, rz);
 }
 
-/** Structures whose bounds touch chunk (cx, cz). */
-export function structuresNear(gen: WorldGen, cx: number, cz: number): Structure[] {
+/** Structures of a dimension whose bounds touch chunk (cx, cz). */
+export function structuresNear(gen: GenLike, cx: number, cz: number, dim: Dim = 'overworld'): Structure[] {
   const x0 = cx * CS, z0 = cz * CS;
   const chunk: Rect = { x0, z0, x1: x0 + CS - 1, z1: z0 + CS - 1 };
-  const rx = floorDiv(x0, REGION), rz = floorDiv(z0, REGION);
+  const size = REGION_OF[dim];
+  const rx = floorDiv(x0, size), rz = floorDiv(z0, size);
   const out: Structure[] = [];
-  for (let dz = -1; dz <= 1; dz++) for (let dx = -1; dx <= 1; dx++) for (const s of structuresInRegion(gen, rx + dx, rz + dz)) if (overlaps(s.bounds, chunk)) out.push(s);
+  for (let dz = -1; dz <= 1; dz++) for (let dx = -1; dx <= 1; dx++) for (const s of regionStructures(dim, gen, rx + dx, rz + dz)) if (overlaps(s.bounds, chunk)) out.push(s);
   return out;
 }
 
-/** The closest structure of a kind, searching outward a few regions. */
-export function nearestStructure(gen: WorldGen, kind: StructureKind, x: number, z: number, maxRings = 8): Structure | null {
-  const rx = floorDiv(x, REGION), rz = floorDiv(z, REGION);
+/** The closest structure of a kind (in its own dimension), searching outward a few regions. */
+export function nearestStructure(gen: GenLike, kind: StructureKind, x: number, z: number, maxRings = 8): Structure | null {
+  const dim = STRUCTURES[kind].dim;
+  const size = REGION_OF[dim];
+  const rx = floorDiv(x, size), rz = floorDiv(z, size);
   let best: Structure | null = null, bd = Infinity;
   for (let r = 0; r <= maxRings; r++) {
     for (let dz = -r; dz <= r; dz++) for (let dx = -r; dx <= r; dx++) {
       if (Math.max(Math.abs(dx), Math.abs(dz)) !== r) continue;
-      for (const s of structuresInRegion(gen, rx + dx, rz + dz)) {
+      for (const s of regionStructures(dim, gen, rx + dx, rz + dz)) {
         if (s.kind !== kind) continue;
         const d = Math.hypot(s.x - x, s.z - z);
         if (d < bd) { bd = d; best = s; }
       }
     }
-    // Anything in a further ring is at least (r * REGION) away.
-    if (best && bd < r * REGION) return best;
+    // Anything in a further ring is at least (r * size) away.
+    if (best && bd < r * size) return best;
   }
   return best;
 }
 
-/** Write the parts of `s` that fall inside chunk (cx, cz). */
-export function buildStructure(gen: WorldGen, s: Structure, blocks: Uint8Array, meta: Uint8Array, cx: number, cz: number): void {
-  const x0 = cx * CS, z0 = cz * CS;
-  const set = (x: number, y: number, z: number, id: number, m = 0) => {
-    const lx = x - x0, lz = z - z0;
-    if (lx < 0 || lx >= CS || lz < 0 || lz >= CS || y < 1 || y >= CH) return;
-    const i = idx(lx, y, lz);
-    blocks[i] = id;
-    meta[i] = m;
-  };
-  const get = (x: number, y: number, z: number) => {
-    const lx = x - x0, lz = z - z0;
-    if (lx < 0 || lx >= CS || lz < 0 || lz >= CS || y < 0 || y >= CH) return -1;
-    return blocks[idx(lx, y, lz)];
-  };
-  /** A per-block coin flip that's the same whichever chunk asks. */
-  const h = (x: number, y: number, z: number, salt = 0) => hash3(s.seed + salt, x, y, z);
-  const chest = (x: number, y: number, z: number, facing: number) => set(x, y, z, B.chest, (facing & 3) | 16 | (LOOT_TABLE[s.kind] << 5));
+/** Look a structure kind up by any reasonable spelling of its name ("frost keep", "Frost_Keep", "frostkeep"). */
+export function structureByName(name: string): StructureKind | null {
+  const norm = (t: string) => t.toLowerCase().replace(/[^a-z]/g, '');
+  const want = norm(name);
+  for (const k of Object.keys(STRUCTURES) as StructureKind[]) if (norm(k) === want || norm(STRUCTURES[k].name) === want) return k;
+  for (const k of Object.keys(STRUCTURES) as StructureKind[]) if (want.length >= 3 && (norm(STRUCTURES[k].name).includes(want) || norm(k).startsWith(want))) return k;
+  return null;
+}
+
+// ---------------------------------------------------------------- Building
+
+type Build = (b: Builder, s: Structure) => void;
+const BUILDERS: Partial<Record<StructureKind, Build>> = {
+  outpost: OW.outpost, manor: OW.manor, citadel: OW.citadel, ziggurat: OW.ziggurat, frostkeep: OW.frostkeep, vault: OW.vault,
+  witchhut: OW.witchhut, igloo: OW.igloo, well: OW.well, ruinedgate: OW.ruinedgate, fossil: OW.fossil, oceanruin: OW.oceanruin,
+  campsite: OW.campsite, stones: OW.stones, cabin: OW.cabin,
+  bastion: EM.bastion, forge: EM.forge, spire: EM.spire, cathedral: EM.cathedral,
+  shrine: EM.shrine, monoliths: EM.monoliths, ashcamp: EM.ashcamp, lavawell: EM.lavawell, cage: EM.cage,
+  spires: HO.spires, observatory: HO.observatory, garden: HO.garden, starforge: HO.starforge,
+  crystalshrine: HO.crystalshrine, bridge: HO.bridge, crater: HO.crater, waystones: HO.waystones, statue: HO.statue,
+};
+
+/** Write the parts of `s` that fall inside chunk (cx, cz); returns creatures to spawn there. */
+export function buildStructure(gen: GenLike, s: Structure, blocks: Uint8Array, meta: Uint8Array, cx: number, cz: number): Spawn[] {
+  const b = new Builder(blocks, meta, cx, cz, s.seed);
+  const fn = BUILDERS[s.kind];
+  if (fn) { fn(b, s); return b.spawns; }
+  const set = (x: number, y: number, z: number, id: number, m = 0) => b.set(x, y, z, id, m);
+  const get = (x: number, y: number, z: number) => b.get(x, y, z);
+  const h = (x: number, y: number, z: number, salt = 0) => b.h(x, y, z, salt);
+  const chest = (x: number, y: number, z: number, facing: number) => set(x, y, z, B.chest, chestMeta(facing, STRUCTURES[s.kind].loot));
   switch (s.kind) {
-    case 'temple': temple(gen, s, set, chest); break;
-    case 'shipwreck': shipwreck(gen, s, set, h, chest); break;
+    case 'temple': temple(gen as WorldGen, s, set, chest); break;
+    case 'shipwreck': shipwreck(gen as WorldGen, s, set, h, chest); break;
     case 'mine': mine(s, set, get, h, chest); break;
     case 'sanctum': sanctum(s, set, h, chest); break;
     case 'treasure': chest(s.x, s.y, s.z, 0); set(s.x, s.y - 1, s.z, B.sandstone); break;
   }
+  return b.spawns;
 }
 
 type Set = (x: number, y: number, z: number, id: number, m?: number) => void;
