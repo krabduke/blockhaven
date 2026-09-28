@@ -233,7 +233,7 @@ await page.evaluate(() => {
   G.hudHidden = true; G.hud.setVisible(false);
   const css = document.createElement('style');
   css.textContent = `
-    #chatlog, #toast, #resume, #debug, #rotate-hint, #bossbar, .boss-bar { display: none !important; }
+    #chatlog, #toast, #resume, #debug, #rotate-hint, #bossbar, .boss-bar, #achievement { display: none !important; }
     #tr { position: fixed; inset: 0; pointer-events: none; z-index: 9999; font-family: 'Pixelify Sans', system-ui, sans-serif; }
     #tr .bar { position: absolute; left: 0; right: 0; background: #000; }
     #tr .top { top: 0; } #tr .bot { bottom: 0; }
@@ -390,6 +390,27 @@ async function setup(shot) {
     return { spot, ground, top: window.__top(x, z, 40) };
   }, { spot, s });
   return info;
+}
+
+// ------------------------------------------------------------------ stills for the README
+// STILLS=name,name saves one clean frame (no bars or titles) from each named shot to docs/screenshots.
+if (process.env.STILLS) {
+  const want = process.env.STILLS.split(',');
+  const docs = new URL('../docs/screenshots/', import.meta.url).pathname;
+  for (const shot of SHOTS) {
+    if (!want.includes(shot.name)) continue;
+    const info = await setup(shot);
+    const u = shot.still ?? 0.6;
+    const c = shot.cam(u, info);
+    await page.evaluate((c) => { window.__cam = c; window.__follow(c.pos); }, c);
+    await settle(c.pos, 11, 40000);
+    const time = typeof shot.time === 'function' ? shot.time(u) : shot.time;
+    for (let i = 0; i < 45; i++) await page.evaluate(({ c, time }) => { window.__cam = c; window.__follow(c.pos); window.blockhaven.world.time = time; window.__overlay({ bars: 0, fade: 0, flash: 0, card: null, logo: null }); window.__vstep(33.33); }, { c, time });
+    await page.screenshot({ path: `${docs}${shot.name}.jpg`, type: 'jpeg', quality: 86 });
+    console.log('still', shot.name);
+  }
+  await browser.close();
+  process.exit(0);
 }
 
 // ------------------------------------------------------------------ recording

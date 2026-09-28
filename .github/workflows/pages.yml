@@ -28,6 +28,11 @@ jobs:
       - run: npm run lint
       - run: npm test
       - run: npm run build
+      # The trailer is too big for the repo: it lives on the "trailer" release and is served from the site.
+      - name: Add the trailer
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release download trailer --repo "$GITHUB_REPOSITORY" --pattern qubecraft-trailer-web.mp4 --output dist/trailer.mp4 || echo "No trailer release; skipping"
       - uses: actions/upload-pages-artifact@v3
         with:
           path: dist

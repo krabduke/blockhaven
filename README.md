@@ -1,8 +1,10 @@
 # QubeCraft
 
-A blocky survival sandbox that runs in your browser. Dig into an endless world, craft tools, build a home, farm, fish, enchant your gear, and make it through the night.
+A blocky survival sandbox that runs in your browser. Dig into an endless world, craft tools, build a home, farm, fish, enchant your gear, make it through the night, and then go looking for what's buried, burning and floating out there.
 
-![Title screen, with the live world orbiting behind the logo](docs/screenshots/title.png)
+[![The QubeCraft trailer: click to watch](docs/trailer.jpg)](https://krabduke.github.io/qubecraft/trailer.mp4)
+
+**[Watch the trailer](https://krabduke.github.io/qubecraft/trailer.mp4)** (1:46, 1080p), or [download it](https://github.com/krabduke/qubecraft/releases/tag/trailer). Everything in it was recorded in the game, and the score is synthesized the same way as the game's own music.
 
 QubeCraft plays like the classic block-building survival games: the same block size, movement physics, crafting grid, mining times, hunger and day/night rhythm. Every texture, sound, creature and line of code is original to this project. There are no image or audio files at all: textures are painted procedurally at startup and sounds are synthesized with the Web Audio API.
 
@@ -27,7 +29,11 @@ Worlds save automatically to your browser's storage (IndexedDB) every 30 seconds
 
 ## Screenshots
 
+![A few seconds of the trailer: sunrise, badlands, a sun temple, animals at golden hour, monsters at night, the Ember Cathedral, the Hollow and its Colossus](docs/trailer-preview.gif)
+
 All taken in-game at render distance 16 with the default Fancy graphics.
+
+![Title screen, with the live world orbiting behind the logo](docs/screenshots/title.png)
 
 | | |
 |---|---|
@@ -45,6 +51,16 @@ All taken in-game at render distance 16 with the default Fancy graphics.
 | ![A comparator, campfire, smoker, item frame, flower pot, barrel, composter and anvil at dusk](docs/screenshots/workshop.png) | |
 | ![The crafting table screen](docs/screenshots/crafting.png) | ![The enchanting table screen](docs/screenshots/enchanting.png) |
 
+**Structures** (from the trailer's camera)
+
+| | |
+|---|---|
+| ![The Frost Keep: a walled castle with ice-crowned towers in a snowy spruce forest](docs/screenshots/frostkeep.jpg) | ![Thornwood Manor: a three-storey timber house with a slate roof, a porch and a flower garden](docs/screenshots/manor.jpg) |
+| ![The Vinecrown Ziggurat: a stepped, vine-hung pyramid in the jungle](docs/screenshots/jungle.jpg) | ![A raider outpost: a timber watchtower over a camp with a cage](docs/screenshots/outpost.jpg) |
+| ![The Tidewatch Citadel on the sea floor: crystal-crowned walls around a domed keep](docs/screenshots/citadel.jpg) | ![The Echo Vault: a buried deepstone hall with an altar before a great dark arch](docs/screenshots/vault.jpg) |
+| ![The Ember Cathedral: a nave of burning stained glass, pews and a red runner to the altar](docs/screenshots/cathedral.jpg) | ![The Sky Garden: a glass dome of blossom trees on a floating island in the Hollow](docs/screenshots/garden.jpg) |
+| ![The Astral Spires: slender towers joined by a bridge in the Hollow](docs/screenshots/spires.jpg) | ![The Star Forge: obsidian pillars around a lava crucible under a burning star core](docs/screenshots/starforge.jpg) |
+
 ## Features
 
 **World**
@@ -60,7 +76,7 @@ All taken in-game at render distance 16 with the default Fancy graphics.
 - Day and night on a 20-minute cycle, with sun, moon, stars, drifting clouds, and rain, snow and thunderstorms
 
 **Blocks and building**
-- 180 blocks, including stairs, slabs, fences, fence gates, doors, trapdoors, ladders, glass and glass panes, iron bars, lanterns, signs you can write on, wool, carpets, stained glass and banners in all sixteen dye colours (mix dyes: red and white make pink, blue and green make cyan), sixteen original paintings to hang, slate, marble, terracotta, hay bales, cake, bookshelves, TNT and lamps
+- 199 blocks, including stairs, slabs, fences, fence gates, doors, trapdoors, ladders, glass and glass panes, iron bars, lanterns, signs you can write on, wool, carpets, stained glass and banners in all sixteen dye colours (mix dyes: red and white make pink, blue and green make cyan), sixteen original paintings to hang, slate, marble, terracotta, hay bales, cake, bookshelves, TNT and lamps
 - Power: buttons, pressure plates and levers send power along spark dust wire to light lamps, open doors, trapdoors and gates, and set off TNT. Repeaters pass power one way after a delay you set by right-clicking them (they also boost it back to full strength); pistons push up to twelve blocks (and anything standing there), and sticky pistons pull a block back; hoppers move items from containers above into whatever they point at and pick up items dropped on them (a powered hopper pauses); and the Watcher, an original sensor block, sends a short pulse out of its back whenever the block in front of it changes
 - Fire that spreads through wood, wool and leaves and burns out on its own, and puts itself out in the rain
 - Smooth lighting with ambient occlusion; sunlight and torchlight both flood-fill through the world
@@ -229,6 +245,7 @@ TypeScript, [Vite](https://vite.dev) and [Three.js](https://threejs.org), with n
 | Procedural textures | `src/textures.ts` |
 | Synthesized sound | `src/audio.ts` |
 | Menus, HUD and inventories | `src/ui/` |
+| The trailer (scripted recorder, synthesized score, assembly) | `trailer/` |
 
 Physics runs at 20 ticks per second using the classic constants (gravity 0.08, 0.98 drag, jump velocity 0.42, 0.6 × 0.91 ground friction), so walking speed, sprint-jumping, jump height and falling all feel familiar.
 
@@ -236,7 +253,7 @@ Physics runs at 20 ticks per second using the classic constants (gravity 0.08, 0
 
 ```bash
 npm run lint                      # oxlint
-npm test                          # unit tests: noise, world gen, lighting, physics, crafting, armor, enchanting...
+npm test                          # unit tests: noise, world gen, every structure kind, lighting, physics, crafting...
 npm run dev -- --port 5199        # then, in another terminal:
 npm run playtest                  # plays the real game in headless Chromium and checks mining, placing,
                                   # water, torches, combat, bows, shearing, breeding, bone meal, armor,
@@ -252,6 +269,18 @@ npm run screenshots               # regenerates docs/screenshots
 ```
 
 Every push runs lint, the unit tests, the playtest, the phone test and the two-player test in CI before deploying. CI machines have no GPU, so there the game runs with `NORENDER=1` (the page is opened with `?norender`): everything updates normally but nothing is drawn.
+
+## Making the trailer
+
+```bash
+npx vite --port 5199              # then, in another terminal:
+npx tsx trailer/plan.ts 384       # finds every landmark in the chosen world
+node trailer/record.mjs           # plays the game on a frame-by-frame clock and saves each frame
+node trailer/render-score.mjs     # synthesizes the soundtrack
+sh trailer/assemble.sh            # grades and cuts it all into trailer/out/qubecraft-trailer.mp4
+```
+
+The recorder runs the game on a virtual clock, so every frame is exactly a thirtieth of a second of game time however long it takes to draw, with all the graphics effects on. A scripted camera replaces the player's view, and the titles, letterbox and flashes are drawn over the game in the page. `ONLY=name,name` re-records single shots, and `STILLS=name,name` saves clean stills to `docs/screenshots`.
 
 ## What's not in yet
 
