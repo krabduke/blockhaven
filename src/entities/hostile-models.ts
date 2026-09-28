@@ -460,7 +460,7 @@ function raider(): MobModel {
   const bolt = tone('#c8c0a8');
   const flag: Paint = (g, w, h, f, rand) => {
     fur('#8a2e22', { top: '#a03a2a', strand: 0.12 })(g, w, h, f, rand);
-    if (f === 0 || f === 1) {
+    if (f === 4 || f === 5) {
       // An original raider sigil: a pale broken ring pierced by a bolt.
       const cx = Math.floor(w / 2), cy = Math.floor(h / 3);
       for (let a = 0; a < 12; a++) { if (a === 2 || a === 3) continue; const t = a / 12 * Math.PI * 2; px(g, '#e8dcc0', cx + Math.round(Math.cos(t) * 2.4), cy + Math.round(Math.sin(t) * 2.4)); }
@@ -500,8 +500,8 @@ function raider(): MobModel {
       ],
     },
     {
-      name: 'pennant', size: [0.9, 22, 0.9], pivot: [2.4, 14, 3.2], offset: [0, 11, 0], paint: wood, parent: 'torso', rot: [0.12, 0, -0.08],
-      extra: [box([0.4, 10, 6], [0, 5, 3.3], flag), box([1.6, 1.6, 1.6], [0, 11.6, 0], iron)],
+      name: 'pennant', size: [0.9, 30, 0.9], pivot: [2.4, 14, 3.2], offset: [0, 15, 0], paint: wood, parent: 'torso', rot: [0.12, 0, -0.08],
+      extra: [box([8, 9, 0.4], [-4.4, 24.5, 0], flag), box([1.6, 1.6, 1.6], [0, 30.6, 0], iron)],
     },
   ]);
 }
