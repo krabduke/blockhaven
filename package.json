@@ -10,6 +10,7 @@
     "lint": "oxlint",
     "playtest": "node scripts/playtest.mjs",
     "test:mobile": "node scripts/mobile-test.mjs",
+    "test:multiplayer": "node scripts/multiplayer-test.mjs",
     "screenshots": "node scripts/screenshots.mjs",
     "icons": "node scripts/make-icons.mjs"
   },

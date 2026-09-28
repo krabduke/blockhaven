@@ -1276,6 +1276,8 @@ await wait(300);
     E.breakAnchor(...E.anchorsStanding()[0]);
     out.anchors = [a0, E.anchorsStanding().length];
     out.bar = document.querySelector('#bossbar')?.classList.contains('show') ?? false;
+    // Out of harm's way while it dies (its last shards are still in the air).
+    p.creative = true; p.health = 20;
     boss.health = 1; boss.hurt(E, 5, null, 0, true);
     for (let i = 0; i < 20 && E.list.includes(boss); i++) await sleep(500);
     await sleep(1500);
@@ -1292,6 +1294,7 @@ await wait(300);
     const G = window.blockhaven, p = G.player;
     const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     p.creative = false; p.flying = false; p.health = 20;
+    if (!p.alive) { p.alive = true; G.menus.show(null); }
     p.armor.slots[1] = { id: G.items.glider, count: 1 };
     p.body.pos = [0.5, 150, 40.5]; p.body.vel = [0, -0.2, 0]; p.yaw = Math.PI; p.pitch = -0.25;
     await sleep(300);

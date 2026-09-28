@@ -68,7 +68,7 @@ export class Chat {
       this.history = this.history.slice(-50);
       try { localStorage.setItem(HISTORY_KEY, JSON.stringify(this.history)); } catch { /* storage unavailable */ }
       if (v.startsWith('/')) runCommand(this.g, v);
-      else this.say(`<you> ${v}`);
+      else { this.say(`<${this.g.playerName}> ${v}`); this.g.net?.say(v); }
     } else if (e.key === 'Escape') {
       this.close();
     } else if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {

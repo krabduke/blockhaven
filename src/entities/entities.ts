@@ -142,8 +142,8 @@ export class ItemEntity extends Entity {
         }
       }
     }
-    // Pickup.
-    const p = m.player;
+    // Pickup, by whoever is nearest.
+    const p = m.nearestPlayer(b.pos);
     if (p.alive && this.pickupDelay === 0) {
       const pa = p.body.aabb(), ia = b.aabb();
       const near = ia.max[0] > pa.min[0] - 1 && ia.min[0] < pa.max[0] + 1 && ia.max[1] > pa.min[1] - 0.5 && ia.min[1] < pa.max[1] + 0.5 && ia.max[2] > pa.min[2] - 1 && ia.min[2] < pa.max[2] + 1;
@@ -287,6 +287,8 @@ export class Mob extends Entity {
   }
 
   hurt(m: EntityManager, amount: number, from: [number, number, number] | null, knock = 0.4, byPlayer = false): void {
+    // A guest's copy of the host's creature: the host decides what the hit does.
+    if (this.netId) { if (this.hurtTime === 0 && this.deathTime === 0) { m.onPuppetHit(this, amount, from, knock); this.hurtTime = 10; } return; }
     if (this.hurtTime > 0 || this.deathTime > 0) return;
     this.health -= amount;
     this.hurtTime = 10;
@@ -314,7 +316,7 @@ export class Mob extends Entity {
 
   /** Right-click with an item. Returns true if the item was used. */
   interact(m: EntityManager, stack: ItemStack | null): 'fed' | 'sheared' | 'trade' | 'tamed' | 'saddled' | 'ride' | 'sit' | null {
-    if (this.deathTime) return null;
+    if (this.deathTime || this.netId) return null;
     if (this.spec.trader && !this.baby) return 'trade';
     const b = this.body.pos;
     // Taming: foxes take apples, mossbacks warm up to you over several feedings.
@@ -378,7 +380,7 @@ export class Mob extends Entity {
       if (this.deathTime > 20) { this.dead = true; m.puff(this.body.pos[0], this.body.pos[1] + 0.5, this.body.pos[2]); }
       return;
     }
-    const w = m.world, b = this.body, p = m.player;
+    const w = m.world, b = this.body, p = m.nearestPlayer(this.body.pos);
     updateContacts(w, b, this.body.height * 0.85);
     if (this.angry > 0) this.angry--;
     if (this.healCooldown > 0) this.healCooldown--;
@@ -569,7 +571,7 @@ export class Mob extends Entity {
    * dives at you to slam with its fists. While an anchor stone stands it mends itself.
    */
   private colossusTick(m: EntityManager): void {
-    const b = this.body, p = m.player, pp = p.body.pos;
+    const b = this.body, p = m.nearestPlayer(this.body.pos), pp = p.body.pos;
     const target = p.alive && !p.creative;
     const toP = [pp[0] - b.pos[0], pp[1] + 1 - (b.pos[1] + 2.2), pp[2] - b.pos[2]];
     const dP = Math.hypot(toP[0], toP[1], toP[2]);
@@ -680,7 +682,7 @@ export class Mob extends Entity {
    * help crops they fly over grow, and sting you if angered (then calm down).
    */
   private beeTick(m: EntityManager): void {
-    const b = this.body, w = m.world, p = m.player;
+    const b = this.body, w = m.world, p = m.nearestPlayer(this.body.pos);
     if (!this.home && (this.age === 1 || this.age % 200 === 0)) {
       // Find the nest it came from (spawned beside it).
       for (let dy = -2; dy <= 2 && !this.home; dy++) for (let dz = -3; dz <= 3 && !this.home; dz++) for (let dx = -3; dx <= 3; dx++) {
@@ -747,7 +749,7 @@ export class Mob extends Entity {
 
   /** Floating movement for Emberwisps and moths. */
   private flyTick(m: EntityManager): void {
-    const b = this.body, p = m.player, w = m.world;
+    const b = this.body, p = m.nearestPlayer(this.body.pos), w = m.world;
     const pd = dist(p.body.pos, b.pos);
     const hostile = this.spec.hostile && p.alive && !p.creative && pd < 32;
     if (!this.flyTarget || dist(this.flyTarget, b.pos) < 1.5 || this.age % 100 === 0) {
@@ -927,16 +929,17 @@ export class Projectile extends Entity {
           return true;
         }
       } else {
-        const p = m.player;
-        if (!p.alive) return false;
-        const a = p.body.aabb();
-        const lo = [a.min[0] - 0.1, a.min[1], a.min[2] - 0.1], hi = [a.max[0] + 0.1, a.max[1], a.max[2] + 0.1];
-        for (let s = 0; s <= 4; s++) {
-          const q = [b.pos[0] + dir[0] * speed * s / 4, b.pos[1] + dir[1] * speed * s / 4, b.pos[2] + dir[2] * speed * s / 4];
-          if (q[0] > lo[0] && q[0] < hi[0] && q[1] > lo[1] && q[1] < hi[1] && q[2] > lo[2] && q[2] < hi[2]) {
-            if (this.kind === 'potion') return true; // splash damage is dealt on impact
-            p.damage(Math.ceil(speed * this.baseDamage), (this.owner as Mob).spec.kind, [dir[0], dir[2]]);
-            return true;
+        for (const p of m.allPlayers()) {
+          if (!p.alive) continue;
+          const a = p.body.aabb();
+          const lo = [a.min[0] - 0.1, a.min[1], a.min[2] - 0.1], hi = [a.max[0] + 0.1, a.max[1], a.max[2] + 0.1];
+          for (let s = 0; s <= 4; s++) {
+            const q = [b.pos[0] + dir[0] * speed * s / 4, b.pos[1] + dir[1] * speed * s / 4, b.pos[2] + dir[2] * speed * s / 4];
+            if (q[0] > lo[0] && q[0] < hi[0] && q[1] > lo[1] && q[1] < hi[1] && q[2] > lo[2] && q[2] < hi[2]) {
+              if (this.kind === 'potion') return true; // splash damage is dealt on impact
+              p.damage(Math.ceil(speed * this.baseDamage), (this.owner as Mob).spec.kind, [dir[0], dir[2]]);
+              return true;
+            }
           }
         }
       }
@@ -1035,7 +1038,7 @@ export class XpOrb extends Entity {
   tick(m: EntityManager): void {
     this.prev = [...this.body.pos];
     this.age++;
-    const b = this.body, p = m.player;
+    const b = this.body, p = m.nearestPlayer(this.body.pos);
     const target = [p.body.pos[0], p.body.pos[1] + 0.9, p.body.pos[2]];
     const d = dist(target, b.pos);
     if (p.alive && d < 8) {
@@ -1224,6 +1227,47 @@ export class EntityManager {
   onExplosion: (x: number, y: number, z: number) => void = () => {};
   onMobKilled: (mob: Mob, byPlayer: boolean) => void = () => {};
   onBossDefeated: (mob: Mob) => void = () => {};
+
+  // ---------- Shared worlds ----------
+  /** Other players in a shared world (on the host), as creatures and items see them. */
+  others: PlayerLike[] = [];
+  /** On a guest: creatures and items are the host's, shown as copies that follow its updates. */
+  puppets = false;
+  /** A guest hit one of the host's creatures. */
+  onPuppetHit: (mob: Mob, amount: number, from: [number, number, number] | null, knock: number) => void = () => {};
+
+  allPlayers(): PlayerLike[] { return this.others.length ? [this.player, ...this.others] : [this.player]; }
+
+  /** The closest living player to a point (you, if nobody is alive). */
+  nearestPlayer(pos: number[]): PlayerLike {
+    if (!this.others.length) return this.player;
+    let best: PlayerLike = this.player, bd = this.player.alive ? dist(this.player.body.pos, pos) : Infinity;
+    for (const o of this.others) {
+      if (!o.alive) continue;
+      const d = dist(o.body.pos, pos);
+      if (d < bd) { bd = d; best = o; }
+    }
+    return best;
+  }
+
+  /** Follow the host's position for a copied entity. */
+  private puppetTick(e: Entity): void {
+    e.prev = [...e.body.pos];
+    e.age++;
+    const t = e.netTarget, b = e.body;
+    if (t) {
+      const dx = t[0] - b.pos[0], dy = t[1] - b.pos[1], dz = t[2] - b.pos[2];
+      if (Math.abs(dx) + Math.abs(dy) + Math.abs(dz) > 8) b.pos = [...t];
+      else { b.pos[0] += dx * 0.45; b.pos[1] += dy * 0.45; b.pos[2] += dz * 0.45; }
+      b.vel = [b.pos[0] - e.prev[0], b.pos[1] - e.prev[1], b.pos[2] - e.prev[2]];
+    }
+    if (e instanceof Mob) {
+      e.walkAnim += Math.hypot(b.vel[0], b.vel[2]) * 3.5;
+      if (e.hurtTime > 0) e.hurtTime--;
+      if (e.deathTime > 0) e.deathTime++;
+      if (e.attackCooldown > 0) e.attackCooldown--;
+    }
+  }
   private anchorCache: { tick: number; list: [number, number, number][] } = { tick: -1, list: [] };
 
   /** Anchor stones still standing in the Hollow (checked at most once a second). */
@@ -1258,7 +1302,11 @@ export class EntityManager {
     return e;
   }
 
+  /** On a guest: items belong to the host, so drops are sent there instead of made here. */
+  remoteDrop: ((x: number, y: number, z: number, stack: ItemStack, delay: number, vel?: [number, number, number]) => void) | null = null;
+
   dropItem(x: number, y: number, z: number, stack: ItemStack, delay = 10, vel?: [number, number, number]): ItemEntity {
+    if (this.remoteDrop) { this.remoteDrop(x, y, z, { ...stack }, delay, vel); return new ItemEntity({ ...stack }, x, y, z, this.renderer, delay); }
     const e = this.add(new ItemEntity({ ...stack }, x, y, z, this.renderer, delay));
     if (vel) e.body.vel = [...vel];
     return e;
@@ -1342,7 +1390,13 @@ export class EntityManager {
   }
 
   tick(): void {
-    for (const e of this.list) if (!e.dead) e.tick(this);
+    for (const e of this.list) if (!e.dead) { if (e.netId) this.puppetTick(e); else e.tick(this); }
+    if (this.puppets) {
+      for (const e of this.list) if (e.dead) e.object.removeFromParent();
+      this.list = this.list.filter((e) => !e.dead);
+      this.particles.tick(this.world);
+      return;
+    }
     // Mobs push each other apart a little.
     const mobs = this.list.filter((e): e is Mob => e instanceof Mob);
     for (let i = 0; i < mobs.length; i++) for (let j = i + 1; j < mobs.length; j++) {
@@ -1497,7 +1551,7 @@ export class EntityManager {
   /** Pressure plates react to anything standing on them. */
   private tickPlates(): void {
     const now = new Set<string>();
-    const bodies = [this.player.alive ? this.player.body : null, ...this.list.filter((e) => !e.dead).map((e) => e.body)];
+    const bodies = [...this.allPlayers().map((p) => (p.alive ? p.body : null)), ...this.list.filter((e) => !e.dead).map((e) => e.body)];
     for (const b of bodies) {
       if (!b) continue;
       const x = Math.floor(b.pos[0]), y = Math.floor(b.pos[1] + 0.01), z = Math.floor(b.pos[2]);
@@ -1618,8 +1672,7 @@ export class EntityManager {
       if (e instanceof Mob) { const dmg = hitBody(e.body); if (dmg) e.hurt(this, dmg, null, 0.4, true); }
       else if (e instanceof ItemEntity && hitBody(e.body) > 20) e.dead = true;
     }
-    const pd = hitBody(this.player.body);
-    if (pd) this.player.damage(pd, 'explosion');
+    for (const pl of this.allPlayers()) { const pd = hitBody(pl.body); if (pd) pl.damage(pd, 'explosion'); }
     this.onExplosion(x, y, z);
   }
 

@@ -34,6 +34,9 @@ import { Input } from './game/input';
 import { Signs } from './game/signs';
 import { Waypoints } from './game/waypoints';
 import { Raids } from './game/raids';
+import { GuestSession, HostSession, type Welcome } from './net/session';
+import { answerInvite, type Link } from './net/peer';
+import { ShareScreens } from './ui/share';
 import { glideStep, wornGlider } from './game/glide';
 import { WorldMap } from './ui/map';
 
@@ -133,6 +136,10 @@ export class Game {
   readonly chat: Chat;
   readonly history: EditHistory;
   readonly waypoints = new Waypoints();
+  /** A shared world: this game is the host, or a guest in someone else's. */
+  net: HostSession | GuestSession | null = null;
+  /** The Invite a friend and Join a friend screens. */
+  readonly share: ShareScreens;
   readonly music = new Music();
   readonly ambience = new Ambience();
   private soundTimer = 0;
@@ -228,6 +235,7 @@ export class Game {
         catch (e) { this.toast(`Couldn’t export: ${(e as Error).message}`); }
       },
     }, this.settings);
+    this.share = new ShareScreens(this, this.menus);
 
     this.debugEl = root.querySelector('#debug')!;
     this.resumeEl = root.querySelector('#resume')!;
@@ -354,6 +362,7 @@ export class Game {
 
   private async startTitle(): Promise<void> {
     this.mode = 'title';
+    this.menus.setGuest(false);
     this.hud.setVisible(false);
     this.menus.show('title');
     const gen = new WorldGen(hashString('blockhaven-title'));
@@ -418,6 +427,12 @@ export class Game {
   async travel(to: Dimension, opts: { toSpawn?: boolean } = {}): Promise<void> {
     if (!this.meta || !this.world) return;
     const p = this.player;
+    // Friends can't follow through gates yet.
+    if (this.net && !opts.toSpawn) {
+      p.portalCooldown = 100;
+      this.toast(this.net instanceof GuestSession ? 'Gates only work for the host in a shared world.' : 'Your friends can’t follow you through gates yet. Close the world to friends first.', 4);
+      return;
+    }
     const from = this.world.dimension;
     await this.save();
     const home = to === 'overworld' && (from === 'hollow' || opts.toSpawn);
@@ -531,6 +546,8 @@ export class Game {
   }
 
   async save(): Promise<void> {
+    // A guest's world belongs to the host.
+    if (this.net instanceof GuestSession) return;
     if (!this.world || !this.meta || this.meta.id === '__title' || this.mode !== 'playing') return;
     const prev = this.meta as SaveMeta;
     const meta: SaveMeta = {
@@ -573,6 +590,8 @@ export class Game {
   private async quitToTitle(): Promise<void> {
     this.containers.close();
     await this.save();
+    this.net?.close();
+    this.net = null;
     document.exitPointerLock?.();
     this.startTitle();
   }
@@ -854,6 +873,54 @@ export class Game {
   }
 
   // ---------- Pass-throughs kept for scripts and tests ----------
+  // ---------- Shared worlds ----------
+  /** Open this world to a friend: an invite code, and a way to finish with their reply (resolves to their name). */
+  async inviteFriend(): Promise<{ code: string; accept: (reply: string) => Promise<string> }> {
+    if (!this.world || this.mode !== 'playing') throw new Error('Open a world first.');
+    if (this.net instanceof GuestSession) throw new Error('You’re a guest in this world; only the host can invite people.');
+    if (this.world.dimension !== 'overworld') throw new Error('Shared worlds are overworld only for now. Head back to the overworld first.');
+    if (!this.net) this.net = new HostSession(this);
+    return this.net.invite();
+  }
+
+  /** Join a friend's world: your reply code, and a promise that resolves once you're in. */
+  async joinFriend(invite: string): Promise<{ code: string; joined: Promise<void> }> {
+    const { code, link } = await answerInvite(invite);
+    const joined = link.then((l) => new Promise<void>((resolve, reject) => {
+      l.onClose = () => reject(new Error('The connection closed before the world arrived.'));
+      l.onMessage = (m) => {
+        if (m.op === 'bye') { reject(new Error(String(m.reason))); l.close(); return; }
+        if (m.op === 'welcome') this.startGuest(l, m as unknown as Welcome).then(resolve, reject);
+      };
+      l.send({ op: 'hello', name: this.playerName, build: __BUILD_ID__ });
+    }));
+    return { code, joined };
+  }
+
+  private async startGuest(link: Link, w: Welcome): Promise<void> {
+    if (this.mode === 'playing') await this.quitToTitle();
+    const session = new GuestSession(this, link, w);
+    this.net = session;
+    session.onBye = (reason) => {
+      if (this.net !== session) return;
+      this.net = null;
+      this.containers.close();
+      document.exitPointerLock?.();
+      void this.startTitle().then(() => this.toast(reason, 8));
+    };
+    this.menus.setGuest(true);
+    const meta: WorldMeta = { id: 'guest', name: `${w.host}’s world`, seed: w.seed, seedText: '', gamemode: w.gamemode, created: Date.now(), lastPlayed: Date.now(), time: w.time };
+    await this.play(meta);
+    session.attach();
+    const p = this.player;
+    p.body.pos = [...w.spawn];
+    p.spawn = [...w.spawn];
+    p.needsSurface = true;
+    this.prevPos = [...p.body.pos];
+  }
+
+  /** Your name in shared worlds. */
+  get playerName(): string { return this.settings.name.trim() || 'Wanderer'; }
   /** Test hook: how loud the game is right now. */
   audioLevel = audioLevel;
   /** Test and command hook: build a vehicle by kind. */
@@ -978,6 +1045,7 @@ export class Game {
     this.hud.update(this.player, dt);
     this.hud.updateInfo(this, dt);
     this.updateBossBar();
+    this.net?.frame(dt);
     if ((this.soundTimer -= dt) <= 0) { this.soundTimer = 0.25; this.listen(); }
     this.map.frame(dt);
     if (this.containers.open && w.tickCount % 2 === 0) this.containers.render();
@@ -1160,6 +1228,7 @@ export class Game {
     this.actions.tick(active);
     w.tick(p.body.pos[0], p.body.pos[1], p.body.pos[2], true);
     ents.tick();
+    this.net?.tick();
     this.raids.tick();
     this.tickHollow();
     if (this.riding) this.seatPlayer();

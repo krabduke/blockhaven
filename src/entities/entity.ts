@@ -8,6 +8,10 @@ import type { EntityManager } from './entities';
 export abstract class Entity {
   dead = false;
   age = 0;
+  /** In a shared world on a guest: the host's id for this entity (0 = a local one). */
+  netId = 0;
+  /** Where the host last said it was. */
+  netTarget: [number, number, number] | null = null;
   prev: [number, number, number];
   object: THREE.Object3D;
   constructor(readonly body: Body, object: THREE.Object3D) {

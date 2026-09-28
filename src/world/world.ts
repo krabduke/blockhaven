@@ -105,6 +105,21 @@ export class World implements ChunkSource {
   onIgnite: (x: number, y: number, z: number) => void = () => {};
   /** Chunks whose generated creatures have already been spawned. */
   spawnedChunks = new Set<string>();
+
+  // ---------- Shared worlds ----------
+  /** False on a guest: the host runs fluids, redstone, growth and furnaces and sends the results. */
+  simulate = true;
+  /** False on a guest: chunks come from the host and are never saved here. */
+  persist = true;
+  /** Every block or metadata change (the host broadcasts these; a guest sends its own to the host). */
+  onChange: ((x: number, y: number, z: number, id: number, meta: number) => void) | null = null;
+  /** Guest: fetch a chunk's edited contents from the host (null = untouched, generate it here). */
+  remoteChunk: ((cx: number, cz: number) => Promise<{ blocks: Uint8Array; meta: Uint8Array } | null>) | null = null;
+  /** Host: also grow crops and trees around these other players (x, z). */
+  tickAround: [number, number][] = [];
+  private applyingRemote = false;
+  /** Edits for chunks still being generated, applied once they arrive. */
+  private heldEdits = new Map<string, [number, number, number, number, number][]>();
   dimension: 'overworld' | 'ember' | 'hollow' = 'overworld';
 
   private genPending = new Set<string>();
@@ -169,7 +184,8 @@ export class World implements ChunkSource {
     c.modified = true;
     c.version++;
     this.markDirty(x, y, z);
-    this.notifyWatchers(x, y, z);
+    if (!this.applyingRemote) this.onChange?.(x, y, z, c.blocks[idx(x & 15, y, z & 15)], m);
+    if (this.simulate) this.notifyWatchers(x, y, z);
   }
 
   /** While true, setBlock skips neighbour reactions (used to place multi-block structures in one go). */
@@ -199,6 +215,8 @@ export class World implements ChunkSource {
       if (LIGHT_OPACITY[old] !== LIGHT_OPACITY[id] || EMIT[old] !== EMIT[id]) this.light.update(x, y, z);
     }
     this.markDirty(x, y, z);
+    if (!this.applyingRemote) this.onChange?.(x, y, z, id, meta);
+    if (!this.simulate) return true;
     this.notifyWatchers(x, y, z);
     if (this.quiet) return true;
     this.schedule(x, y, z, 1);
@@ -537,6 +555,7 @@ export class World implements ChunkSource {
 
   /** Recompute wire networks and consumers around a changed position. */
   updatePower(x: number, y: number, z: number): void {
+    if (!this.simulate) return;
     // 1. Collect connected wire near the change.
     const wires = new Map<string, [number, number, number]>();
     const queue: [number, number, number][] = [];
@@ -637,6 +656,41 @@ export class World implements ChunkSource {
     c.meta[idx(x & 15, y, z & 15)] = m;
     c.modified = true;
     this.markDirty(x, y, z);
+    if (!this.applyingRemote) this.onChange?.(x, y, z, c.blocks[idx(x & 15, y, z & 15)], m);
+  }
+
+  /**
+   * Apply a change that came over the network: the block and its light, without side effects
+   * and without echoing it back. Changes to chunks still loading are held until they arrive.
+   */
+  applyRemote(x: number, y: number, z: number, id: number, meta: number, react = false): void {
+    const c = this.getChunk(x >> 4, z >> 4);
+    if (!c) {
+      const key = chunkKey(x >> 4, z >> 4);
+      if (this.genPending.has(key)) { const l = this.heldEdits.get(key) ?? []; l.push([x, y, z, id, meta]); this.heldEdits.set(key, l); }
+      return;
+    }
+    this.applyingRemote = true;
+    try {
+      if (react) this.setBlock(x, y, z, id, meta);
+      else {
+        const wasQuiet = this.quiet;
+        this.quiet = true;
+        this.setBlock(x, y, z, id, meta);
+        this.quiet = wasQuiet;
+      }
+    } finally { this.applyingRemote = false; }
+  }
+
+  /** Host: a chunk's contents if it has been changed from what the seed generates, else null. */
+  async chunkData(cx: number, cz: number): Promise<{ blocks: Uint8Array; meta: Uint8Array } | null> {
+    const key = chunkKey(cx, cz);
+    const c = this.chunks.get(key);
+    if (c) return c.modified ? { blocks: c.blocks.slice(), meta: c.meta.slice() } : null;
+    const st = this.stash.get(key);
+    if (st) return { blocks: st.blocks.slice(), meta: st.meta.slice() };
+    if (this.savedKeys.has(key)) return loadChunk(this.worldId, cx, cz, VOLUME);
+    return null;
   }
 
   /** Press a button: it pops back out after a second. */
@@ -827,6 +881,7 @@ export class World implements ChunkSource {
   }
 
   schedule(x: number, y: number, z: number, delay: number): void {
+    if (!this.simulate) return;
     const key = `${x},${y},${z}`;
     const due = this.tickCount + delay;
     const cur = this.scheduled.get(key);
@@ -1087,6 +1142,7 @@ export class World implements ChunkSource {
   tick(px: number, py: number, pz: number, randomTicks: boolean): void {
     this.tickCount++;
     this.time = (this.time + 1) % 24000;
+    if (!this.simulate) return;
     if (--this.weatherTimer <= 0) {
       if (this.weather === 'clear') {
         this.weather = this.rand() < 0.25 ? 'thunder' : 'rain';
@@ -1107,7 +1163,11 @@ export class World implements ChunkSource {
     this.tickFurnaces();
     this.tickBrewing();
     this.tickHoppers();
-    if (randomTicks) this.randomTicks(px, py, pz);
+    if (randomTicks) {
+      this.randomTicks(px, py, pz);
+      // Around other players too, skipping chunks already covered.
+      for (const [x, z] of this.tickAround) if (Math.abs(x - px) > 144 || Math.abs(z - pz) > 144) this.randomTicks(x, py, z);
+    }
   }
 
   private randomTicks(px: number, _py: number, pz: number): void {
@@ -1261,7 +1321,8 @@ export class World implements ChunkSource {
     this.genPending.add(key);
     let saved: { blocks: Uint8Array; meta: Uint8Array } | undefined;
     const st = this.stash.get(key);
-    if (st) saved = { blocks: st.blocks.slice(), meta: st.meta.slice() };
+    if (this.remoteChunk) saved = (await this.remoteChunk(cx, cz).catch(() => null)) ?? undefined;
+    else if (st) saved = { blocks: st.blocks.slice(), meta: st.meta.slice() };
     else if (this.savedKeys.has(key)) saved = (await loadChunk(this.worldId, cx, cz, VOLUME)) ?? undefined;
     const res = await this.pool.generate(cx, cz, saved);
     this.genPending.delete(key);
@@ -1280,6 +1341,8 @@ export class World implements ChunkSource {
     if (saved) this.rescanPending(chunk);
     if (res.spawns?.length && !this.spawnedChunks.has(key)) this.onSpawns(res.spawns);
     this.spawnedChunks.add(key);
+    const held = this.heldEdits.get(key);
+    if (held) { this.heldEdits.delete(key); for (const e of held) this.applyRemote(...e); }
   }
 
   private rescanPending(c: Chunk): void {
@@ -1293,7 +1356,7 @@ export class World implements ChunkSource {
 
   private unload(c: Chunk): void {
     const key = chunkKey(c.cx, c.cz);
-    if (c.modified) {
+    if (c.modified && this.persist) {
       this.stash.set(key, { blocks: c.blocks, meta: c.meta });
       this.savedKeys.add(key);
       saveChunk(this.worldId, c.cx, c.cz, c.blocks, c.meta).then(() => {
@@ -1311,6 +1374,7 @@ export class World implements ChunkSource {
 
   /** Persist all modified loaded chunks. */
   async saveAll(): Promise<void> {
+    if (!this.persist) return;
     const jobs: Promise<void>[] = [];
     for (const c of this.chunks.values()) {
       if (!c.modified) continue;

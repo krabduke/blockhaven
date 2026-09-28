@@ -122,6 +122,20 @@ Every creature is built from hand-placed boxes with procedurally painted fur, wo
 - Survival, and Creative (fly, instant breaking, and every block and item in a searchable palette)
 - Title screen, world list, create world with a seed, pause menu, settings (render distance, field of view, mouse sensitivity, brightness, volume, view bobbing, invert mouse), death screen and a debug overlay
 
+## Play with friends
+
+Up to four friends can join your world, straight from their browsers, with no accounts and no game server.
+
+1. In your world, open the pause menu and choose **Invite a friend**, then **Create an invite code**. Send the code to your friend in any chat app.
+2. Your friend chooses **Join a friend** on the title screen, pastes your code, and sends you back the reply code it makes.
+3. Paste their reply and choose **Connect**. They appear in your world a moment later.
+
+Your game is the host: it runs the world, the creatures and the items, and your friends see every change. Their own building and digging comes back to you. You see each other with name tags, share chat, pick things up and get chased by the same monsters.
+
+For now, guests can't open chests, furnaces, brewing stands or hoppers; nobody can use gates while friends are connected; and only the host can use commands that change the world. The world is saved on the host's side only.
+
+Connecting uses public STUN servers (Google's and Cloudflare's) so the two browsers can find each other; nothing else leaves your machines. Some strict networks (certain workplaces, mobile carriers) block direct connections, and then joining won't work.
+
 ## Play on a phone or tablet
 
 Open the same link on your phone and turn it sideways. Touch controls appear automatically:
@@ -224,14 +238,15 @@ npm run playtest                  # plays the real game in headless Chromium and
                                   # bees and crops, raids, structures, the Astral Gate, the Hollow and
                                   # its Colossus, gliding, music and cave echo, world backups and save/load
 npm run test:mobile               # the same on an emulated phone: touch walking, looking, mining, buttons
+npm run test:multiplayer          # two players in one world: joining, block edits, creatures, items, chat
 npm run screenshots               # regenerates docs/screenshots
 ```
 
-Every push runs lint, the unit tests, the playtest and the phone test in CI before deploying. CI machines have no GPU, so there the game runs with `NORENDER=1` (the page is opened with `?norender`): everything updates normally but nothing is drawn.
+Every push runs lint, the unit tests, the playtest, the phone test and the two-player test in CI before deploying. CI machines have no GPU, so there the game runs with `NORENDER=1` (the page is opened with `?norender`): everything updates normally but nothing is drawn.
 
 ## What's not in yet
 
-Comparators, map items and multiplayer.
+Comparators, map items, and more of multiplayer: shared chests and furnaces, travelling between dimensions together, and a way to connect through networks that block direct links.
 
 ## Licence
 

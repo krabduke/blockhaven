@@ -261,10 +261,14 @@ export function lookup(name: string): Command | undefined {
   return COMMANDS.find((c) => c.name === n || c.aliases?.includes(n));
 }
 
+const GUEST_COMMANDS = new Set(['help', 'seed', 'locate', 'waypoint', 'music', 'kill']);
+
 export function runCommand(g: Game, line: string): void {
   const parts = line.trim().replace(/^\//, '').split(/\s+/);
   const c = lookup(parts[0] ?? '');
   if (!c) { g.chat.say(`Unknown command "${parts[0]}". Type /help for a list.`); return; }
+  // In someone else's world, only commands that don't change it.
+  if (g.net && 'guest' in g.net && !GUEST_COMMANDS.has(c.name)) { g.chat.say(`Only the host can use /${c.name} in a shared world.`); return; }
   c.run(g, parts.slice(1));
 }
 

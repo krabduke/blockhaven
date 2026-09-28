@@ -403,6 +403,8 @@ export class Actions {
         sfx.click();
         return;
       }
+      // In someone else's world, containers stay with the host for now.
+      if (this.g.net && 'guest' in this.g.net && (id === B.hopper || id === B.brewing_stand || id === B.furnace || id === B.furnace_lit || id === B.chest)) { this.g.toast('Only the host can open this in a shared world.', 3); return; }
       if (id === B.hopper) { const be = w.getBlockEntity(x, y, z); if (be?.kind === 'hopper') { document.exitPointerLock(); this.containers.show('hopper', { hopper: be }); } return; }
       if (id === B.brewing_stand) { const be = w.getBlockEntity(x, y, z); if (be?.kind === 'brewing') { document.exitPointerLock(); this.containers.show('brewing', { brewing: be }); } return; }
       if (id === B.furnace || id === B.furnace_lit) { const be = w.getBlockEntity(x, y, z); if (be?.kind === 'furnace') { document.exitPointerLock(); this.containers.show('furnace', { furnace: be }); } return; }

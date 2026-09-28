@@ -33,7 +33,7 @@ jobs:
           path: dist
 
   # Plays the built game in headless Chromium: the full playtest and the
-  # phone-controls test. CI machines have no GPU, so the game runs without
+  # phone-controls test, and a two-player test. CI machines have no GPU, so the game runs without
   # drawing (NORENDER); the checks exercise game logic. A deploy waits for both.
   playtest:
     runs-on: ubuntu-latest
@@ -56,6 +56,8 @@ jobs:
         run: SOFTWARE_GL=1 NORENDER=1 npm run playtest
       - name: Phone controls
         run: SOFTWARE_GL=1 NORENDER=1 npm run test:mobile
+      - name: Two players
+        run: npm run test:multiplayer
       - uses: actions/upload-artifact@v4
         if: always()
         with:

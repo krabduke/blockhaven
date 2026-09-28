@@ -29,11 +29,13 @@ export interface Settings {
   /** Lower the render resolution when frames get slow. */
   autoQuality: boolean;
   music: number;
+  /** What other players see above your head in a shared world. */
+  name: string;
 }
 
 const DEFAULTS: Settings = {
   renderDistance: 8, fov: 70, sensitivity: 1, brightness: 0.5, volume: 0.6, viewBobbing: true, invertY: false, fancy: true, shadows: true, post: true,
-  keys: {}, toggleSprint: false, toggleSneak: false, reduceMotion: false, uiScale: 1, showCoords: false, minimap: true, fpsCap: 0, autoQuality: true, music: 0.4,
+  keys: {}, toggleSprint: false, toggleSneak: false, reduceMotion: false, uiScale: 1, showCoords: false, minimap: true, fpsCap: 0, autoQuality: true, music: 0.4, name: '',
 };
 
 export function loadSettings(): Settings {
@@ -48,7 +50,7 @@ export function saveSettings(s: Settings): void {
   try { localStorage.setItem('blockhaven.settings', JSON.stringify(s)); } catch { /* ignore */ }
 }
 
-function el<K extends keyof HTMLElementTagNameMap>(tag: K, attrs: Record<string, string> = {}, text?: string): HTMLElementTagNameMap[K] {
+export function el<K extends keyof HTMLElementTagNameMap>(tag: K, attrs: Record<string, string> = {}, text?: string): HTMLElementTagNameMap[K] {
   const e = document.createElement(tag);
   for (const [k, v] of Object.entries(attrs)) {
     if (k === 'class') e.className = v; else e.setAttribute(k, v);
@@ -57,7 +59,7 @@ function el<K extends keyof HTMLElementTagNameMap>(tag: K, attrs: Record<string,
   return e;
 }
 
-function button(label: string, cls = '', onClick?: () => void): HTMLButtonElement {
+export function button(label: string, cls = '', onClick?: () => void): HTMLButtonElement {
   const b = el('button', { class: 'btn ' + cls, type: 'button' }, label);
   if (onClick) b.addEventListener('click', onClick);
   return b;
@@ -105,6 +107,23 @@ export class Menus {
     return s;
   }
 
+  /** Add a screen built elsewhere (the shared-world screens). */
+  register(id: string, screen: HTMLElement): void {
+    this.parent.appendChild(screen);
+    this.screens.set(id, screen);
+  }
+  /** Called whenever a screen opens, so screens built elsewhere can refresh. */
+  onShow: (id: string) => void = () => {};
+
+  /** In someone else's world: no inviting, no backups, and quitting means leaving. */
+  setGuest(on: boolean): void {
+    const pause = this.screens.get('pause');
+    if (!pause) return;
+    for (const b of pause.querySelectorAll<HTMLElement>('[data-host-only]')) b.hidden = on;
+    const quit = pause.querySelector<HTMLElement>('[data-quit]');
+    if (quit) quit.textContent = on ? 'Leave the world' : 'Save and quit to title';
+  }
+
   show(id: string | null): void {
     if (id) document.exitPointerLock?.();
     for (const [k, s] of this.screens) s.classList.toggle('show', k === id);
@@ -112,6 +131,7 @@ export class Menus {
     if (id === 'worlds') this.refreshWorlds();
     if (id === 'settings') this.renderSettings();
     if (id === 'controls') this.renderControls();
+    if (id) this.onShow(id);
     const first = id ? this.screens.get(id)?.querySelector<HTMLElement>('button, input') : null;
     first?.focus({ preventScroll: true });
   }
@@ -123,6 +143,7 @@ export class Menus {
     const menu = el('div', { class: 'title-menu stack' });
     menu.append(
       button('Play', 'primary', () => this.show('worlds')),
+      button('Join a friend', '', () => this.show('join')),
       button('Settings', '', () => { this.settingsBack = 'title'; this.show('settings'); }),
     );
     s.appendChild(menu);
@@ -255,10 +276,13 @@ export class Menus {
     p.append(
       el('h2', {}, 'Paused'),
       button('Back to game', 'primary', () => this.cb.resume()),
+      button('Invite a friend', '', () => this.show('invite')),
       button('Settings', '', () => { this.settingsBack = 'pause'; this.show('settings'); }),
       button('Export a backup', '', () => this.cb.exportCurrent()),
       button('Save and quit to title', '', () => this.cb.saveAndQuit()),
     );
+    const [invite, , backup, quit] = [...p.querySelectorAll('button')].slice(1);
+    invite.dataset.hostOnly = ''; backup.dataset.hostOnly = ''; quit.dataset.quit = '';
     s.appendChild(p);
   }
 
