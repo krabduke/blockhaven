@@ -1,7 +1,9 @@
 // Ties everything together: the main loop, player control, mining and
 // placing, interactions, commands, saving, and the title screen flyover.
 
-import { initAudio, setVolume, sfx, spatial } from './audio';
+import { audioLevel, initAudio, setCave, setMusicVolume, setVolume, sfx, spatial } from './audio';
+import { Music, type Mood } from './music';
+import { Ambience } from './ambience';
 import { B, BLOCKS, SOLID } from './blocks';
 import { EntityManager, MOBS, Mob, TntEntity } from './entities/entities';
 import { makeVehicle, type Vehicle } from './entities/vehicles';
@@ -131,6 +133,9 @@ export class Game {
   readonly chat: Chat;
   readonly history: EditHistory;
   readonly waypoints = new Waypoints();
+  readonly music = new Music();
+  readonly ambience = new Ambience();
+  private soundTimer = 0;
   raids!: Raids;
   readonly map: WorldMap;
   /** 0 first person, 1 behind, 2 in front. */
@@ -266,6 +271,8 @@ export class Game {
     this.renderer.uniforms.uGamma.value = s.brightness;
     document.documentElement.style.setProperty('--ui', String(s.uiScale));
     setVolume(s.volume);
+    setMusicVolume(s.music);
+    this.music.setEnabled(s.music > 0);
   }
 
   private resize(): void {
@@ -687,6 +694,38 @@ export class Game {
     void this.save();
   }
 
+  /** Tell the music, the ambience and the cave echo where you are. */
+  private listen(): void {
+    const w = this.world!, p = this.player;
+    const [x, y, z] = [p.body.pos[0], p.body.pos[1] + p.eyeHeight, p.body.pos[2]].map(Math.floor);
+    const c = w.getChunk(x >> 4, z >> 4);
+    const biome = c ? c.biomes[(x & 15) + (z & 15) * 16] : BIOME.plains;
+    const sky = w.getSky(x, y, z) / 15;
+    const dim = w.dimension;
+    // Enclosure: dark overhead and rock close by in most directions.
+    let cave = 0;
+    if (dim === 'ember') cave = 0.75;
+    else if (dim === 'overworld' && sky < 0.3) {
+      let hits = 0;
+      for (const [dx, dy, dz] of [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]]) {
+        for (let k = 1; k <= 12; k++) if (SOLID[w.getBlock(x + dx * k, y + dy * k, z + dz * k)]) { hits++; break; }
+      }
+      cave = (1 - sky / 0.3) * (hits / 6);
+    }
+    let water = 0;
+    for (let i = 0; i < 16; i++) {
+      const a = (i / 16) * Math.PI * 2, r = 3 + (i % 3) * 3;
+      const wx = Math.floor(x + Math.cos(a) * r), wz = Math.floor(z + Math.sin(a) * r);
+      for (let dy = -4; dy <= 1; dy++) if (w.getBlock(wx, y + dy, wz) === B.water) { water++; break; }
+    }
+    const day = this.entities?.isDay() ?? true;
+    this.ambience.set({ dimension: dim, biome, day, y, sky, cave, water: Math.min(1, water / 8), rain: this.renderer.rain, underwater: p.body.eyeInWater });
+    setCave(cave);
+    const snowy = biome === BIOME.taiga || (biome === BIOME.mountains && y > 110);
+    const mood: Mood = dim === 'ember' ? 'ember' : dim === 'hollow' ? 'hollow' : cave > 0.5 ? 'cave' : snowy ? 'snow' : day ? 'day' : 'night';
+    this.music.setMood(mood);
+  }
+
   private updateBossBar(): void {
     const boss = this.mode === 'playing' && !this.hudHidden && this.world?.dimension === 'hollow' ? this.entities?.mobs().find((m) => m.spec.boss && m.deathTime === 0) : undefined;
     const near = boss && Math.hypot(boss.body.pos[0] - this.player.body.pos[0], boss.body.pos[2] - this.player.body.pos[2]) < 160;
@@ -815,6 +854,8 @@ export class Game {
   }
 
   // ---------- Pass-throughs kept for scripts and tests ----------
+  /** Test hook: how loud the game is right now. */
+  audioLevel = audioLevel;
   /** Test and command hook: build a vehicle by kind. */
   makeVehicle = makeVehicle;
   /** Block ids by name (so scripts don't hard-code numbers). */
@@ -852,12 +893,16 @@ export class Game {
     this.fpsTime += dt;
     if (this.fpsTime >= 1) { this.fps = this.frames; this.frames = 0; this.fpsTime = 0; }
 
+    this.music.update();
+    this.ambience.update(dt);
     const w = this.world;
     if (!w) {
       this.renderer.renderFrame(dt, false, 1, false);
       return;
     }
     if (this.mode === 'title') {
+      this.music.setMood('title');
+      this.ambience.silence();
       this.titleFrame(dt);
       return;
     }
@@ -933,6 +978,7 @@ export class Game {
     this.hud.update(this.player, dt);
     this.hud.updateInfo(this, dt);
     this.updateBossBar();
+    if ((this.soundTimer -= dt) <= 0) { this.soundTimer = 0.25; this.listen(); }
     this.map.frame(dt);
     if (this.containers.open && w.tickCount % 2 === 0) this.containers.render();
     if (this.toastTimer > 0) { this.toastTimer -= dt; this.toastEl.style.opacity = this.toastTimer > 0 ? '1' : '0'; }

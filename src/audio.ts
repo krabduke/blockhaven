@@ -1,11 +1,42 @@
-// Synthesized sound effects (Web Audio). No audio files are used.
+// Synthesized sound (Web Audio). No audio files are used.
+//
+// Routing: effects go to a bus with a dry path and a reverb send whose level rises when you're
+// underground (the cave echo). Ambience and music have their own buses; music has its own
+// volume (Settings > Music) and a softer hall reverb of its own.
 
 import type { SoundKind } from './blocks';
 
 let ctx: AudioContext | null = null;
 let master: GainNode | null = null;
+/** Sound effects: dry, plus a send into the cave reverb. */
+let bus: GainNode | null = null;
+let caveSend: GainNode | null = null;
+let ambBus: GainNode | null = null;
+let musicBus: GainNode | null = null;
 let noiseBuf: AudioBuffer | null = null;
+let meter: AnalyserNode | null = null;
+let musicMeter: AnalyserNode | null = null;
 let volume = 0.6;
+let musicVolume = 0.4;
+
+/** A stereo reverb tail: decaying noise, darkened, with a few early reflections. */
+function impulse(c: AudioContext, seconds: number, decay: number, reflections: number[] = [], dark = 0.6): AudioBuffer {
+  const len = Math.floor(c.sampleRate * seconds);
+  const buf = c.createBuffer(2, len, c.sampleRate);
+  for (let ch = 0; ch < 2; ch++) {
+    const d = buf.getChannelData(ch);
+    let lp = 0;
+    for (let i = 0; i < len; i++) {
+      lp = lp * dark + (Math.random() * 2 - 1) * (1 - dark);
+      d[i] = lp * Math.pow(1 - i / len, decay) * 2.2;
+    }
+    for (const ms of reflections) {
+      const i = Math.floor((ms / 1000) * c.sampleRate * (ch ? 1.07 : 1));
+      if (i < len) d[i] += 0.6 * Math.pow(1 - i / len, decay);
+    }
+  }
+  return buf;
+}
 
 export function initAudio(): void {
   if (ctx) { if (ctx.state === 'suspended') ctx.resume(); return; }
@@ -14,12 +45,64 @@ export function initAudio(): void {
     master = ctx.createGain();
     master.gain.value = volume;
     master.connect(ctx.destination);
+    meter = ctx.createAnalyser();
+    meter.fftSize = 2048;
+    master.connect(meter);
     noiseBuf = ctx.createBuffer(1, ctx.sampleRate, ctx.sampleRate);
     const d = noiseBuf.getChannelData(0);
     for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+    bus = ctx.createGain();
+    bus.connect(master);
+    caveSend = ctx.createGain();
+    caveSend.gain.value = 0;
+    const cave = ctx.createConvolver();
+    cave.buffer = impulse(ctx, 2.4, 3.2, [23, 41, 67, 97, 140], 0.45);
+    bus.connect(caveSend).connect(cave).connect(master);
+    ambBus = ctx.createGain();
+    ambBus.gain.value = 0.9;
+    ambBus.connect(master);
+    // Drips and other cave sounds in the ambience should echo too.
+    ambBus.connect(caveSend);
+    musicBus = ctx.createGain();
+    musicBus.gain.value = musicVolume;
+    const hall = ctx.createConvolver();
+    hall.buffer = impulse(ctx, 3.8, 2.6, [], 0.7);
+    const wet = ctx.createGain();
+    wet.gain.value = 0.45;
+    musicBus.connect(master);
+    musicMeter = ctx.createAnalyser();
+    musicMeter.fftSize = 2048;
+    musicBus.connect(musicMeter);
+    musicBus.connect(hall).connect(wet).connect(master);
   } catch {
     ctx = null;
   }
+}
+
+/** For the music and ambience modules: the context, their buses and a second of white noise. */
+export function audioGraph(): { ctx: AudioContext; music: GainNode; amb: GainNode; sfx: GainNode; noise: AudioBuffer } | null {
+  return ctx && musicBus && ambBus && bus && noiseBuf ? { ctx, music: musicBus, amb: ambBus, sfx: bus, noise: noiseBuf } : null;
+}
+
+/** Loudness (RMS) of everything playing right now, or of the music alone: 0 when silent. Used by tests. */
+export function audioLevel(which: 'all' | 'music' = 'all'): number {
+  const m = which === 'music' ? musicMeter : meter;
+  if (!m) return 0;
+  const d = new Float32Array(m.fftSize);
+  m.getFloatTimeDomainData(d);
+  let sum = 0;
+  for (const v of d) sum += v * v;
+  return Math.sqrt(sum / d.length);
+}
+
+export function setMusicVolume(v: number): void {
+  musicVolume = v;
+  if (musicBus && ctx) musicBus.gain.setTargetAtTime(v, ctx.currentTime, 0.2);
+}
+
+/** How enclosed the listener is (0 in the open, 1 deep in a cave): sets the echo on effects. */
+export function setCave(amount: number): void {
+  if (caveSend && ctx) caveSend.gain.setTargetAtTime(Math.max(0, Math.min(1, amount)) * 0.55, ctx.currentTime, 0.4);
 }
 
 export function setVolume(v: number): void {
@@ -40,7 +123,7 @@ const MATERIAL: Record<SoundKind, { freq: number; q: number; dur: number; type: 
 };
 
 function noise(freq: number, q: number, dur: number, type: BiquadFilterType, gain: number, when = 0, pan = 0): void {
-  if (!ctx || !master || !noiseBuf || gain <= 0) return;
+  if (!ctx || !bus || !noiseBuf || gain <= 0) return;
   const t = ctx.currentTime + when;
   const src = ctx.createBufferSource();
   src.buffer = noiseBuf;
@@ -53,13 +136,13 @@ function noise(freq: number, q: number, dur: number, type: BiquadFilterType, gai
   g.gain.exponentialRampToValueAtTime(0.001, t + dur);
   const p = ctx.createStereoPanner();
   p.pan.value = Math.max(-1, Math.min(1, pan));
-  src.connect(f).connect(g).connect(p).connect(master);
+  src.connect(f).connect(g).connect(p).connect(bus!);
   src.start(t, Math.random() * 0.5);
   src.stop(t + dur + 0.05);
 }
 
 function tone(freq: number, dur: number, type: OscillatorType, gain: number, slideTo?: number, when = 0): void {
-  if (!ctx || !master) return;
+  if (!ctx || !bus) return;
   const t = ctx.currentTime + when;
   const o = ctx.createOscillator();
   o.type = type;
@@ -68,14 +151,14 @@ function tone(freq: number, dur: number, type: OscillatorType, gain: number, sli
   const g = ctx.createGain();
   g.gain.setValueAtTime(gain, t);
   g.gain.exponentialRampToValueAtTime(0.001, t + dur);
-  o.connect(g).connect(master);
+  o.connect(g).connect(bus!);
   o.start(t);
   o.stop(t + dur + 0.02);
 }
 
 /** A slow-swelling brass-like note: two detuned saws through a low-pass. */
 function swell(freq: number, dur: number, gain: number, when = 0): void {
-  if (!ctx || !master) return;
+  if (!ctx || !bus) return;
   const t = ctx.currentTime + when;
   const f = ctx.createBiquadFilter();
   f.type = 'lowpass'; f.frequency.setValueAtTime(400, t); f.frequency.linearRampToValueAtTime(1400, t + dur * 0.4); f.Q.value = 2;
@@ -84,7 +167,7 @@ function swell(freq: number, dur: number, gain: number, when = 0): void {
   g.gain.exponentialRampToValueAtTime(gain, t + dur * 0.3);
   g.gain.setValueAtTime(gain, t + dur * 0.7);
   g.gain.exponentialRampToValueAtTime(0.001, t + dur);
-  f.connect(g).connect(master);
+  f.connect(g).connect(bus!);
   for (const d of [-4, 4]) {
     const o = ctx.createOscillator();
     o.type = 'sawtooth'; o.frequency.value = freq; o.detune.value = d;

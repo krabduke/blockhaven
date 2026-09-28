@@ -78,6 +78,7 @@ All taken in-game at render distance 16 with the default Fancy graphics.
 - Living world: potatoes and redroot (seeds from tall grass) to farm and cook, bee nests in trees whose bees carry nectar home (harvest honey with a glass bottle or honeycomb with shears, with a torch below to keep them calm), salmon and a glowing glimmerfish on the line, and village raids: some nights a war horn sounds and raiders with crossbows march on the village in three waves, the last led by a captain. Beat them to become a Village Hero and pay less amber when trading (`/raid start` to try it)
 - Structures to find (`/locate` names each): sun temples in the desert with a trapped vault under the floor, shipwrecks on the sea floor, abandoned mines with old rails, webs and a crawler nest, and buried sanctums of stone brick holding an Astral Gate
 - The endgame: craft Starseekers (crystal shard + ember core) and throw one to see which way the nearest sanctum lies. Set twelve into the Astral Gate's frame to open it onto the Hollow, pale islands adrift in a starry void. Its Colossus circles the central island, hurls void shards and dives at you, and it mends itself from anchor stones on tall pillars (shoot or break them first). Beat it for the way home and a glider: wear it in the chest slot and jump while falling to glide, dive for speed and pull up to climb. Mend a worn glider with leather
+- Sound, all synthesized in the browser with no audio files: generative music that composes a new piece every few minutes in a mood that suits where you are (bright by day, modal at night, sparse in caves, dark in the Emberdeep, glassy in the Hollow; `/music` plays one now), wind that grows with height, surf, rain, birdsong, crickets, frogs, cave drips, and an echo on every sound when you're underground
 - Farming: till with a hoe, then plant wheat and carrots, which grow in the light. Bone meal speeds up crops, saplings and grass
 - Achievements for the classic milestones
 
@@ -171,7 +172,7 @@ Plug in a gamepad and it just works: left stick to move, right stick to look, ri
 
 ## Commands
 
-`/gamemode survival|creative`, `/speed <multiplier>` (walk and fly faster; `/speed 1` resets), `/time set day|noon|sunset|night|midnight|<ticks>`, `/weather clear|rain|thunder`, `/give <item> [count]`, `/xp <amount>`, `/tp <x> <y> <z>` or `/tp <waypoint>`, `/spawn <mob>` (for example `zombie`, `skeleton`, `witch`, `blastcap`), `/locate village|temple|shipwreck|mine|sanctum`, `/dimension overworld|ember|hollow`, `/raid start|stop`, `/seed`, `/kill`, `/help [command]`
+`/gamemode survival|creative`, `/speed <multiplier>` (walk and fly faster; `/speed 1` resets), `/time set day|noon|sunset|night|midnight|<ticks>`, `/weather clear|rain|thunder`, `/give <item> [count]`, `/xp <amount>`, `/tp <x> <y> <z>` or `/tp <waypoint>`, `/spawn <mob>` (for example `zombie`, `skeleton`, `witch`, `blastcap`), `/locate village|temple|shipwreck|mine|sanctum`, `/dimension overworld|ember|hollow`, `/raid start|stop`, `/music`, `/seed`, `/kill`, `/help [command]`
 
 Building: `/setblock <x> <y> <z> <block>`, `/fill <x1> <y1> <z1> <x2> <y2> <z2> <block> [replace <block>|hollow|outline]` (up to 32,768 blocks) and `/undo`, which also takes back blocks you placed or broke in Creative. Coordinates accept `~` for your own position, like `~ ~-1 ~`.
 
@@ -221,7 +222,7 @@ npm run playtest                  # plays the real game in headless Chromium and
                                   # commands and undo, chat completion, maps, camera, key bindings,
                                   # a gamepad, inventory dragging, brewing, rails, boats, taming, pistons,
                                   # bees and crops, raids, structures, the Astral Gate, the Hollow and
-                                  # its Colossus, gliding, world backups and save/load
+                                  # its Colossus, gliding, music and cave echo, world backups and save/load
 npm run test:mobile               # the same on an emulated phone: touch walking, looking, mining, buttons
 npm run screenshots               # regenerates docs/screenshots
 ```
@@ -230,7 +231,7 @@ Every push runs lint, the unit tests, the playtest and the phone test in CI befo
 
 ## What's not in yet
 
-Music and ambient sound, comparators, map items and multiplayer.
+Comparators, map items and multiplayer.
 
 ## Licence
 

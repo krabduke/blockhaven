@@ -159,6 +159,14 @@ export const COMMANDS: Command[] = [
     },
   },
   {
+    name: 'music', usage: '/music', help: 'Plays a new piece of music now',
+    run(g) {
+      if (g.settings.music <= 0) { g.chat.say('Music is off. Turn it up in Settings > Sound.'); return; }
+      g.music.playNow();
+      g.chat.say('Composing something…');
+    },
+  },
+  {
     name: 'raid', usage: '/raid start|stop', help: 'Starts or calls off a raid on the village you are in',
     complete: (i) => (i === 0 ? ['start', 'stop'] : []),
     run(g, a) {

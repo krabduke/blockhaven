@@ -11,7 +11,7 @@ import { chromium } from 'playwright';
 const url = (process.argv[2] ?? 'http://localhost:5199/') + (process.env.NORENDER ? '?norender' : '');
 // Use the real GPU (Metal on macOS); set SOFTWARE_GL=1 to force software rendering.
 const browser = await chromium.launch({
-  args: process.env.SOFTWARE_GL ? ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'] : ['--use-angle=metal', '--enable-gpu', '--ignore-gpu-blocklist'],
+  args: [...(process.env.SOFTWARE_GL ? ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'] : ['--use-angle=metal', '--enable-gpu', '--ignore-gpu-blocklist']), '--autoplay-policy=no-user-gesture-required'],
 });
 const page = await browser.newPage({ viewport: { width: 1000, height: 640 } });
 const errors = [];
@@ -1155,6 +1155,38 @@ await wait(300);
   check('a piston pushes a row of blocks and pulls its head back; a sticky one brings the block back', pw.pushed && pw.retracted && pw.sticky, JSON.stringify(pw));
   check('a hopper carries items from a chest above to one below and picks up dropped items', pw.hopperMoved === 3 && pw.hopperCollected === 1, JSON.stringify(pw));
   check('a watcher pulses when the block it looks at changes', pw.watcher, JSON.stringify(pw));
+}
+
+// --- Sound: music you can hear, and caves that echo.
+{
+  const snd = await g(async () => {
+    const G = window.blockhaven, p = G.player, w = G.world, B = G.ids;
+    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+    const peak = async (ms) => { let m = 0; for (let t = 0; t < ms; t += 50) { m = Math.max(m, G.audioLevel('music')); await sleep(50); } return m; };
+    const was = [...p.body.pos];
+    // Silence the music, then ask for a new piece.
+    G.music.setEnabled(false);
+    await sleep(2500);
+    const quiet = await peak(600);
+    G.music.setEnabled(true);
+    G.runCommand('/music');
+    await sleep(2500);
+    const playing = G.music.playing;
+    const loud = await peak(3000);
+    // A sealed stone room deep underground.
+    const [x, , z] = p.body.pos.map(Math.floor);
+    const y = 20;
+    for (let dx = -3; dx <= 3; dx++) for (let dy = -1; dy <= 4; dy++) for (let dz = -3; dz <= 3; dz++) w.setBlock(x + dx, y + dy, z + dz, Math.max(Math.abs(dx), Math.abs(dz)) === 3 || dy === -1 || dy === 4 ? B.stone : 0);
+    const fly = p.flying;
+    p.flying = false; p.body.pos = [x + 0.5, y, z + 0.5]; p.body.vel = [0, 0, 0];
+    await sleep(1200);
+    const cave = G.ambience.at?.cave ?? 0;
+    p.body.pos = was; p.flying = fly;
+    await sleep(800);
+    const open = G.ambience.at?.cave ?? 1;
+    return { quiet, playing, loud, cave, open };
+  });
+  check('music plays, and a sealed room underground echoes like a cave while the open air does not', snd.playing && snd.loud > 0.003 && snd.loud > snd.quiet * 3 && snd.cave > 0.8 && snd.open < 0.2, JSON.stringify(snd));
 }
 
 // --- Structures, the Astral Gate, the Hollow and its Colossus, gliding, and the way home.
