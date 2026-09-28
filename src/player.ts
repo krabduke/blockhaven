@@ -36,6 +36,8 @@ export class Player {
   flying = false;
   sneaking = false;
   sprinting = false;
+  /** Riding the air on a glider. */
+  gliding = false;
   creative = false;
   spawn: [number, number, number] = [0.5, 80, 0.5];
   lastDamageSource = '';
@@ -43,6 +45,8 @@ export class Player {
   needsSurface = false;
   /** Just came through a gate: find or build one on arrival. */
   portalArrival = false;
+  /** Coming home to the spawn point from another dimension. */
+  arriveAtSpawn = false;
   /** Ticks before a gate can be used again (must step out first). */
   portalCooldown = 0;
   portalTime = 0;
@@ -154,7 +158,8 @@ export class Player {
         this.armor.slots.forEach((s, i) => {
           if (!s) return;
           const def = itemDef(s.id)?.armor;
-          if (!def) return;
+          // Gliders wear from flying, not from blows.
+          if (!def || def.points === 0) return;
           if (Math.random() < 1 / (enchLevel(s, 'unbreaking') + 1)) s.damage = (s.damage ?? 0) + wear;
           if ((s.damage ?? 0) >= def.durability) this.armor.slots[i] = null;
         });

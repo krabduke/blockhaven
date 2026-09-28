@@ -873,7 +873,9 @@ await wait(300);
     w.setBlock(x - 1, y, z, B.farmland); w.setBlock(x - 1, y + 1, z, B.redroot, 7);
     w.breakBlock(x + 1, y + 1, z, true); w.breakBlock(x - 1, y + 1, z, true);
     for (let i = 0; i < 20 && !(p.inv.count(It.potato) && p.inv.count(It.redroot) && p.inv.count(It.redroot_seeds)); i++) await sleep(200);
-    return { honey, emptied, potatoes: p.inv.count(It.potato), redroot: p.inv.count(It.redroot), seeds: p.inv.count(It.redroot_seeds) };
+    // Count what you picked up plus anything that bounced away and is still lying nearby.
+    const got = (id) => p.inv.count(id) + G.entities.list.filter((e) => e.stack?.id === id && !e.dead && Math.hypot(e.body.pos[0] - x, e.body.pos[2] - z) < 12).reduce((n, e) => n + e.stack.count, 0);
+    return { honey, emptied, potatoes: got(It.potato), redroot: got(It.redroot), seeds: got(It.redroot_seeds) };
   });
   check('a full bee nest gives honey to a bottle; potatoes and redroot drop crops and seeds', living.honey === 1 && living.emptied === 0 && living.potatoes >= 1 && living.redroot >= 1 && living.seeds >= 1, JSON.stringify(living));
 
@@ -1155,12 +1157,141 @@ await wait(300);
   check('a watcher pulses when the block it looks at changes', pw.watcher, JSON.stringify(pw));
 }
 
+// --- Structures, the Astral Gate, the Hollow and its Colossus, gliding, and the way home.
+{
+  const found = await g(async () => {
+    const G = window.blockhaven, p = G.player, w = G.world, B = G.ids;
+    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+    const log = [];
+    const orig = G.chat.say.bind(G.chat); G.chat.say = (t) => { log.push(t); orig(t); };
+    const where = (kind) => { log.length = 0; G.runCommand('/locate ' + kind); const m = /at (-?\d+), (-?\d+)(?:, (-?\d+))? /.exec(log.join(' ')); return m ? (m[3] !== undefined ? [+m[1], +m[2], +m[3]] : [+m[1], null, +m[2]]) : null; };
+    const out = { temple: !!where('temple'), shipwreck: !!where('shipwreck') };
+    const visit = async ([x, , z]) => { p.creative = true; p.flying = true; p.body.pos = [x + 0.5, 120, z + 0.5]; for (let i = 0; i < 60; i++) { await sleep(500); if (w.isLoaded(x, z) && w.getChunk(x >> 4, z >> 4)?.dirty.size === 0) break; } await sleep(1500); };
+    const mine = where('mine');
+    if (mine) {
+      await visit(mine);
+      let rails = 0, webs = 0;
+      for (let dx = -30; dx <= 30; dx++) for (let dz = -30; dz <= 30; dz++) { const b = w.getBlock(mine[0] + dx, mine[1], mine[2] + dz); if (b === B.rail) rails++; const c = w.getBlock(mine[0] + dx, mine[1] + 2, mine[2] + dz); if (c === B.cobweb) webs++; }
+      out.mine = { rails, webs };
+    }
+    const sanctum = where('sanctum');
+    if (sanctum) {
+      await visit(sanctum);
+      const [x, y, z] = sanctum;
+      const frames = [];
+      for (let dx = -2; dx <= 2; dx++) for (let dz = -2; dz <= 2; dz++) if (w.getBlock(x + dx, y + 1, z + dz) === B.astral_frame) frames.push([x + dx, y + 1, z + dz]);
+      out.frames = frames.length;
+      out.sanctum = sanctum;
+    }
+    G.chat.say = orig;
+    return out;
+  });
+  check('temples, shipwrecks, mines and sanctums generate; a mine has rails and webs; a sanctum holds a ring of twelve Astral Frames', found.temple && found.shipwreck && found.mine?.rails > 10 && found.mine?.webs > 0 && found.frames === 12, JSON.stringify(found));
+
+  const gate = await g(async (sanctum) => {
+    const G = window.blockhaven, p = G.player, w = G.world, B = G.ids, It = G.items, E = G.entities;
+    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+    try { Object.defineProperty(G.input, 'locked', { get: () => true, configurable: true }); } catch { /* already */ }
+    const [x, y, z] = sanctum;
+    p.creative = false; p.flying = false; p.health = 20;
+    // A thrown Starseeker flies off toward the sanctum.
+    p.body.pos = [x + 60.5, y + 3, z + 0.5]; p.body.vel = [0, 0, 0];
+    for (let dx = -1; dx <= 1; dx++) for (let dz = -1; dz <= 1; dz++) { w.setBlock(x + 60 + dx, y + 2, z + dz, B.stone); for (let dy = 3; dy <= 5; dy++) w.setBlock(x + 60 + dx, y + dy, z + dz, 0); }
+    p.inv.slots.fill(null);
+    p.inv.slots[0] = { id: It.starseeker, count: 13 }; p.selected = 0; p.pitch = 0.3;
+    await sleep(200);
+    G.use();
+    await sleep(600);
+    const orb = E.list.find((e) => 'startY' in e);
+    const orbMoved = orb ? orb.body.pos[0] < x + 60 : false;
+    // Fill eleven frames by hand, then set the last Starseeker with right-click.
+    const ring = [];
+    for (let dx = -2; dx <= 2; dx++) for (let dz = -2; dz <= 2; dz++) if (w.getBlock(x + dx, y + 1, z + dz) === B.astral_frame) ring.push([x + dx, y + 1, z + dz]);
+    ring.slice(1).forEach(([a, b, c]) => w.setMeta(a, b, c, w.getMeta(a, b, c) | 4));
+    const [fx, fy, fz] = ring[0];
+    w.setMeta(fx, fy, fz, w.getMeta(fx, fy, fz) & ~4);
+    p.body.pos = [fx + 0.5, fy + 2.2, fz + 0.5]; p.body.vel = [0, 0, 0]; p.pitch = -Math.PI / 2 + 0.01;
+    for (let dy = 1; dy <= 4; dy++) if (w.getBlock(fx, fy + dy, fz) !== 0) w.setBlock(fx, fy + dy, fz, 0);
+    await sleep(200);
+    G.use();
+    await sleep(200);
+    const open = w.getBlock(x, y + 1, z) === B.astral_portal;
+    return { thrown: !!orb, orbMoved, set: !!(w.getMeta(fx, fy, fz) & 4), open, achieved: p.achievements.has('astral') };
+  }, found.sanctum);
+  check('a thrown Starseeker flies toward the sanctum, and setting the twelfth one opens the Astral Gate', gate.thrown && gate.orbMoved && gate.set && gate.open && gate.achieved, JSON.stringify(gate));
+
+  const hollow = await g(async (sanctum) => {
+    const G = window.blockhaven, p = G.player;
+    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+    const [x, y, z] = sanctum;
+    p.portalCooldown = 0;
+    p.body.pos = [x + 0.5, y + 1.05, z + 0.5]; p.body.vel = [0, 0, 0];
+    for (let i = 0; i < 40 && G.world.dimension !== 'hollow'; i++) await sleep(500);
+    for (let i = 0; i < 40 && G.mode !== 'playing'; i++) await sleep(500);
+    await sleep(2000);
+    const E = G.entities, w = G.world;
+    let boss = null;
+    for (let i = 0; i < 30 && !boss; i++) { await sleep(500); boss = E.mobs().find((m) => m.spec.boss); }
+    const out = { dim: w.dimension, stood: w.getBlock(Math.floor(p.body.pos[0]), Math.floor(p.body.pos[1]) - 1, Math.floor(p.body.pos[2])) !== 0, boss: !!boss };
+    if (!boss) return out;
+    // Stand in the open and let it attack.
+    p.body.pos = [20.5, 66, 0.5]; p.health = 20;
+    let shards = 0, hurt = false;
+    for (let i = 0; i < 40; i++) { await sleep(250); shards = Math.max(shards, E.list.filter((e) => e.kind === 'shard').length); if (p.lastDamageSource === 'colossus') hurt = true; if (p.health < 8) p.health = 20; }
+    out.shards = shards; out.hurt = hurt;
+    out.healing = !!boss.healFrom;
+    const a0 = E.anchorsStanding().length;
+    E.breakAnchor(...E.anchorsStanding()[0]);
+    out.anchors = [a0, E.anchorsStanding().length];
+    out.bar = document.querySelector('#bossbar')?.classList.contains('show') ?? false;
+    boss.health = 1; boss.hurt(E, 5, null, 0, true);
+    for (let i = 0; i < 20 && E.list.includes(boss); i++) await sleep(500);
+    await sleep(1500);
+    out.gone = !E.list.some((e) => e.spec?.boss && !e.dead);
+    out.portal = w.getBlock(1, 65, 0) === G.ids.astral_portal;
+    out.glider = E.list.some((e) => e.stack?.id === G.items.glider);
+    out.achieved = p.achievements.has('colossus');
+    return out;
+  }, found.sanctum);
+  check('the Astral Gate leads to the Hollow, where the Colossus fires shards and is mended by anchor stones until it falls', hollow.dim === 'hollow' && hollow.stood && hollow.boss && hollow.shards > 0 && hollow.hurt && hollow.healing && hollow.anchors[1] === hollow.anchors[0] - 1 && hollow.bar, JSON.stringify(hollow));
+  check('beating the Colossus opens the way home and leaves a glider', hollow.gone && hollow.portal && hollow.glider && hollow.achieved, JSON.stringify(hollow));
+
+  const glide = await g(async () => {
+    const G = window.blockhaven, p = G.player;
+    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+    p.creative = false; p.flying = false; p.health = 20;
+    p.armor.slots[1] = { id: G.items.glider, count: 1 };
+    p.body.pos = [0.5, 150, 40.5]; p.body.vel = [0, -0.2, 0]; p.yaw = Math.PI; p.pitch = -0.25;
+    await sleep(300);
+    G.keys.add('Space'); await sleep(120); G.keys.delete('Space');
+    const start = [...p.body.pos];
+    let glided = false;
+    for (let i = 0; i < 20; i++) { await sleep(100); glided ||= p.gliding; }
+    const end = [...p.body.pos];
+    const out = { glided, horiz: Math.hypot(end[0] - start[0], end[2] - start[2]), drop: start[1] - end[1], worn: p.armor.slots[1]?.damage ?? 0 };
+    // Home through the portal at the island's heart.
+    p.gliding = false; p.armor.slots[1] = null; p.portalCooldown = 0;
+    p.body.pos = [1.5, 65.1, 0.5]; p.body.vel = [0, 0, 0];
+    for (let i = 0; i < 40 && G.world.dimension === 'hollow'; i++) await sleep(500);
+    for (let i = 0; i < 40 && G.mode !== 'playing'; i++) await sleep(500);
+    await sleep(2000);
+    out.home = G.world.dimension;
+    return out;
+  });
+  check('a glider carries you far forward for a short drop, and wears as you fly', glide.glided && glide.horiz > 15 && glide.horiz > glide.drop && glide.worn > 0, JSON.stringify(glide));
+  check('the portal at the Hollow\'s heart takes you home', glide.home === 'overworld', JSON.stringify(glide));
+}
+
 // --- Save, quit, reload, and check a block change persisted.
 const marker = await g(async () => {
   const G = window.blockhaven;
   const [px, , pz] = G.player.body.pos.map(Math.floor);
   const m = [px + 3, G.world.groundY(px + 3, pz + 3), pz + 3];
   G.world.setBlock(m[0], m[1], m[2], 33 /* glowstone */);
+  // Exactly four planks to look for after the reload (earlier sections reshuffle the inventory).
+  const inv = G.player.inv;
+  inv.slots.forEach((st, i) => { if (st?.id === 5) inv.slots[i] = null; });
+  inv.slots[8] = { id: 5, count: 4 };
   await G.save();
   return m;
 });

@@ -38,6 +38,10 @@ All taken in-game at render distance 16 with the default Fancy graphics.
 | ![Boars, woolbacks, hens and a fox in a meadow](docs/screenshots/animals.png) | ![A torch-lit cave with glowmoss, dripstone and lava](docs/screenshots/cave.png) |
 | ![Monsters closing in on a torch-lit clearing at night](docs/screenshots/night-raid.png) | ![A glowstone-lit cavern in the Emberdeep](docs/screenshots/emberdeep.png) |
 | ![A line-up of monsters: frostling, zombie, brambler, witch, skeleton, blastcap, mirewalker and shellcrawler](docs/screenshots/creatures.png) | ![Villagers of different trades beside a stonewarden](docs/screenshots/villagers.png) |
+| ![A stepped sandstone sun temple in a dug-out courtyard](docs/screenshots/temple.png) | ![A shipwreck on the sea floor with a snapped mast](docs/screenshots/shipwreck.png) |
+| ![Timbered tunnels of an abandoned mine with rails and cobwebs](docs/screenshots/mine.png) | ![A sanctum hall around the Astral Gate over lava](docs/screenshots/sanctum.png) |
+| ![The Hollow: a pale island with obsidian pillars in a starry void](docs/screenshots/hollow.png) | ![The Hollow Colossus, mended by a beam from an anchor stone](docs/screenshots/colossus.png) |
+| ![Crossbow raiders and their banner-carrying captain beside a bee and a mossback](docs/screenshots/raiders.png) | ![Potatoes, redroot and carrots at every stage beside bee nests and hives](docs/screenshots/farm.png) |
 | ![The crafting table screen](docs/screenshots/crafting.png) | ![The enchanting table screen](docs/screenshots/enchanting.png) |
 
 ## Features
@@ -72,6 +76,8 @@ All taken in-game at render distance 16 with the default Fancy graphics.
 - Bows and arrows with a charge-up draw, a crossbow that you load by holding right click and fire with the next click, a shield that blocks hits from in front while raised, snowballs, eggs and a fishing rod
 - Brewing: fill glass bottles at water and brew them on a brewing stand (fuelled by glow dust or an ember core) into potions of Swiftness (sugar), Healing (red berries), Regeneration (golden apple), Fire Resistance (emberquartz), Night Vision (carrot), Water Breathing (raw fish), Strength (crystal shard), Leaping (bog slime, dropped by bogfrogs), Slow Falling (feather) and Poison (rotten flesh). Add gunpowder to make any of them a splash potion that affects everything nearby. Active effects and their time left show on screen
 - Living world: potatoes and redroot (seeds from tall grass) to farm and cook, bee nests in trees whose bees carry nectar home (harvest honey with a glass bottle or honeycomb with shears, with a torch below to keep them calm), salmon and a glowing glimmerfish on the line, and village raids: some nights a war horn sounds and raiders with crossbows march on the village in three waves, the last led by a captain. Beat them to become a Village Hero and pay less amber when trading (`/raid start` to try it)
+- Structures to find (`/locate` names each): sun temples in the desert with a trapped vault under the floor, shipwrecks on the sea floor, abandoned mines with old rails, webs and a crawler nest, and buried sanctums of stone brick holding an Astral Gate
+- The endgame: craft Starseekers (crystal shard + ember core) and throw one to see which way the nearest sanctum lies. Set twelve into the Astral Gate's frame to open it onto the Hollow, pale islands adrift in a starry void. Its Colossus circles the central island, hurls void shards and dives at you, and it mends itself from anchor stones on tall pillars (shoot or break them first). Beat it for the way home and a glider: wear it in the chest slot and jump while falling to glide, dive for speed and pull up to climb. Mend a worn glider with leather
 - Farming: till with a hoe, then plant wheat and carrots, which grow in the light. Bone meal speeds up crops, saplings and grass
 - Achievements for the classic milestones
 
@@ -165,7 +171,7 @@ Plug in a gamepad and it just works: left stick to move, right stick to look, ri
 
 ## Commands
 
-`/gamemode survival|creative`, `/speed <multiplier>` (walk and fly faster; `/speed 1` resets), `/time set day|noon|sunset|night|midnight|<ticks>`, `/weather clear|rain|thunder`, `/give <item> [count]`, `/xp <amount>`, `/tp <x> <y> <z>` or `/tp <waypoint>`, `/spawn <mob>` (for example `zombie`, `skeleton`, `witch`, `blastcap`), `/locate village`, `/dimension overworld|ember`, `/seed`, `/kill`, `/help [command]`
+`/gamemode survival|creative`, `/speed <multiplier>` (walk and fly faster; `/speed 1` resets), `/time set day|noon|sunset|night|midnight|<ticks>`, `/weather clear|rain|thunder`, `/give <item> [count]`, `/xp <amount>`, `/tp <x> <y> <z>` or `/tp <waypoint>`, `/spawn <mob>` (for example `zombie`, `skeleton`, `witch`, `blastcap`), `/locate village|temple|shipwreck|mine|sanctum`, `/dimension overworld|ember|hollow`, `/raid start|stop`, `/seed`, `/kill`, `/help [command]`
 
 Building: `/setblock <x> <y> <z> <block>`, `/fill <x1> <y1> <z1> <x2> <y2> <z2> <block> [replace <block>|hollow|outline]` (up to 32,768 blocks) and `/undo`, which also takes back blocks you placed or broke in Creative. Coordinates accept `~` for your own position, like `~ ~-1 ~`.
 
@@ -213,7 +219,9 @@ npm run playtest                  # plays the real game in headless Chromium and
                                   # weather, dungeon loot, fishing, enchanting, power, fire, villages,
                                   # trading, Ember Gates, the Emberdeep, crafting, closing every screen,
                                   # commands and undo, chat completion, maps, camera, key bindings,
-                                  # a gamepad, inventory dragging, world backups and save/load
+                                  # a gamepad, inventory dragging, brewing, rails, boats, taming, pistons,
+                                  # bees and crops, raids, structures, the Astral Gate, the Hollow and
+                                  # its Colossus, gliding, world backups and save/load
 npm run test:mobile               # the same on an emulated phone: touch walking, looking, mining, buttons
 npm run screenshots               # regenerates docs/screenshots
 ```
@@ -222,7 +230,7 @@ Every push runs lint, the unit tests, the playtest and the phone test in CI befo
 
 ## What's not in yet
 
-An end dimension, redstone components beyond the basics (no repeaters, pistons or comparators yet), minecarts and boats, horses, maps and multiplayer.
+Music and ambient sound, comparators, map items and multiplayer.
 
 ## Licence
 

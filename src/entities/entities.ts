@@ -3,7 +3,7 @@
 import * as THREE from 'three';
 import { EFFECTS, type EffectId } from '../effects';
 import { sfx, spatial } from '../audio';
-import { B, BLOCKS, SOLID } from '../blocks';
+import { B, BLOCKS, SOLID, SPAWNER_KINDS } from '../blocks';
 import { I, itemDef, type ItemStack } from '../items';
 import { Body, moveBody, raycast, stepBody, updateContacts } from '../physics';
 import type { Renderer } from '../render/renderer';
@@ -14,6 +14,7 @@ import { Entity, dist } from './entity';
 import { Vehicle, makeVehicle, type RiderInput } from './vehicles';
 import { animateMob, newAnimState } from './animate';
 import { tradesFor, type TradeOffer } from '../trading';
+import { HOLLOW_TOP, anchorPillars } from '../world/hollowgen';
 
 export interface PlayerLike {
   body: Body;
@@ -55,6 +56,8 @@ interface MobSpec {
   exploder?: boolean;
   /** Ticks between ranged attacks. */
   shotDelay?: number;
+  /** A boss: no knockback, a long death, its own AI. */
+  boss?: boolean;
   /** Where it naturally spawns. */
   habitat?: 'ember' | 'cave' | 'water' | 'desert' | 'cold' | 'forest' | 'swamp';
 }
@@ -82,6 +85,7 @@ export const MOBS: Record<string, MobSpec> = {
   streamfish: { kind: 'streamfish', width: 0.4, height: 0.3, health: 3, speed: 0.5, hostile: false, aquatic: true, habitat: 'water', pitch: 1200, xp: 1, drops: () => [{ id: I.raw_fish, count: 1 }] },
   zombie: { kind: 'zombie', width: 0.6, height: 1.95, health: 20, speed: 0.7, hostile: true, attack: 3, burnsInDay: true, pitch: 140, xp: 5, drops: (r) => [{ id: I.rotten_flesh, count: Math.floor(r() * 3) }, ...(r() < 0.03 ? [{ id: I.iron_ingot, count: 1 }] : r() < 0.04 ? [{ id: I.carrot, count: 1 }] : r() < 0.04 ? [{ id: I.potato, count: 1 }] : [])] },
   skeleton: { kind: 'skeleton', width: 0.6, height: 1.95, health: 20, speed: 0.7, hostile: true, ranged: true, projectile: 'arrow', shotDelay: 34, burnsInDay: true, pitch: 480, xp: 5, drops: (r) => [{ id: I.bone, count: Math.floor(r() * 3) }, { id: I.arrow, count: Math.floor(r() * 3) }] },
+  colossus: { kind: 'colossus', width: 2.4, height: 4.4, health: 300, speed: 1, hostile: true, flying: true, fireImmune: true, boss: true, pitch: 55, xp: 0, drops: () => [] },
   raider: { kind: 'raider', width: 0.6, height: 1.95, health: 24, speed: 0.75, hostile: true, ranged: true, projectile: 'arrow', shotDelay: 50, pitch: 210, xp: 6, drops: (r) => [{ id: I.arrow, count: Math.floor(r() * 3) }, ...(r() < 0.35 ? [{ id: I.amber, count: 1 }] : []), ...(r() < 0.06 ? [{ id: I.crossbow, count: 1 }] : [])] },
   witch: { kind: 'witch', width: 0.6, height: 1.95, health: 26, speed: 0.6, hostile: true, ranged: true, projectile: 'potion', shotDelay: 60, pitch: 620, xp: 5, drops: (r) => [[I.glow_dust, I.sugar, I.string, I.stick, I.gunpowder][Math.floor(r() * 5)]].map((id) => ({ id, count: 1 + Math.floor(r() * 2) })) },
   blastcap: { kind: 'blastcap', width: 0.8, height: 1.1, health: 16, speed: 0.8, hostile: true, exploder: true, pitch: 360, xp: 5, drops: (r) => [{ id: I.gunpowder, count: Math.floor(r() * 3) }] },
@@ -231,6 +235,13 @@ export class Mob extends Entity {
   rally: [number, number] | null = null;
   /** Raid captains are tougher and carry a banner. */
   captain = false;
+  /** Boss state: circling the island, diving at you, or climbing back out. */
+  bossPhase: 'circle' | 'swoop' | 'return' = 'circle';
+  bossTimer = 0;
+  orbit = 0;
+  /** The anchor stone mending it, if any (drawn as a beam). */
+  healFrom: [number, number, number] | null = null;
+  private beam?: THREE.Line;
   private beeTimer = 0;
   /** Ridden by the player: movement comes from the rider's keys. */
   ridden = false;
@@ -280,7 +291,7 @@ export class Mob extends Entity {
     this.health -= amount;
     this.hurtTime = 10;
     if (byPlayer) { this.hurtByPlayer = 100; if (this.spec.guardian) this.angry = 600; }
-    if (from) {
+    if (from && !this.spec.boss) {
       const dx = this.body.pos[0] - from[0], dz = this.body.pos[2] - from[2];
       const d = Math.hypot(dx, dz) || 1;
       this.body.vel[0] += (dx / d) * knock;
@@ -355,6 +366,15 @@ export class Mob extends Entity {
     if (this.growing > 0 && --this.growing === 0) { this.body.width = this.spec.width; this.body.height = this.spec.height; }
     if (this.deathTime > 0) {
       this.deathTime++;
+      if (this.spec.boss) {
+        // It comes apart slowly, shedding light, then bursts.
+        const b = this.body;
+        b.pos[1] += 0.05;
+        for (let i = 0; i < 4; i++) m.particles.add(new THREE.Vector3(b.pos[0] + (Math.random() - 0.5) * 3, b.pos[1] + Math.random() * 4.4, b.pos[2] + (Math.random() - 0.5) * 3), new THREE.Vector3((Math.random() - 0.5) * 0.3, Math.random() * 0.3, (Math.random() - 0.5) * 0.3), new THREE.Color(0.7 + Math.random() * 0.3, 0.6, 1), 30, 0.25, -0.004);
+        if (this.deathTime % 15 === 0) sfx.explode({ gain: 0.5, pan: 0 });
+        if (this.deathTime > 90) { this.dead = true; this.beam?.removeFromParent(); m.puff(b.pos[0], b.pos[1] + 2, b.pos[2]); m.onBossDefeated(this); }
+        return;
+      }
       if (this.deathTime > 20) { this.dead = true; m.puff(this.body.pos[0], this.body.pos[1] + 0.5, this.body.pos[2]); }
       return;
     }
@@ -366,11 +386,12 @@ export class Mob extends Entity {
     if (this.ridden) { this.rideTick(m); return; }
     if (this.tamed && this.spec.kind === 'burrowfox' && this.companionTick(m)) return;
     if (this.spec.kind === 'bee') { this.beeTick(m); return; }
+    if (this.spec.boss) { this.colossusTick(m); return; }
     if (this.spec.flying) { this.flyTick(m); return; }
     if (this.spec.aquatic) { this.swimTick(m); return; }
     let forward = 0;
     let jump = false;
-    const daylight = m.isDay() || w.dimension === 'ember';
+    const daylight = m.isDay() || w.dimension !== 'overworld';
     const face = (dx: number, dz: number) => { this.yaw = Math.atan2(-dx, -dz); };
     const pd0 = dist(p.body.pos, b.pos);
     // Pick a target: hostiles go for the player or villagers; guardians go for hostiles.
@@ -539,8 +560,72 @@ export class Mob extends Entity {
     const sp = Math.hypot(b.vel[0], b.vel[2]);
     this.walkAnim += sp * 3.5;
     // Despawn far hostiles.
-    if (!this.rally && (this.spec.hostile || this.spec.habitat === 'cave' || this.spec.habitat === 'water') && (pd0 > 96 || (pd0 > 40 && Math.random() < 1 / 800))) this.dead = true;
+    if (!this.rally && !this.spec.boss && (this.spec.hostile || this.spec.habitat === 'cave' || this.spec.habitat === 'water') && (pd0 > 96 || (pd0 > 40 && Math.random() < 1 / 800))) this.dead = true;
     if (b.pos[1] < -20) this.dead = true;
+  }
+
+  /**
+   * The Hollow Colossus: circles the central island, hurls volleys of void shards, and now and then
+   * dives at you to slam with its fists. While an anchor stone stands it mends itself.
+   */
+  private colossusTick(m: EntityManager): void {
+    const b = this.body, p = m.player, pp = p.body.pos;
+    const target = p.alive && !p.creative;
+    const toP = [pp[0] - b.pos[0], pp[1] + 1 - (b.pos[1] + 2.2), pp[2] - b.pos[2]];
+    const dP = Math.hypot(toP[0], toP[1], toP[2]);
+    // Mending from the nearest anchor stone.
+    if (this.age % 20 === 0) {
+      let best: [number, number, number] | null = null, bd = Infinity;
+      for (const a of m.anchorsStanding()) { const d = dist(a, b.pos); if (d < bd) { bd = d; best = a; } }
+      this.healFrom = best;
+      if (best && this.health < this.spec.health) this.health = Math.min(this.spec.health, this.health + 2);
+    }
+    let goal: number[];
+    let maxSpeed = 0.42;
+    this.bossTimer++;
+    if (this.bossPhase === 'circle') {
+      this.orbit += 0.008;
+      goal = [Math.cos(this.orbit) * 34, HOLLOW_TOP + 22 + Math.sin(this.age / 45) * 4, Math.sin(this.orbit) * 34];
+      // A volley of three shards every few seconds.
+      const cycle = this.bossTimer % 110;
+      if (target && dP < 72 && (cycle === 80 || cycle === 88 || cycle === 96)) {
+        const lead = dP / 0.9;
+        const aim = [toP[0] + p.body.vel[0] * lead * 0.5, toP[1], toP[2] + p.body.vel[2] * lead * 0.5];
+        m.shoot('shard', this, [b.pos[0], b.pos[1] + 2.6, b.pos[2]], aim, 0.9, 0.03, 5.5);
+        this.aiming = true;
+      }
+      if (target && dP < 80 && this.bossTimer > 380) { this.bossPhase = 'swoop'; this.bossTimer = 0; sfx.warHorn(); }
+    } else if (this.bossPhase === 'swoop') {
+      goal = [pp[0], pp[1] + 0.5, pp[2]];
+      maxSpeed = 0.75;
+      this.aiming = true;
+      if (dP < 3.6 && target) {
+        p.damage(7, 'colossus', [toP[0] / (dP || 1), toP[2] / (dP || 1)]);
+        p.body.vel[1] = Math.max(p.body.vel[1], 0.7);
+        this.attackCooldown = 30;
+        sfx.explode({ gain: 0.6, pan: 0 });
+        this.bossPhase = 'return'; this.bossTimer = 0;
+      } else if (!target || this.bossTimer > 200) { this.bossPhase = 'return'; this.bossTimer = 0; }
+    } else {
+      goal = [Math.cos(this.orbit) * 34, HOLLOW_TOP + 24, Math.sin(this.orbit) * 34];
+      if (dist(goal, b.pos) < 6 || this.bossTimer > 240) { this.bossPhase = 'circle'; this.bossTimer = 0; }
+    }
+    const d = [goal[0] - b.pos[0], goal[1] - b.pos[1], goal[2] - b.pos[2]];
+    const dl = Math.hypot(d[0], d[1], d[2]) || 1;
+    for (let k = 0; k < 3; k++) b.vel[k] = b.vel[k] * 0.94 + (d[k] / dl) * 0.035;
+    const sp = Math.hypot(b.vel[0], b.vel[1], b.vel[2]);
+    if (sp > maxSpeed) for (let k = 0; k < 3; k++) b.vel[k] *= maxSpeed / sp;
+    b.pos[0] += b.vel[0]; b.pos[1] += b.vel[1]; b.pos[2] += b.vel[2];
+    // Face where it's going, or you when it's attacking.
+    const look = this.aiming ? toP : b.vel;
+    if (Math.hypot(look[0], look[2]) > 0.01) {
+      let dy = Math.atan2(-look[0], -look[2]) - this.yaw;
+      dy = Math.atan2(Math.sin(dy), Math.cos(dy));
+      this.yaw += dy * 0.12;
+    }
+    // Brushing past it hurts.
+    if (target && dP < 2.6 && this.age % 20 === 0) p.damage(4, 'colossus', [toP[0] / (dP || 1), toP[2] / (dP || 1)]);
+    if (this.age % 160 === 0 && dP < 64) sfx.mobSay(this.spec.pitch, m.spatialFor(b.pos));
   }
 
   /** Carrying the player: turn toward where they look, run when they sprint, leap with jump. */
@@ -732,7 +817,7 @@ export class Mob extends Entity {
     this.object.rotation.y = this.anim.yaw;
     // Recoil when hurt; fall over when dying.
     parts.body.rotation.x = this.hurtTime > 0 ? -Math.sin((this.hurtTime / 10) * Math.PI) * 0.25 : 0;
-    if (this.deathTime > 0) this.object.rotation.z = Math.min(Math.PI / 2, (this.deathTime / 10) * (Math.PI / 2));
+    if (this.deathTime > 0 && !this.spec.boss) this.object.rotation.z = Math.min(Math.PI / 2, (this.deathTime / 10) * (Math.PI / 2));
     else this.object.rotation.z = 0;
     // Ground the shadow: find the floor below and fade it with height.
     const sh = this.model.shadow;
@@ -743,6 +828,22 @@ export class Mob extends Entity {
     if (sh.visible) {
       sh.position.y = -drop / size + 0.03;
       (sh.material as THREE.MeshBasicMaterial).opacity = Math.max(0, 1 - drop / 5);
+    }
+    // A boss being mended: a beam of light from the anchor stone.
+    if (this.spec.boss) {
+      if (!this.beam) {
+        this.beam = new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3()]), new THREE.LineBasicMaterial({ color: 0xe8a8ff }));
+        this.beam.frustumCulled = false;
+        m.renderer.scene.add(this.beam);
+      }
+      const a = this.healFrom;
+      this.beam.visible = !!a && this.deathTime === 0;
+      if (a) {
+        const pos = this.beam.geometry.getAttribute('position') as THREE.BufferAttribute;
+        pos.setXYZ(0, a[0] + 0.5, a[1] + 0.5, a[2] + 0.5);
+        pos.setXYZ(1, this.object.position.x, this.object.position.y + 2.4, this.object.position.z);
+        pos.needsUpdate = true;
+      }
     }
     if (this.fuse > 0) {
       // Swell and flash white before bursting.
@@ -763,7 +864,7 @@ export class Mob extends Entity {
 }
 
 // ---------- Projectiles, XP orbs, fishing bobber ----------
-export type ProjectileKind = 'arrow' | 'thorn' | 'snowball' | 'egg' | 'fireball' | 'potion';
+export type ProjectileKind = 'arrow' | 'thorn' | 'snowball' | 'egg' | 'fireball' | 'potion' | 'shard';
 
 export class Projectile extends Entity {
   stuck = 0;
@@ -776,7 +877,11 @@ export class Projectile extends Entity {
   }
   static makeObject(kind: ProjectileKind, renderer: Renderer): THREE.Object3D {
     const g = new THREE.Group();
-    if (kind === 'potion') {
+    if (kind === 'shard') {
+      const core = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.22, 0.5), new THREE.MeshBasicMaterial({ color: 0xc88aff }));
+      const glow = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.12, 0.7), new THREE.MeshBasicMaterial({ color: 0xf4e8ff }));
+      g.add(core, glow);
+    } else if (kind === 'potion') {
       const bottle = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.24, 0.18), new THREE.MeshBasicMaterial({ color: 0x9a4ad8 }));
       const neck = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.08, 0.08), new THREE.MeshBasicMaterial({ color: 0x8a6a3a }));
       neck.position.y = 0.16;
@@ -845,6 +950,8 @@ export class Projectile extends Entity {
     const hit = raycast(m.world, b.pos, dir, speed);
     if (hit) {
       b.pos = [...hit.point] as [number, number, number];
+      // Arrows shatter anchor stones.
+      if (hit.id === B.anchor_stone && this.owner === 'player') { this.dead = true; m.breakAnchor(hit.pos[0], hit.pos[1], hit.pos[2]); return; }
       if (this.kind === 'fireball') {
         b.pos = [hit.point[0] - dir[0] * 0.3, hit.point[1] - dir[1] * 0.3, hit.point[2] - dir[2] * 0.3];
         this.dead = true;
@@ -861,9 +968,10 @@ export class Projectile extends Entity {
     }
     b.pos[0] += b.vel[0]; b.pos[1] += b.vel[1]; b.pos[2] += b.vel[2];
     const inWater = m.world.getBlock(Math.floor(b.pos[0]), Math.floor(b.pos[1]), Math.floor(b.pos[2])) === B.water;
-    const drag = inWater ? 0.6 : 0.99;
+    const drag = inWater ? 0.6 : this.kind === 'shard' ? 1 : 0.99;
     b.vel[0] *= drag; b.vel[1] *= drag; b.vel[2] *= drag;
     if (this.kind === 'fireball') { if (this.age % 2 === 0) m.flame(b.pos[0], b.pos[1], b.pos[2]); }
+    else if (this.kind === 'shard') { if (this.age % 2 === 0) m.particles.add(new THREE.Vector3(...b.pos), new THREE.Vector3(0, 0, 0), new THREE.Color(0.8, 0.55, 1), 14, 0.12, 0); }
     else b.vel[1] -= this.kind === 'arrow' || this.kind === 'thorn' ? 0.05 : 0.03;
     if (this.age > 400 || b.pos[1] < -20) this.dead = true;
   }
@@ -895,6 +1003,10 @@ export class Projectile extends Entity {
       const d = Math.hypot(p.body.pos[0] - b.pos[0], p.body.pos[1] + 0.9 - b.pos[1], p.body.pos[2] - b.pos[2]);
       if (p.alive && d < 2.6) p.damage(Math.ceil(5 * (1 - d / 2.6)) + 1, 'witch');
       return;
+    }
+    if (this.kind === 'shard') {
+      sfx.breakBlock('glass', m.spatialFor(b.pos));
+      for (let i = 0; i < 14; i++) m.particles.add(new THREE.Vector3(...b.pos), new THREE.Vector3((Math.random() - 0.5) * 0.25, Math.random() * 0.2, (Math.random() - 0.5) * 0.25), new THREE.Color(0.75, 0.5, 1), 18, 0.1, 0.01);
     }
     if (this.kind === 'snowball') for (let i = 0; i < 6; i++) m.particles.add(new THREE.Vector3(...b.pos), new THREE.Vector3((Math.random() - 0.5) * 0.1, Math.random() * 0.1, (Math.random() - 0.5) * 0.1), new THREE.Color(0.95, 0.97, 1), 12, 0.07);
     if (this.kind === 'egg') {
@@ -1016,6 +1128,39 @@ export class Bobber extends Entity {
 }
 
 
+/** A thrown Starseeker: it climbs, streaks toward the nearest sanctum for a few seconds, then falls (or shatters). */
+export class SeekerOrb extends Entity {
+  private startY: number;
+  constructor(x: number, y: number, z: number, readonly target: [number, number]) {
+    const body = new Body(x, y, z, 0.25, 0.25);
+    const g = new THREE.Group();
+    const core = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.22, 0.22), new THREE.MeshBasicMaterial({ color: 0x9af0ff }));
+    core.rotation.set(0.6, 0.6, 0);
+    g.add(core);
+    super(body, g);
+    this.startY = y;
+  }
+  tick(m: EntityManager): void {
+    this.prev = [...this.body.pos];
+    this.age++;
+    const b = this.body;
+    const dx = this.target[0] - b.pos[0], dz = this.target[1] - b.pos[2];
+    const d = Math.hypot(dx, dz);
+    // Close by, it dives toward the spot; otherwise it holds a height above where it was thrown.
+    const aimY = d < 12 ? this.startY - 2 : this.startY + 5;
+    const sp = Math.min(0.32, d * 0.05);
+    b.vel = [d > 0.1 ? (dx / d) * sp : 0, (aimY - b.pos[1]) * 0.08, d > 0.1 ? (dz / d) * sp : 0];
+    b.pos[0] += b.vel[0]; b.pos[1] += b.vel[1]; b.pos[2] += b.vel[2];
+    if (this.age % 2 === 0) m.particles.add(new THREE.Vector3(b.pos[0], b.pos[1], b.pos[2]), new THREE.Vector3((Math.random() - 0.5) * 0.02, 0, (Math.random() - 0.5) * 0.02), new THREE.Color(0.6, 0.95, 1), 18, 0.08, 0.001);
+    this.object.rotation.y += 0.2;
+    if (this.age > 80) {
+      this.dead = true;
+      if (Math.random() < 0.8) m.dropItem(b.pos[0], b.pos[1], b.pos[2], { id: I.starseeker, count: 1 }, 10, [0, 0, 0]);
+      else { m.puff(b.pos[0], b.pos[1], b.pos[2]); sfx.breakBlock('glass', m.spatialFor(b.pos)); }
+    }
+  }
+}
+
 // ---------- Particles ----------
 class Particles {
   mesh: THREE.InstancedMesh;
@@ -1078,6 +1223,27 @@ export class EntityManager {
   private tileColors = new Map<number, THREE.Color[]>();
   onExplosion: (x: number, y: number, z: number) => void = () => {};
   onMobKilled: (mob: Mob, byPlayer: boolean) => void = () => {};
+  onBossDefeated: (mob: Mob) => void = () => {};
+  private anchorCache: { tick: number; list: [number, number, number][] } = { tick: -1, list: [] };
+
+  /** Anchor stones still standing in the Hollow (checked at most once a second). */
+  anchorsStanding(): [number, number, number][] {
+    const w = this.world;
+    if (w.dimension !== 'hollow') return [];
+    if (w.tickCount - this.anchorCache.tick < 20) return this.anchorCache.list;
+    const spots: [number, number, number][] = anchorPillars(w.seed).map(([x, z, h]) => [x, HOLLOW_TOP + h + 1, z]);
+    spots.push([0, HOLLOW_TOP + 5, 0]);
+    this.anchorCache = { tick: w.tickCount, list: spots.filter(([x, y, z]) => w.getBlock(x, y, z) === B.anchor_stone) };
+    return this.anchorCache.list;
+  }
+
+  /** An anchor stone shatters in a burst of light that hurts anything close. */
+  breakAnchor(x: number, y: number, z: number): void {
+    if (this.world.getBlock(x, y, z) !== B.anchor_stone) return;
+    this.world.setBlock(x, y, z, 0);
+    this.anchorCache.tick = -1;
+    this.explode(x + 0.5, y + 0.5, z + 0.5, 3);
+  }
   onBred: () => void = () => {};
   onProjectileHit: (p: Projectile, mob: Mob) => void = () => {};
   private spawnerTimers = new Map<string, number>();
@@ -1142,7 +1308,8 @@ export class EntityManager {
       if (--t > 0) { this.spawnerTimers.set(key, t); continue; }
       this.spawnerTimers.set(key, 200 + Math.floor(Math.random() * 600));
       const kinds = this.world.dimension === 'ember' ? ['emberwisp', 'cinderbrute'] : ['zombie', 'skeleton', 'shellcrawler', 'mirewalker', 'brambler'];
-      const kind = kinds[Math.abs(x * 31 + z * 17 + y) % kinds.length];
+      const sm = this.world.getMeta(x, y, z);
+      const kind = sm && SPAWNER_KINDS[sm] ? SPAWNER_KINDS[sm] : kinds[Math.abs(x * 31 + z * 17 + y) % kinds.length];
       const nearby = this.mobs().filter((m) => m.spec.kind === kind && Math.hypot(m.body.pos[0] - x, m.body.pos[1] - y, m.body.pos[2] - z) < 9).length;
       if (nearby >= 6) continue;
       const n = 1 + Math.floor(Math.random() * 4);
@@ -1228,7 +1395,8 @@ export class EntityManager {
   }
 
   private spawnTick(): void {
-    if (this.world.tickCount % 20 !== 0) return;
+    // Nothing spawns on its own in the Hollow: only its Colossus lives there.
+    if (this.world.tickCount % 20 !== 0 || this.world.dimension === 'hollow') return;
     const w = this.world;
     const p = this.player.body.pos;
     const mobs = this.mobs();

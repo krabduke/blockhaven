@@ -889,6 +889,65 @@ tile('salmon', fishSprite('#b8584a', '#e89a88', '#8a3a30'));
 tile('cooked_salmon', fishSprite('#c8784a', '#e8b890', '#8a5a30'));
 tile('glimmerfish', fishSprite('#3a8ab0', '#bfe8f0', '#2a6a90', '#7af0e8'));
 
+// ---------- The Astral Gate and the Hollow ----------
+tile('hollowstone', (p) => {
+  p.ramp(p.field(3, 3), [hex('#a89cba'), hex('#b6abc6'), hex('#c3b9d1'), hex('#cfc6db'), hex('#dbd4e5')], 0.08);
+  p.speckle(hex('#8e7fa8'), 0.05, 0.05);
+  p.speckle(hex('#eee8f6'), 0.03, 0.03);
+});
+tile('hollow_bricks', (p) => {
+  for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) {
+    const off = (y >> 2) % 2 ? 4 : 0;
+    const gap = y % 4 === 3 || (x + off) % 8 === 7;
+    p.set(x, y, gap ? p.jit(hex('#7a6e90'), 0.04) : p.jit(hex(y % 4 === 0 ? '#d6cde2' : '#c2b8d0'), 0.05));
+  }
+});
+const frameStone = (p: Painter) => { p.ramp(p.field(3, 2), [hex('#1e2a36'), hex('#243242'), hex('#2a3a4c')], 0.06); p.speckle(hex('#3e5a70'), 0.06, 0.05); };
+tile('astral_frame_side', (p) => { frameStone(p); p.rect(0, 0, 16, 3, hex('#2e4458')); p.rect(0, 3, 16, 1, hex('#c8a24a')); for (let x = 1; x < S; x += 4) p.rect(x, 8, 2, 2, hex('#6ad0e0')); p.rect(0, 13, 16, 1, hex('#c8a24a')); });
+const frameTop = (lit: boolean) => (p: Painter) => {
+  frameStone(p);
+  p.border(hex('#c8a24a'));
+  for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) {
+    const d = Math.hypot(x - 7.5, y - 7.5);
+    if (d < 3) p.set(x, y, lit ? p.jit(hex('#bff6ff'), 0.05) : hex('#0a1016'));
+    else if (d < 4.3) p.set(x, y, lit ? hex('#5ad8f0') : hex('#3a5a6e'));
+  }
+  // A star point at each compass mark.
+  for (const [x, y] of [[7, 1], [8, 1], [7, 14], [8, 14], [1, 7], [1, 8], [14, 7], [14, 8]]) p.set(x, y, hex(lit ? '#e8fcff' : '#6ad0e0'));
+};
+tile('astral_frame_top', frameTop(false));
+tile('astral_frame_top_full', frameTop(true));
+tile('astral_eye', (p) => { p.fill(hex('#7ae8f8'), 0.1); p.rect(5, 5, 6, 6, hex('#d8fcff')); p.rect(7, 7, 2, 2, hex('#ffffff')); p.border(hex('#2a8aa8')); });
+tile('astral_portal', (p) => {
+  const f = p.field(2, 2);
+  for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) {
+    const v = f[x + y * S];
+    p.set(x, y, v > 0.62 ? hex('#1c1a48') : v > 0.4 ? hex('#12102e') : hex('#08081a'));
+  }
+  for (let i = 0; i < 14; i++) p.set(Math.floor(p.rand() * S), Math.floor(p.rand() * S), [hex('#ffffff'), hex('#9ae8ff'), hex('#d8a8ff')][i % 3]);
+});
+tile('anchor_stone', (p) => {
+  for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) {
+    const facet = ((x + y) >> 2) % 2 === 0, edge = (x + y) % 4 === 0 || (x - y + 16) % 6 === 0;
+    p.set(x, y, edge ? hex('#fff0ff') : p.jit(hex(facet ? '#e86ae0' : '#9a4ae8'), 0.06));
+  }
+  p.border(hex('#5a2a8a'));
+});
+tile('starbloom', (p) => {
+  p.transparent();
+  for (let y = 8; y < S; y++) p.set(7 + (y % 3 === 0 ? 1 : 0), y, p.jit(hex('#9a8ab8'), 0.08));
+  p.set(5, 12, hex('#9a8ab8')); p.set(6, 11, hex('#9a8ab8')); p.set(10, 11, hex('#9a8ab8')); p.set(9, 12, hex('#9a8ab8'));
+  p.sprite(['...s...', '..sws..', 'sswCwss', '..sws..', '...s...'], { s: hex('#7ad8f0'), w: hex('#d8f8ff'), C: hex('#ffffff') }, 0.03, 4, 3);
+});
+tile('starseeker', (p) => {
+  p.transparent();
+  p.sprite(['.....b.....', '....bcb....', '...bcwcb...', '..bccwccb..', '.bcccwcccb.', 'bwwwwCwwwwb', '.bcccwcccb.', '..bccwccb..', '...bcwcb...', '....bcb....', '.....b.....'], { b: hex('#b8903a'), c: hex('#4ac8e0'), w: hex('#bff4ff'), C: hex('#ffffff') }, 0.04, 2, 2);
+});
+tile('glider', (p) => {
+  p.transparent();
+  p.sprite(['r............r', 'mr..........rm', 'mmr........rmm', 'mmmr......rmmm', 'mmmmr.hh.rmmmm', 'mmmmmrhhrmmmmm', '.mmmmmrrmmmmm.', '..mmmm..mmmm..', '...mm....mm...'], { m: hex('#6a58a8'), r: hex('#d8c8a0'), h: hex('#8a6a3a') }, 0.06, 1, 4);
+});
+
 // ---------- Batch 3: Emberdeep, villages, building blocks ----------
 tile('portal', (p) => {
   for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) {

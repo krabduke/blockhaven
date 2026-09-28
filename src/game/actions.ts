@@ -3,10 +3,12 @@
 
 import { sfx, spatial } from '../audio';
 import { B, BLOCKS, DYE_COLORS, SOLID, WOOL_KEY, isLeaves, isLog, isRail } from '../blocks';
-import { Bobber, TntEntity } from '../entities/entities';
+import { Bobber, SeekerOrb, TntEntity } from '../entities/entities';
 import { Boat, Minecart } from '../entities/vehicles';
 import { I, coloredItem, enchLevel, itemDef, maxStack, type ItemStack } from '../items';
 import { raycast, selectionBox, type RayHit } from '../physics';
+import { nearestStructure } from '../world/structures';
+import { WorldGen } from '../world/worldgen';
 import type { Game } from '../game';
 
 export class Actions {
@@ -335,6 +337,27 @@ export class Actions {
     }
     // Drinking a potion works like eating.
     if (def?.potion && !def.potion.splash) { this.eating = 1; return; }
+    // Starseekers: set into an Astral Frame, or thrown to show the way to the nearest sanctum.
+    if (held?.id === I.starseeker && !repeat) {
+      if (hit && hit.id === B.astral_frame) {
+        const [x, y, z] = hit.pos;
+        const m = w.getMeta(x, y, z);
+        if (m & 4) return;
+        w.setMeta(x, y, z, m | 4);
+        consume();
+        this.renderer.swingHand();
+        sfx.brewed();
+        if (w.tryOpenAstralGate(x, y, z)) { sfx.warHorn(); p.achieve('astral'); this.g.chat.say('The Astral Gate opens.'); }
+        return;
+      }
+      if (w.dimension !== 'overworld') { this.g.chat.say('The Starseeker spins without finding anything.'); return; }
+      const s = nearestStructure(new WorldGen(w.seed), 'sanctum', p.body.pos[0], p.body.pos[2]);
+      if (!s) return;
+      this.entities.add(new SeekerOrb(eye[0] + dir[0], eye[1] + dir[1], eye[2] + dir[2], [s.x + 0.5, s.z + 0.5]));
+      consume();
+      this.renderer.swingHand();
+      return;
+    }
 
     if (hit && !sneaking) {
       const [x, y, z] = hit.pos;

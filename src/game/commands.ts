@@ -5,6 +5,7 @@ import { B, BLOCKS } from '../blocks';
 import { MOBS } from '../entities/entities';
 import { ITEMS, maxStack, type ItemDef } from '../items';
 import { WorldGen } from '../world/worldgen';
+import { nearestStructure, type StructureKind } from '../world/structures';
 import { nearestVillage } from '../world/villages';
 import type { Game } from '../game';
 
@@ -140,14 +141,21 @@ export const COMMANDS: Command[] = [
     },
   },
   {
-    name: 'locate', usage: '/locate village', help: 'Finds the nearest village',
-    complete: (i) => (i === 0 ? ['village'] : []),
+    name: 'locate', usage: '/locate village|temple|shipwreck|mine|sanctum', help: 'Finds the nearest village or structure',
+    complete: (i) => (i === 0 ? ['village', 'temple', 'shipwreck', 'mine', 'sanctum'] : []),
     run(g, a) {
       const w = g.world!, p = g.player;
-      if (a[0] !== 'village') { g.chat.say('Usage: ' + this.usage); return; }
-      if (w.dimension !== 'overworld') { g.chat.say('There are no villages down here.'); return; }
-      const v = nearestVillage(new WorldGen(w.seed), p.body.pos[0], p.body.pos[2]);
-      g.chat.say(v ? `Nearest village is at ${v.cx}, ${v.cz} (${Math.round(Math.hypot(v.cx - p.body.pos[0], v.cz - p.body.pos[2]))} blocks away)` : 'No village found nearby.');
+      const what = a[0];
+      const kinds = ['temple', 'shipwreck', 'mine', 'sanctum'];
+      if (what !== 'village' && !kinds.includes(what)) { g.chat.say('Usage: ' + this.usage); return; }
+      if (w.dimension !== 'overworld') { g.chat.say('There are none in this dimension.'); return; }
+      const gen = new WorldGen(w.seed);
+      const [px, , pz] = p.body.pos;
+      const found = what === 'village' ? nearestVillage(gen, px, pz) : nearestStructure(gen, what as StructureKind, px, pz);
+      if (!found) { g.chat.say(`No ${what} found nearby.`); return; }
+      const fx = 'cx' in found ? found.cx : found.x, fz = 'cz' in found ? found.cz : found.z;
+      const name = { village: 'village', temple: 'sun temple', shipwreck: 'shipwreck', mine: 'abandoned mine', sanctum: 'sanctum' }[what];
+      g.chat.say(`Nearest ${name} is at ${fx}, ${'y' in found && what !== 'temple' && what !== 'shipwreck' ? found.y + ', ' : ''}${fz} (${Math.round(Math.hypot(fx - px, fz - pz))} blocks away)`);
     },
   },
   {
@@ -160,11 +168,11 @@ export const COMMANDS: Command[] = [
     },
   },
   {
-    name: 'dimension', usage: '/dimension overworld|ember', help: 'Travels to another dimension',
-    complete: (i) => (i === 0 ? ['overworld', 'ember'] : []),
+    name: 'dimension', usage: '/dimension overworld|ember|hollow', help: 'Travels to another dimension',
+    complete: (i) => (i === 0 ? ['overworld', 'ember', 'hollow'] : []),
     run(g, a) {
       const d = a[0];
-      if (d === 'ember' || d === 'overworld') { if (d !== g.world!.dimension) g.travel(d); }
+      if (d === 'ember' || d === 'overworld' || d === 'hollow') { if (d !== g.world!.dimension) g.travel(d); }
       else g.chat.say('Usage: ' + this.usage);
     },
   },

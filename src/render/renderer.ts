@@ -371,7 +371,7 @@ export class Renderer {
   thunder = 0;
   flash = 0;
   private rainLines: THREE.LineSegments;
-  dimension: 'overworld' | 'ember' = 'overworld';
+  dimension: 'overworld' | 'ember' | 'hollow' = 'overworld';
   /** Fancy = sun shading, shadows, water reflections, colour grading. */
   fancy = true;
   shadows = true;
@@ -751,6 +751,39 @@ export class Renderer {
       this.sky_state = { sun: 0, skyColor: fog, fogColor: fog };
       return;
     }
+    if (this.dimension === 'hollow') {
+      // A deep indigo void with the stars always out and no sun: an even, silvery twilight.
+      const fog = this.underwater ? new THREE.Color(0x1f3d7a) : new THREE.Color(0x1a1432);
+      const top = new THREE.Color(0x06050f);
+      this.uniforms.uSun.value = 0.62;
+      this.uniforms.uDay.value = 0;
+      this.uniforms.uMinLight.value = 0.16;
+      (this.uniforms.uSkyLightColor.value as THREE.Color).setRGB(0.78, 0.74, 1.05);
+      (this.uniforms.uFogColor.value as THREE.Color).copy(fog);
+      (this.uniforms.uSkyTop.value as THREE.Color).copy(top);
+      this.skyUniforms.uCloudsOn.value = 0;
+      this.skyUniforms.uNight.value = 1;
+      this.skyUniforms.uDusk.value = 0;
+      this.uniforms.uDuskAmt.value = 0;
+      this.uniforms.uHaze.value = 0.04;
+      this.uniforms.uWet.value = 0;
+      (this.skyUniforms.uHorizon.value as THREE.Color).copy(fog);
+      const far = this.renderDistance * 16;
+      this.uniforms.uFogNear.value = far * 0.45;
+      this.uniforms.uFogFar.value = far * 1.0;
+      this.gl.setClearColor(fog);
+      this.sky.visible = true;
+      this.sky.position.copy(camPos);
+      this.clouds.visible = false;
+      this.sun.visible = false;
+      this.moon.visible = false;
+      this.stars.rotation.z = this.uniforms.uTime.value * 0.002;
+      (this.stars.material as THREE.PointsMaterial).opacity = 1;
+      this.sky_state = { sun: 0.62, skyColor: top, fogColor: fog };
+      return;
+    }
+    this.sun.visible = true;
+    this.moon.visible = true;
     this.sky.visible = true;
     // The flat cloud sheet is only for Fast graphics; Fancy draws shaded clouds in the sky shader.
     this.clouds.visible = !this.fancy;

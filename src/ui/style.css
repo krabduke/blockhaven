@@ -368,6 +368,15 @@ body.touch, body.touch canvas#game { touch-action: none; overscroll-behavior: no
 @keyframes fx-blink { 50% { opacity: 0.45; } }
 @media (prefers-reduced-motion: reduce) { #effects .fx.ending { animation: none; } }
 
+/* ---------- Boss bar ---------- */
+#bossbar { position: fixed; top: 10px; left: 50%; transform: translateX(-50%); z-index: 6; display: none; flex-direction: column; align-items: center; gap: 4px; pointer-events: none; zoom: var(--ui, 1); text-shadow: 2px 2px 0 #000; font-size: 16px; color: #e8d8ff; }
+#bossbar.show { display: flex; }
+#bossbar .track { width: min(420px, 76vw); height: 10px; background: #140f20; border: 2px solid #000; box-shadow: inset 0 0 0 1px #3a2a5a; }
+#bossbar .track i { display: block; height: 100%; width: 100%; background: #b86ae8; transition: width 0.3s; }
+#bossbar.mending .track i { background: linear-gradient(90deg, #b86ae8, #f0c8ff, #b86ae8); background-size: 200% 100%; animation: mend 1.2s linear infinite; }
+@keyframes mend { to { background-position: -200% 0; } }
+@media (prefers-reduced-motion: reduce) { #bossbar .track i { transition: none; animation: none !important; } }
+
 /* ---------- Raid bar ---------- */
 #raidbar { position: fixed; top: 10px; left: 50%; transform: translateX(-50%); z-index: 6; display: none; flex-direction: column; align-items: center; gap: 4px; pointer-events: none; zoom: var(--ui, 1); text-shadow: 2px 2px 0 #000; font-size: 16px; }
 #raidbar.show { display: flex; }

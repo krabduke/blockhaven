@@ -121,6 +121,9 @@ s([I.bowl, B.red_mushroom, B.brown_mushroom], I.mushroom_stew);
 s([I.bowl, I.redroot, I.redroot, I.redroot, I.redroot, I.redroot, I.redroot], I.redroot_stew);
 s([I.redroot], I.dye_red);
 r(['PPP', 'HHH', 'PPP'], { P: PLANKS, H: I.honeycomb }, B.beehive);
+s([I.crystal_shard, I.ember_core], I.starseeker);
+// Worn-out gliders mend with leather.
+s([I.glider, I.leather], I.glider);
 r(['GGG', 'GAG', 'GGG'], { G: I.gold_ingot, A: I.apple }, I.golden_apple);
 s([I.gunpowder, I.ember_core, I.coal], I.fire_charge, 3);
 r(['SS', 'SS'], { S: B.slate }, B.polished_slate, 4);

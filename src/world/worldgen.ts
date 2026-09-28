@@ -5,9 +5,10 @@ import { B, isLeaves } from '../blocks';
 import { Simplex, hash3, mulberry32 } from '../noise';
 import { CH, CS, SEA_LEVEL, idx } from './chunk';
 import { buildVillage, villagesNear } from './villages';
+import { buildStructure, structuresNear } from './structures';
 
-export const BIOME = { ocean: 0, plains: 1, forest: 2, desert: 3, taiga: 4, mountains: 5, beach: 6, birch_forest: 7, swamp: 8, savanna: 9, emberdeep: 10, river: 11, badlands: 12, jungle: 13, blossom: 14 } as const;
-export const BIOME_NAMES = ['Ocean', 'Plains', 'Forest', 'Desert', 'Snowy Taiga', 'Mountains', 'Beach', 'Birch Forest', 'Swamp', 'Savanna', 'Emberdeep', 'River', 'Badlands', 'Jungle', 'Blossom Grove'];
+export const BIOME = { ocean: 0, plains: 1, forest: 2, desert: 3, taiga: 4, mountains: 5, beach: 6, birch_forest: 7, swamp: 8, savanna: 9, emberdeep: 10, river: 11, badlands: 12, jungle: 13, blossom: 14, hollow: 15 } as const;
+export const BIOME_NAMES = ['Ocean', 'Plains', 'Forest', 'Desert', 'Snowy Taiga', 'Mountains', 'Beach', 'Birch Forest', 'Swamp', 'Savanna', 'Emberdeep', 'River', 'Badlands', 'Jungle', 'Blossom Grove', 'The Hollow'];
 
 /** Grass / foliage tint per biome (rgb 0-1). */
 export const BIOME_TINT: [number, number, number][] = [
@@ -15,6 +16,7 @@ export const BIOME_TINT: [number, number, number][] = [
   [0.42, 0.62, 0.4], [0.52, 0.7, 0.45], [0.6, 0.78, 0.4], [0.55, 0.76, 0.36],
   [0.42, 0.52, 0.3], [0.74, 0.72, 0.38], [0.6, 0.35, 0.25],
   [0.52, 0.72, 0.4], [0.72, 0.64, 0.4], [0.38, 0.6, 0.27], [0.56, 0.74, 0.42],
+  [0.6, 0.55, 0.75],
 ];
 
 function smoothstep(a: number, b: number, x: number): number {
@@ -308,7 +310,8 @@ export class WorldGen {
       if (blocks[i] === B.water && blocks[idx(x, SEA_LEVEL + 1, z)] === 0 && hash3(seed + 91, x0 + x, 0, z0 + z) < 0.05) blocks[idx(x, SEA_LEVEL + 1, z)] = B.lily_pad;
     }
 
-    // Villages are built last so they clear trees and flowers in their way.
+    // Temples, wrecks, mines and sanctums, then villages last so they clear trees and flowers in their way.
+    for (const st of structuresNear(this, cx, cz)) buildStructure(this, st, blocks, meta, cx, cz);
     const spawns: Spawn[] = this.nestBees.splice(0);
     for (const v of villagesNear(this, cx, cz)) spawns.push(...buildVillage(this, v, blocks, meta, cx, cz));
 
@@ -336,7 +339,7 @@ export class WorldGen {
     for (let k = 0; k < n; k++) {
       const [x, z, f] = spots[Math.floor(rand() * spots.length)];
       blocks[idx(x, y0, z)] = B.chest;
-      meta[idx(x, y0, z)] = f | 16;
+      meta[idx(x, y0, z)] = f | 16; // loot table 0: dungeon
     }
   }
 

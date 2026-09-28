@@ -87,6 +87,7 @@ export function collisionBox(id: number, meta: number): Box | null {
     case 'door': return doorBox(meta);
     case 'bed': return { min: [0, 0, 0], max: [1, 9 / 16, 1] };
     case 'table': return { min: [0, 0, 0], max: [1, 12 / 16, 1] };
+    case 'frame': return { min: [0, 0, 0], max: [1, 13 / 16, 1] };
     case 'pane': return { min: [7 / 16, 0, 7 / 16], max: [9 / 16, 1, 9 / 16] };
     case 'trapdoor': return trapdoorBox(meta);
     case 'lantern': return id === B.bell ? { min: [4 / 16, 4 / 16, 4 / 16], max: [12 / 16, 1, 12 / 16] } : { min: [5 / 16, meta & 1 ? 2 / 16 : 0, 5 / 16], max: [11 / 16, (meta & 1 ? 2 / 16 : 0) + 9 / 16, 11 / 16] };
@@ -128,6 +129,7 @@ export function selectionBox(id: number, meta: number): Box | null {
     case 'sign': return (meta & 4) ? { min: [0, 4 / 16, 0], max: [1, 12 / 16, 1] } : { min: [0.25, 0, 0.25], max: [0.75, 1, 0.75] };
     case 'fire': return { min: [0, 0, 0], max: [1, 1 / 16, 1] };
     case 'portal': return null;
+    case 'astralpool': return null;
     case 'rail': return { min: [0, 0, 0], max: [1, 2 / 16, 1] };
     case 'banner':
       if (meta & 64) return { min: [0.3, 0, 0.3], max: [0.7, 1, 0.7] };
@@ -224,6 +226,8 @@ export class Body {
   onLadder = false;
   inWeb = false;
   inPortal = false;
+  /** Standing in an Astral Gate. */
+  inAstral = false;
   inFire = false;
   fallDistance = 0;
   constructor(x: number, y: number, z: number, public width: number, public height: number) {
@@ -329,7 +333,7 @@ export function moveBody(w: BlockReader, body: Body, dx: number, dy: number, dz:
 /** Update fluid / ladder contact flags. */
 export function updateContacts(w: BlockReader, body: Body, eyeHeight: number): void {
   const a = body.aabb();
-  body.inWater = false; body.inLava = false; body.onLadder = false; body.inWeb = false; body.inPortal = false; body.inFire = false;
+  body.inWater = false; body.inLava = false; body.onLadder = false; body.inWeb = false; body.inPortal = false; body.inAstral = false; body.inFire = false;
   const x0 = Math.floor(a.min[0] + 0.001), x1 = Math.floor(a.max[0] - 0.001);
   const y0 = Math.floor(a.min[1] + 0.001), y1 = Math.floor(a.max[1] - 0.4);
   const z0 = Math.floor(a.min[2] + 0.001), z1 = Math.floor(a.max[2] - 0.001);
@@ -339,6 +343,7 @@ export function updateContacts(w: BlockReader, body: Body, eyeHeight: number): v
     else if (id === B.lava) body.inLava = true;
     else if (id === B.cobweb) body.inWeb = true;
     else if (id === B.portal) body.inPortal = true;
+    else if (id === B.astral_portal) body.inAstral = true;
     else if (id === B.fire) body.inFire = true;
   }
   const fx = Math.floor(body.pos[0]), fz = Math.floor(body.pos[2]);

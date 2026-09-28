@@ -22,6 +22,7 @@ import { Menus, loadSettings, type Settings } from './ui/menus';
 import { SEA_LEVEL } from './world/chunk';
 import { WorkerPool } from './world/pool';
 import { BIOME, BIOME_NAMES, WorldGen } from './world/worldgen';
+import { HOLLOW_ARRIVAL, HOLLOW_TOP } from './world/hollowgen';
 import { World } from './world/world';
 import { Actions } from './game/actions';
 import { Chat } from './game/chat';
@@ -31,6 +32,7 @@ import { Input } from './game/input';
 import { Signs } from './game/signs';
 import { Waypoints } from './game/waypoints';
 import { Raids } from './game/raids';
+import { glideStep, wornGlider } from './game/glide';
 import { WorldMap } from './ui/map';
 
 const TICK = 1 / 20;
@@ -39,6 +41,8 @@ const DEATH_MESSAGES: Record<string, string> = {
   poison: 'Poison got the better of you.',
   bee: 'You angered the bees.',
   raider: 'A raider brought you down.',
+  colossus: 'The Hollow Colossus crushed you.',
+  glide: 'You flew into something too fast.',
   drowning: 'You ran out of air.',
   lava: 'You tried to swim in lava.',
   fire: 'You burned to death.',
@@ -73,6 +77,10 @@ export const ACHIEVEMENTS: Record<string, [string, string]> = {
   armor: ['Suit up', 'Wear a piece of iron armor'],
   gate: ['Into the fire', 'Light an Ember Gate'],
   ember: ['Down below', 'Enter the Emberdeep'],
+  astral: ['Stargazer', 'Open an Astral Gate'],
+  hollow: ['Beyond the stars', 'Step into the Hollow'],
+  colossus: ['Giant slayer', 'Defeat the Hollow Colossus'],
+  glide: ['On the wind', 'Glide a hundred blocks'],
   trade: ['Fair deal', 'Trade with a villager'],
   tame: ['Best friends', 'Tame a fox or a mossback'],
   brew: ['Local brewery', 'Brew a potion'],
@@ -80,7 +88,7 @@ export const ACHIEVEMENTS: Record<string, [string, string]> = {
 };
 
 type Mode = 'title' | 'loading' | 'playing';
-export type Dimension = 'overworld' | 'ember';
+export type Dimension = 'overworld' | 'ember' | 'hollow';
 
 interface DimState { blockEntities?: unknown; entities?: unknown; spawned?: string[] }
 type SaveMeta = WorldMeta & {
@@ -89,6 +97,8 @@ type SaveMeta = WorldMeta & {
   weatherTimer?: number;
   dimension?: Dimension;
   dims?: Partial<Record<Dimension, DimState>>;
+  /** The Hollow Colossus has been beaten (it doesn't come back). */
+  colossusDefeated?: boolean;
   waypoints?: unknown;
 };
 
@@ -150,6 +160,8 @@ export class Game {
   readonly fadeEl: HTMLElement;
   private toastEl: HTMLElement;
   private saveEl: HTMLElement;
+  private bossEl: HTMLElement;
+  private bossKey = '';
   private saveFailed = false;
   private toastTimer = 0;
   private loadStart = 0;
@@ -223,6 +235,11 @@ export class Game {
     this.saveEl.textContent = 'Saving…';
     root.appendChild(this.saveEl);
 
+    this.bossEl = document.createElement('div');
+    this.bossEl.id = 'bossbar';
+    this.bossEl.setAttribute('role', 'status');
+    this.bossEl.innerHTML = '<span>The Hollow Colossus</span><div class="track"><i></i></div>';
+    root.appendChild(this.bossEl);
     this.achEl = document.createElement('div');
     this.achEl.id = 'achievement';
     root.appendChild(this.achEl);
@@ -261,7 +278,7 @@ export class Game {
     this.dimension = dim;
     this.pool = new WorkerPool(meta.seed, dim);
     this.renderer.dimension = dim;
-    const storeId = dim === 'ember' ? meta.id + '~ember' : meta.id;
+    const storeId = dim === 'overworld' ? meta.id : meta.id + '~' + dim;
     const state = dimState(meta, dim);
     return (meta.id === '__title' ? Promise.resolve(new Set<string>()) : savedChunkKeys(storeId).catch(() => new Set<string>())).then((keys) => {
       const world = new World(storeId, meta.seed, this.pool!, keys);
@@ -274,6 +291,8 @@ export class Game {
       world.onEvent = (kind, x, y, z, id) => {
         const p = this.player.body.pos;
         const sp = spatial(p[0], p[1] + 1.6, p[2], this.player.yaw, x + 0.5, y + 0.5, z + 0.5);
+        // An anchor stone bursts when it's broken.
+        if (kind === 'break' && id === B.anchor_stone) this.entities?.explode(x + 0.5, y + 0.5, z + 0.5, 3);
         if (kind === 'fizz') sfx.fizz(sp);
         else if (kind === 'piston') sfx.piston(id === 1, sp);
         else if (kind === 'brewed') { sfx.brewed(sp); if (Math.hypot(x - p[0], z - p[2]) < 12) this.player.achieve('brew'); }
@@ -304,6 +323,7 @@ export class Game {
       world.collectItems = (x, y, z, take) => ents.collectInto(x, y, z, take);
       ents.onMobKilled = (mob, byPlayer) => { if (byPlayer && mob.spec.hostile) this.player.achieve('hunter'); };
       ents.onBred = () => this.player.achieve('rancher');
+      ents.onBossDefeated = (mob) => this.colossusDefeated(mob);
       ents.onProjectileHit = (proj, mob) => {
         const pp = this.player.body.pos;
         if (proj.kind === 'arrow' && Math.hypot(mob.body.pos[0] - pp[0], mob.body.pos[2] - pp[2]) >= 20) this.player.achieve('archer');
@@ -383,29 +403,38 @@ export class Game {
     this.prevPos = [...p.body.pos];
   }
 
-  /** Step through an Ember Gate into the other dimension. */
-  async travel(to: Dimension): Promise<void> {
+  /**
+   * Step through a gate into another dimension. Ember Gates link matching spots (distances there are 1/8);
+   * the Astral Gate always opens on the Hollow's rim, and the way home from the Hollow (or dying
+   * anywhere but the overworld) lands you at your spawn point.
+   */
+  async travel(to: Dimension, opts: { toSpawn?: boolean } = {}): Promise<void> {
     if (!this.meta || !this.world) return;
     const p = this.player;
+    const from = this.world.dimension;
     await this.save();
+    const home = to === 'overworld' && (from === 'hollow' || opts.toSpawn);
     const scale = to === 'ember' ? 1 / 8 : 8;
     const tx = Math.floor(p.body.pos[0] * scale), tz = Math.floor(p.body.pos[2] * scale);
     const weather = this.world.weather, weatherTimer = this.world.weatherTimer;
     this.mode = 'loading';
     this.containers.close();
     document.exitPointerLock?.();
-    this.menus.setLoading(to === 'ember' ? 'Descending into the Emberdeep…' : 'Returning to the surface…');
+    this.menus.setLoading(to === 'ember' ? 'Descending into the Emberdeep…' : to === 'hollow' ? 'Stepping through the Astral Gate…' : home ? 'Returning home…' : 'Returning to the surface…');
     this.menus.show('loading');
     this.loadStart = performance.now();
     await this.startWorld(this.meta, to);
     this.world!.weather = weather; this.world!.weatherTimer = weatherTimer;
     this.entities!.player = p;
-    p.body.pos = [tx + 0.5, to === 'ember' ? 64 : 90, tz + 0.5];
+    if (to === 'hollow') p.body.pos = [...HOLLOW_ARRIVAL];
+    else if (home) { p.body.pos = [...p.spawn]; p.arriveAtSpawn = true; }
+    else { p.body.pos = [tx + 0.5, to === 'ember' ? 64 : 90, tz + 0.5]; p.portalArrival = true; }
     p.body.vel = [0, 0, 0];
-    p.portalArrival = true;
+    p.body.fallDistance = 0;
     p.portalCooldown = 200;
     this.prevPos = [...p.body.pos];
     if (to === 'ember') p.achieve('ember');
+    if (to === 'hollow') p.achieve('hollow');
   }
 
   /** Put the player at a matching gate, building one if none is near. */
@@ -473,6 +502,13 @@ export class Game {
     if (p.portalArrival && this.world) {
       p.portalArrival = false;
       this.arriveThroughPortal();
+      this.prevPos = [...p.body.pos];
+    }
+    if (p.arriveAtSpawn && this.world) {
+      // Home from another dimension: stand on the spawn point (or on top of whatever's there now).
+      p.arriveAtSpawn = false;
+      const [x, y, z] = p.body.pos.map(Math.floor);
+      if (SOLID[this.world.getBlock(x, y, z)] || SOLID[this.world.getBlock(x, y + 1, z)]) p.body.pos[1] = this.world.surfaceY(x, z);
       this.prevPos = [...p.body.pos];
     }
     if (p.needsSurface && this.world) {
@@ -612,6 +648,8 @@ export class Game {
     const p = this.player;
     p.alive = true;
     p.health = 20; p.food = 20; p.saturation = 5; p.air = 300; p.burning = 0; p.exhaustion = 0;
+    // Spawn points are in the overworld.
+    if (this.world && this.world.dimension !== 'overworld') { void this.travel('overworld', { toSpawn: true }); return; }
     p.body.pos = [...p.spawn];
     // Bed gone? fall back to the world spawn surface.
     const w = this.world!;
@@ -622,6 +660,43 @@ export class Game {
     this.prevPos = [...p.body.pos];
     this.menus.show(null);
     this.input.lockPointer();
+  }
+
+  // ---------- The Hollow Colossus ----------
+  /** Wake the Colossus when you're in the Hollow and it hasn't been beaten. */
+  private tickHollow(): void {
+    const w = this.world!, ents = this.entities!;
+    if (w.dimension !== 'hollow' || w.tickCount % 100 !== 0 || (this.meta as SaveMeta).colossusDefeated) return;
+    // Count a boss that's still in its death throes, too (mobs() leaves those out).
+    if (!w.isLoaded(0, 0) || ents.list.some((e) => e instanceof Mob && e.spec.boss && !e.dead)) return;
+    const c = ents.spawnMob('colossus', 0.5, HOLLOW_TOP + 30, 0.5);
+    c.orbit = Math.atan2(this.player.body.pos[2], this.player.body.pos[0]) + Math.PI;
+    this.chat.say('Something vast stirs above the island…');
+  }
+
+  private colossusDefeated(mob: Mob): void {
+    const w = this.world!, ents = this.entities!, p = this.player;
+    (this.meta as SaveMeta).colossusDefeated = true;
+    // The way home opens around the pillar at the island's heart.
+    for (let dz = -1; dz <= 1; dz++) for (let dx = -1; dx <= 1; dx++) if (dx || dz) w.setBlock(dx, HOLLOW_TOP + 1, dz, B.astral_portal);
+    ents.dropItem(0.5, HOLLOW_TOP + 3, 3.5, { id: I.glider, count: 1 }, 20, [0, 0.2, 0]);
+    ents.dropXp(mob.body.pos[0], mob.body.pos[1], mob.body.pos[2], 300);
+    p.achieve('colossus');
+    sfx.fanfare();
+    this.chat.say('The Colossus falls. A way home opens at the heart of the island, and something it guarded is left on the dais.');
+    void this.save();
+  }
+
+  private updateBossBar(): void {
+    const boss = this.mode === 'playing' && !this.hudHidden && this.world?.dimension === 'hollow' ? this.entities?.mobs().find((m) => m.spec.boss && m.deathTime === 0) : undefined;
+    const near = boss && Math.hypot(boss.body.pos[0] - this.player.body.pos[0], boss.body.pos[2] - this.player.body.pos[2]) < 160;
+    const key = near ? `${Math.round((boss.health / boss.spec.health) * 200)}|${!!boss.healFrom}` : '';
+    if (key === this.bossKey) return;
+    this.bossKey = key;
+    this.bossEl.classList.toggle('show', !!near);
+    if (!near) return;
+    (this.bossEl.querySelector('i') as HTMLElement).style.width = `${(boss.health / boss.spec.health) * 100}%`;
+    this.bossEl.classList.toggle('mending', !!boss.healFrom);
   }
 
   // ---------- Riding ----------
@@ -857,6 +932,7 @@ export class Game {
     if (this.shotPending) this.saveScreenshot();
     this.hud.update(this.player, dt);
     this.hud.updateInfo(this, dt);
+    this.updateBossBar();
     this.map.frame(dt);
     if (this.containers.open && w.tickCount % 2 === 0) this.containers.render();
     if (this.toastTimer > 0) { this.toastTimer -= dt; this.toastEl.style.opacity = this.toastTimer > 0 ? '1' : '0'; }
@@ -968,7 +1044,23 @@ export class Game {
       if (mv.sneak && !this.wasSneaking) this.dismount();
     }
     this.wasSneaking = mv.sneak;
-    if (p.alive && !this.riding) {
+    // Gliding: jump while falling with a glider on; landing, water or flying folds it away.
+    if (!p.gliding && jump && !this.wasJump && p.alive && !this.riding && !p.flying && !p.body.onGround && !p.body.inWater && p.body.vel[1] < 0 && wornGlider(p)) {
+      p.gliding = true; this.glideStart = [p.body.pos[0], p.body.pos[2]]; this.glideTicks = 0;
+    }
+    if (p.gliding && (!p.alive || this.riding || p.flying || p.body.onGround || p.body.inWater || !wornGlider(p))) p.gliding = false;
+    this.wasJump = jump;
+    if (p.gliding) {
+      const crash = glideStep(w, p);
+      if (crash > 0) p.damage(crash, 'glide');
+      if (++this.glideTicks % 20 === 0 && !p.creative) {
+        const g = wornGlider(p);
+        if (g) g.damage = (g.damage ?? 0) + 1;
+        if (!wornGlider(p)) this.toast('Your glider is worn through. Mend it with leather at a crafting table.', 4);
+      }
+      if (Math.hypot(p.body.pos[0] - this.glideStart[0], p.body.pos[2] - this.glideStart[1]) >= 100) p.achieve('glide');
+      if (p.body.onGround || p.body.inWater) p.gliding = false;
+    } else if (p.alive && !this.riding) {
       const speed = p.speed * (1 + 0.2 * p.effectLevel('swiftness')) * Math.max(0.2, 1 - 0.15 * p.effectLevel('slowness'));
       stepBody(w, p.body, { forward, strafe, jump, sneak: p.sneaking, sprint: p.sprinting, yaw: p.yaw, jumpBoost: p.effectLevel('leaping'), slowFall: p.effects.has('slow_falling') }, p.flying, speed);
     }
@@ -1008,6 +1100,8 @@ export class Game {
       if (p.portalTime % 20 === 1) sfx.fizz({ gain: 0.3, pan: 0 });
       if (p.portalTime >= (p.creative ? 1 : 80)) { p.portalTime = 0; this.travel(w.dimension === 'ember' ? 'overworld' : 'ember'); return; }
     } else p.portalTime = 0;
+    // The Astral Gate takes you straight through.
+    if (p.body.inAstral && p.alive && p.portalCooldown === 0) { this.travel(w.dimension === 'hollow' ? 'overworld' : 'hollow'); return; }
     // Thunder and lightning.
     if (w.weather === 'thunder' && --this.thunderTimer <= 0) {
       this.thunderTimer = 100 + Math.floor(Math.random() * 400);
@@ -1021,12 +1115,16 @@ export class Game {
     w.tick(p.body.pos[0], p.body.pos[1], p.body.pos[2], true);
     ents.tick();
     this.raids.tick();
+    this.tickHollow();
     if (this.riding) this.seatPlayer();
     // Autosave every 30 seconds.
     if (++this.autosave >= 600) { this.autosave = 0; this.save(); }
   }
 
   private wasInWater = false;
+  private wasJump = false;
+  private glideStart: [number, number] = [0, 0];
+  private glideTicks = 0;
 
   private soundBelow() {
     const p = this.player.body.pos;

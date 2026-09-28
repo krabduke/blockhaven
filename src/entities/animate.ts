@@ -306,6 +306,26 @@ const ANIMATORS: Record<string, Animator> = {
     }
     head(c, c.mob.aiming ? 0.05 : 0);
   },
+  colossus(c) {
+    // No legs: it hovers, breathing slowly, with its rubble trailing behind like a tail.
+    c.parts.body.position.y = (Math.sin(c.t * 1.1 + c.a.seed) * 3) / 16;
+    breathe(c, 'torso', 0.012, 0.9);
+    const sway = Math.sin(c.t * 0.9) * 0.08;
+    rot(c.parts.rubble1, 0.15 + sway, 0, sway * 0.5);
+    rot(c.parts.rubble2, 0.2 + Math.sin(c.t * 0.9 - 0.6) * 0.12, 0, 0);
+    rot(c.parts.rubble3, 0.25 + Math.sin(c.t * 0.9 - 1.2) * 0.16, 0, 0);
+    // Fists float free, bobbing out of step with the arms; raised high to slam.
+    const slam = c.mob.attackCooldown > 0 ? c.mob.attackCooldown / 30 : 0;
+    const reach = c.mob.aiming ? -0.9 : -0.2;
+    rot(c.parts.armL, reach - slam * 1.8 + Math.sin(c.t * 1.3) * 0.08, 0, 0.12);
+    rot(c.parts.armR, reach - slam * 1.8 + Math.sin(c.t * 1.3 + 1.5) * 0.08, 0, -0.12);
+    move(c.parts.fistL, 0, -1.5 + Math.sin(c.t * 2.1) * 1.2, 0);
+    move(c.parts.fistR, 0, -1.5 + Math.sin(c.t * 2.1 + 2) * 1.2, 0);
+    rot(c.parts.halo, 0, 0, c.t * 0.35);
+    head(c, c.mob.aiming ? 0.15 : 0);
+    // Dying: it tips back and the halo spins faster.
+    if (c.mob.deathTime > 0) { rot(c.parts.torso, -Math.min(0.6, c.mob.deathTime / 90), 0, 0); rot(c.parts.halo, 0, 0, c.t * 3); }
+  },
   witch(c) {
     bipedLegs(c, 0.5); bob(c, 0.7, 0.04); breathe(c);
     let [al, ar] = armsSwing(c, 0.35);

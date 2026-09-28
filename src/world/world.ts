@@ -28,20 +28,48 @@ const HVEC: [number, number, number][] = [[0, 0, 1], [-1, 0, 0], [0, 0, -1], [1,
 
 const HORIZ: [number, number][] = [[1, 0], [-1, 0], [0, 1], [0, -1]];
 
-/** Dungeon chest loot. */
-function fillLoot(inv: Inventory, rand: () => number): void {
-  const table: [number, number, number, number][] = [
-    // id, min, max, weight
-    [258, 1, 4, 10], [273, 1, 3, 15], [277, 2, 4, 10], [270, 2, 6, 15], [261, 1, 4, 12],
-    [259, 1, 3, 5], [260, 1, 2, 2], [275, 1, 1, 8], [284, 2, 8, 10], [286, 2, 6, 10],
-    [289, 1, 2, 5], [262, 1, 3, 8], [294, 1, 4, 8], [293, 1, 3, 6], [352, 1, 1, 1], [362, 1, 1, 1],
-  ];
-  const total = table.reduce((a, t) => a + t[3], 0);
-  const rolls = 4 + Math.floor(rand() * 5);
+type LootRow = [id: number, min: number, max: number, weight: number];
+/** Chest loot by table (chest meta bits 5-7): dungeon, sun temple, shipwreck, mine, sanctum, Hollow ruin. */
+const LOOT: { rows: LootRow[]; rolls: [number, number] }[] = [
+  { rows: [
+    [I.iron_ingot, 1, 4, 10], [I.bread, 1, 3, 15], [I.seeds, 2, 4, 10], [I.bone, 2, 6, 15], [I.string, 1, 4, 12],
+    [I.gold_ingot, 1, 3, 5], [I.diamond, 1, 2, 2], [I.bucket, 1, 1, 8], [I.arrow, 2, 8, 10], [I.bone_meal, 2, 6, 10],
+    [I.book, 1, 2, 5], [I.apple, 1, 3, 8], [I.gunpowder, 1, 4, 8], [I.carrot, 1, 3, 6], [I.golden_apple, 1, 1, 1], [I.saddle, 1, 1, 1],
+  ], rolls: [4, 8] },
+  { rows: [
+    [I.gold_ingot, 2, 7, 15], [I.iron_ingot, 1, 5, 15], [I.bone, 4, 6, 25], [I.rotten_flesh, 3, 7, 16], [I.amber, 1, 3, 12],
+    [I.diamond, 1, 3, 5], [I.golden_apple, 1, 1, 4], [I.saddle, 1, 1, 6], [I.book, 1, 2, 8], [I.gunpowder, 1, 5, 10],
+    [B.sand, 1, 8, 10], [I.crystal_shard, 1, 3, 6],
+  ], rolls: [3, 7] },
+  { rows: [
+    [I.raw_fish, 2, 6, 15], [I.salmon, 1, 4, 12], [I.paper, 1, 8, 12], [I.coal, 2, 8, 10], [I.wheat_item, 4, 12, 10],
+    [I.potato, 2, 6, 10], [I.carrot, 2, 6, 8], [I.iron_ingot, 1, 5, 12], [I.gold_ingot, 1, 5, 8], [I.amber, 1, 5, 10],
+    [I.diamond, 1, 1, 2], [I.glimmerfish, 1, 2, 4], [I.leather, 1, 4, 6], [I.fishing_rod, 1, 1, 3],
+  ], rolls: [4, 8] },
+  { rows: [
+    [I.bread, 1, 3, 15], [I.coal, 3, 8, 12], [B.rail, 4, 8, 12], [B.torch, 1, 16, 10], [I.iron_ingot, 1, 5, 10],
+    [I.gold_ingot, 1, 3, 5], [I.spark_dust, 4, 9, 6], [I.diamond, 1, 2, 3], [I.golden_apple, 1, 1, 2], [B.powered_rail, 1, 4, 4],
+    [I.string, 1, 4, 6], [I.crystal_shard, 1, 2, 4], [I.saddle, 1, 1, 2], [I.baked_potato, 2, 5, 8],
+  ], rolls: [3, 7] },
+  { rows: [
+    [I.starseeker, 1, 2, 10], [I.iron_ingot, 1, 5, 12], [I.gold_ingot, 1, 3, 8], [I.diamond, 1, 3, 4], [I.bread, 1, 3, 12],
+    [I.apple, 1, 3, 12], [I.book, 1, 3, 8], [I.iron_chestplate, 1, 1, 3], [I.iron_pickaxe, 1, 1, 3], [I.golden_apple, 1, 1, 2],
+    [I.ember_core, 1, 2, 4], [I.crystal_shard, 1, 3, 6],
+  ], rolls: [3, 7] },
+  { rows: [
+    [I.diamond, 1, 3, 8], [I.gold_ingot, 2, 6, 12], [I.iron_ingot, 3, 8, 12], [I.starseeker, 1, 3, 8], [I.golden_apple, 1, 2, 5],
+    [I.diamond_pickaxe, 1, 1, 3], [I.diamond_chestplate, 1, 1, 2], [I.crystal_shard, 2, 5, 10], [I.book, 1, 4, 8], [B.starbloom, 1, 4, 8],
+  ], rolls: [4, 8] },
+];
+
+function fillLoot(inv: Inventory, rand: () => number, table = 0): void {
+  const { rows, rolls: [lo0, hi0] } = LOOT[table] ?? LOOT[0];
+  const total = rows.reduce((a, t) => a + t[3], 0);
+  const rolls = lo0 + Math.floor(rand() * (hi0 - lo0 + 1));
   for (let r = 0; r < rolls; r++) {
     let pick = rand() * total, k = 0;
-    while (pick > table[k][3]) { pick -= table[k][3]; k++; }
-    const [id, lo, hi] = table[k];
+    while (pick > rows[k][3]) { pick -= rows[k][3]; k++; }
+    const [id, lo, hi] = rows[k];
     // Scatter stacks through the chest; if the slot is taken, use the next free one (none are lost).
     let slot = Math.floor(rand() * 27);
     for (let t = 0; t < 27 && inv.slots[slot]; t++) slot = (slot + 1) % 27;
@@ -77,7 +105,7 @@ export class World implements ChunkSource {
   onIgnite: (x: number, y: number, z: number) => void = () => {};
   /** Chunks whose generated creatures have already been spawned. */
   spawnedChunks = new Set<string>();
-  dimension: 'overworld' | 'ember' = 'overworld';
+  dimension: 'overworld' | 'ember' | 'hollow' = 'overworld';
 
   private genPending = new Set<string>();
   private meshSeq = new Map<string, number>();
@@ -212,6 +240,7 @@ export class World implements ChunkSource {
       case 'cross':
         if (id === B.wheat || id === B.carrots || id === B.potatoes || id === B.redroot) return below === B.farmland;
         if (id === B.dead_bush) return below === B.sand || below === B.dirt || below === B.grass;
+        if (id === B.starbloom) return below === B.hollowstone || below === B.grass || below === B.dirt;
         if (id === B.sugar_cane) {
           if (below === B.sugar_cane) return true;
           if (below !== B.grass && below !== B.dirt && below !== B.sand) return false;
@@ -952,6 +981,23 @@ export class World implements ChunkSource {
     this.schedule(x, y, z, 20 + Math.floor(this.rand() * 10));
   }
 
+  // ---------- The Astral Gate ----------
+  /** If the frame at (x, y, z) completes a ring of twelve filled frames, open the gate inside it. */
+  tryOpenAstralGate(x: number, y: number, z: number): boolean {
+    for (let cz = z - 2; cz <= z + 2; cz++) for (let cx = x - 2; cx <= x + 2; cx++) {
+      let ok = true;
+      for (let dz = -2; dz <= 2 && ok; dz++) for (let dx = -2; dx <= 2 && ok; dx++) {
+        const ring = (Math.abs(dx) === 2 && Math.abs(dz) <= 1) || (Math.abs(dz) === 2 && Math.abs(dx) <= 1);
+        if (!ring) continue;
+        if (this.getBlock(cx + dx, y, cz + dz) !== B.astral_frame || !(this.getMeta(cx + dx, y, cz + dz) & 4)) ok = false;
+      }
+      if (!ok) continue;
+      for (let dz = -1; dz <= 1; dz++) for (let dx = -1; dx <= 1; dx++) this.setBlock(cx + dx, y, cz + dz, B.astral_portal);
+      return true;
+    }
+    return false;
+  }
+
   // ---------- Block entities ----------
   getBlockEntity(x: number, y: number, z: number): BlockEntity | undefined {
     const key = `${x},${y},${z}`;
@@ -962,7 +1008,7 @@ export class World implements ChunkSource {
         be = { kind: 'chest', inv: new Inventory(27) };
         const m = this.getMeta(x, y, z);
         if (m & 16) {
-          fillLoot(be.inv, this.rand);
+          fillLoot(be.inv, this.rand, (m >> 5) & 7);
           this.setMeta(x, y, z, m & 15);
         }
       }

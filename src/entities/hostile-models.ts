@@ -506,7 +506,79 @@ function raider(): MobModel {
   ]);
 }
 
+// ---------------------------------------------------------------- Hollow Colossus
+// A hovering giant of pale Hollow stone held together by starlight: slab shoulders etched with
+// gold constellations, a violet core burning in its chest, a crowned head with one long eye, great
+// fists that float free of its forearms, a trail of drifting rubble for legs, and a slowly turning
+// halo of shards behind its head.
+function colossus(): MobModel {
+  const stoneP: Paint = (g, w, h, f, rand) => {
+    tone('#b8aecb', { top: '#d0c8de', bottom: '#8a7ea2', noise: 0.08 })(g, w, h, f, rand);
+    if (f === 2 || f === 3) return;
+    // Seams between slabs, and constellations picked out in gold.
+    for (let y = 3; y < h; y += 5) px(g, '#7a6e92', 0, y, w, 1);
+    const n = Math.max(2, Math.floor((w * h) / 40));
+    let lx = -1, ly = -1;
+    for (let i = 0; i < n; i++) {
+      const x = 1 + Math.floor(rand() * (w - 2)), y = 1 + Math.floor(rand() * (h - 2));
+      px(g, '#f0d070', x, y);
+      if (lx >= 0 && Math.abs(lx - x) + Math.abs(ly - y) < 8) { const sx = Math.sign(x - lx), sy = Math.sign(y - ly); for (let k = 1; k < Math.max(Math.abs(x - lx), Math.abs(y - ly)); k++) px(g, '#b89a50', lx + (Math.abs(x - lx) >= k ? sx * k : sx * Math.abs(x - lx)), ly + (Math.abs(y - ly) >= k ? sy * k : sy * Math.abs(y - ly))); }
+      lx = x; ly = y;
+    }
+  };
+  const dark = tone('#5a4e72', { top: '#6a5e82', bottom: '#40365a' });
+  const chest: Paint = (g, w, h, f, rand) => {
+    stoneP(g, w, h, f, rand);
+    if (f === 5) {
+      // The core, seen through a diamond-shaped opening.
+      const cx = w / 2, cy = h * 0.42;
+      for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+        const d = Math.abs(x + 0.5 - cx) + Math.abs(y + 0.5 - cy);
+        if (d < 4) px(g, d < 2 ? '#fff0ff' : '#d88aff', x, y);
+        else if (d < 5) px(g, '#3a2a5a', x, y);
+      }
+    }
+  };
+  const face = withFace(stoneP, (g, w, h) => {
+    px(g, '#2a2040', 1, 3, w - 2, 3);               // brow shadow
+    px(g, '#8af0ff', 2, 4, w - 4, 1);               // the long eye
+    px(g, '#e8ffff', Math.floor(w / 2) - 1, 4, 2, 1);
+    px(g, '#7a6e92', 3, h - 3, w - 6, 1);           // a grim seam of a mouth
+  });
+  const glow = tone('#d88aff', { top: '#f4d8ff', bottom: '#a05ad8', noise: 0.03 });
+  const gold = tone('#e0b850', { top: '#f0d070', bottom: '#a8842e' });
+  const shard = tone('#c8f0ff', { top: '#f0ffff', bottom: '#7ac8e8', noise: 0.03 });
+  return build('colossus', [
+    {
+      name: 'torso', size: [20, 22, 13], pivot: [0, 40, 0], offset: [0, 11, 0], paint: chest,
+      extra: [box([22, 4, 15], [0, 2, 0], dark), box([6, 6, 1.5], [0, 12, -7], glow)],
+    },
+    { name: 'rubble1', size: [13, 7, 10], pivot: [0, 40, 0], offset: [0, -5, 0.5], paint: stoneP, parent: 'torso' },
+    { name: 'rubble2', size: [9, 6, 7], pivot: [0, 32, 1], offset: [0, -4, 0], paint: stoneP, parent: 'rubble1' },
+    { name: 'rubble3', size: [5, 5, 5], pivot: [0, 24, 1.5], offset: [0, -3.5, 0], paint: dark, parent: 'rubble2' },
+    {
+      name: 'head', size: [12, 11, 11], pivot: [0, 62, -1], offset: [0, 5.5, -0.5], paint: face, parent: 'torso',
+      extra: [
+        box([13, 1.6, 12], [0, 10.6, -0.5], gold),
+        ...[-5, -2.5, 0, 2.5, 5].map((x, i): Detail => box([1.6, i === 2 ? 6 : 4, 1.6], [x, 13 + (i === 2 ? 1 : 0), -5.5], gold)),
+      ],
+    },
+    {
+      // The halo: a square of shards turning slowly behind the head.
+      name: 'halo', size: [1, 1, 1], pivot: [0, 68, 8], offset: [0, 0, 0], paint: glow, parent: 'torso',
+      extra: [box([22, 1.4, 1], [0, 10, 0], shard), box([22, 1.4, 1], [0, -10, 0], shard), box([1.4, 22, 1], [10, 0, 0], shard), box([1.4, 22, 1], [-10, 0, 0], shard),
+        box([3, 3, 1.2], [10, 10, 0], glow, [0, 0, 0.78]), box([3, 3, 1.2], [-10, 10, 0], glow, [0, 0, 0.78]), box([3, 3, 1.2], [10, -10, 0], glow, [0, 0, 0.78]), box([3, 3, 1.2], [-10, -10, 0], glow, [0, 0, 0.78])],
+    },
+    { name: 'shoulderL', size: [11, 7, 14], pivot: [-15, 58, 0], offset: [0, 1, 0], paint: stoneP, parent: 'torso', rot: [0, 0, 0.18], extra: [box([3, 3, 3], [-3, 5, 0], shard, [0.5, 0.5, 0])] },
+    { name: 'shoulderR', size: [11, 7, 14], pivot: [15, 58, 0], offset: [0, 1, 0], paint: stoneP, parent: 'torso', rot: [0, 0, -0.18], extra: [box([3, 3, 3], [3, 5, 0], shard, [0.5, 0.5, 0])] },
+    { name: 'armL', size: [7, 15, 7], pivot: [-15, 56, 0], offset: [0, -8, 0], paint: stoneP, parent: 'torso' },
+    { name: 'armR', size: [7, 15, 7], pivot: [15, 56, 0], offset: [0, -8, 0], paint: stoneP, parent: 'torso' },
+    { name: 'fistL', size: [11, 11, 11], pivot: [-15, 36, 0], offset: [0, -6, 0], paint: stoneP, parent: 'armL', extra: [box([12, 2, 12], [0, -0.5, 0], gold)] },
+    { name: 'fistR', size: [11, 11, 11], pivot: [15, 36, 0], offset: [0, -6, 0], paint: stoneP, parent: 'armR', extra: [box([12, 2, 12], [0, -0.5, 0], gold)] },
+  ], 3);
+}
+
 export const HOSTILE_MODELS: Record<string, () => MobModel> = {
-  zombie, skeleton, witch, raider, blastcap, mirewalker, brambler, shellcrawler, dunescuttler, frostling, cinderbrute, emberwisp,
+  zombie, skeleton, witch, raider, colossus, blastcap, mirewalker, brambler, shellcrawler, dunescuttler, frostling, cinderbrute, emberwisp,
 };
 

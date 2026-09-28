@@ -130,6 +130,10 @@ item(510, 'honeycomb', 'Honeycomb');
 item(511, 'salmon', 'Raw Salmon', { food: { hunger: 2, saturation: 0.4 } });
 item(512, 'cooked_salmon', 'Cooked Salmon', { food: { hunger: 6, saturation: 9.6 } });
 item(513, 'glimmerfish', 'Glimmerfish', { food: { hunger: 1, saturation: 0.2 }, effect: 'night_vision' });
+// The Starseeker: set twelve in an Astral Frame ring to open the gate to the Hollow; thrown, it flies toward the nearest sanctum.
+item(514, 'starseeker', 'Starseeker', { maxStack: 16 });
+// Won from the Hollow Colossus. Worn in the chest slot; jump while falling to glide.
+item(515, 'glider', 'Glider', { maxStack: 1, armor: { slot: 1, points: 0, durability: 432 } });
 item(501, 'boat', 'Boat', { maxStack: 1 });
 item(502, 'minecart', 'Minecart', { maxStack: 1 });
 item(503, 'saddle', 'Saddle', { maxStack: 1 });

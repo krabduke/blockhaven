@@ -5,14 +5,15 @@ import { B } from '../blocks';
 import { computeChunkLight } from './light';
 import { meshSubchunk, type LayerMesh } from './mesher';
 import { EmberGen } from './embergen';
+import { HollowGen } from './hollowgen';
 import { WorldGen } from './worldgen';
 
 export type WorkerRequest =
-  | { type: 'init'; seed: number; dimension: 'overworld' | 'ember' }
+  | { type: 'init'; seed: number; dimension: 'overworld' | 'ember' | 'hollow' }
   | { type: 'gen'; id: number; cx: number; cz: number; saved?: { blocks: Uint8Array; meta: Uint8Array } }
   | { type: 'mesh'; id: number; blocks: Uint8Array; meta: Uint8Array; light: Uint8Array; biomes: Uint8Array; ox: number; oy: number; oz: number };
 
-let gen: WorldGen | EmberGen | null = null;
+let gen: WorldGen | EmberGen | HollowGen | null = null;
 const ctx = self as unknown as DedicatedWorkerGlobalScope;
 
 function buffers(m: LayerMesh | null): ArrayBuffer[] {
@@ -23,7 +24,7 @@ function buffers(m: LayerMesh | null): ArrayBuffer[] {
 ctx.onmessage = (e: MessageEvent<WorkerRequest>) => {
   const msg = e.data;
   if (msg.type === 'init') {
-    gen = msg.dimension === 'ember' ? new EmberGen(msg.seed) : new WorldGen(msg.seed);
+    gen = msg.dimension === 'ember' ? new EmberGen(msg.seed) : msg.dimension === 'hollow' ? new HollowGen(msg.seed) : new WorldGen(msg.seed);
     return;
   }
   if (msg.type === 'gen') {

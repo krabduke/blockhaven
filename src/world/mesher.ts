@@ -584,6 +584,21 @@ export function meshSubchunk(input: MeshInput): SubMesh {
             }
             break;
           }
+          case 'frame': {
+            // An Astral Frame: a squat stone with a socket on top, glowing once a Starseeker is set in it.
+            const full = (m & 4) !== 0;
+            for (let f = 0; f < 6; f++) {
+              const fd = FACES[f];
+              if (f === 3 && OPAQUE[blocks[pidx(x, y - 1, z)]]) continue;
+              const nl = f === 2 ? light[i] : light[pidx(x + fd.n[0], y + fd.n[1], z + fd.n[2])] || light[i];
+              box(bld, x, y, z, 0, 0, 0, 1, 13 / 16, 1, f, f === 2 && full ? tileIndex('astral_frame_top_full') : TILE_LAYERS[id * 6 + f], WHITE, nl, 0);
+            }
+            if (full) emitBox(bld, blocks, light, x, y, z, [5 / 16, 13 / 16, 5 / 16], [11 / 16, 1, 11 / 16], tileIndex('astral_eye'), i);
+            break;
+          }
+          case 'astralpool':
+            emitBox(bld, blocks, light, x, y, z, [0, 0, 0], [1, 12 / 16, 1], TILE_LAYERS[id * 6], i);
+            break;
           case 'table':
             for (let f = 0; f < 6; f++) {
               const fd = FACES[f];

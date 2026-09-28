@@ -28,6 +28,7 @@ add('bow_pull');
 add('crossbow_loaded');
 for (const t of ['piston_inner', 'watcher_back_on', 'repeater_on', 'repeater_torch', 'repeater_torch_on']) add(t);
 add('door_top');
+add('astral_frame_top_full'); add('astral_eye');
 add('bed_foot');
 add('water_flow');
 for (let i = 0; i < 10; i++) add('destroy_' + i);
@@ -37,7 +38,7 @@ for (const it of ITEMS) if (it && it.id >= 256 && it.icon) add(it.icon);
 export const VARIANT_COUNTS: Record<string, number> = {
   grass_top: 4, grass_side: 3, dirt: 3, stone: 4, sand: 3, gravel: 2, cobblestone: 3, snow: 2, leaves: 3,
   spruce_leaves: 2, log_side: 2, granite: 2, limestone: 2, deepstone: 3, red_sand: 2, coarse_dirt: 2,
-  loam_top: 2, mud: 2, moss_block: 2, packed_ice: 2, tall_grass: 3, fern: 2, dripstone: 2, basalt_side: 2,
+  loam_top: 2, mud: 2, moss_block: 2, packed_ice: 2, tall_grass: 3, fern: 2, dripstone: 2, basalt_side: 2, hollowstone: 3,
 };
 for (const [base, n] of Object.entries(VARIANT_COUNTS)) {
   if (!index.has(base)) continue;
@@ -55,7 +56,7 @@ for (const [base, n] of Object.entries(VARIANT_COUNTS)) {
 }
 
 /** Natural tops whose texture can be rotated per block. */
-export const ROTATABLE = new Set(['grass_top', 'dirt', 'sand', 'stone', 'gravel', 'snow', 'red_sand', 'moss_block', 'coarse_dirt', 'loam_top', 'mud', 'packed_ice', 'deepstone', 'granite', 'limestone', 'chalk', 'cobblestone']);
+export const ROTATABLE = new Set(['grass_top', 'dirt', 'sand', 'stone', 'gravel', 'snow', 'red_sand', 'moss_block', 'coarse_dirt', 'loam_top', 'mud', 'packed_ice', 'deepstone', 'granite', 'limestone', 'chalk', 'cobblestone', 'hollowstone']);
 
 export function tileIndex(name: string): number {
   const i = index.get(name);

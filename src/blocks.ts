@@ -2,7 +2,7 @@
 // lighting, mining and world generation all read from it.
 
 export type RenderShape = 'none' | 'cube' | 'cross' | 'liquid' | 'torch' | 'door' | 'bed' | 'cactus' | 'ladder' | 'slabBottom' | 'stairs' | 'fence' | 'gate' | 'table'
-  | 'pane' | 'trapdoor' | 'lantern' | 'wire' | 'button' | 'plate' | 'sign' | 'flat' | 'vine' | 'cake' | 'carpet' | 'portal' | 'fire' | 'layer'
+  | 'pane' | 'trapdoor' | 'lantern' | 'wire' | 'button' | 'plate' | 'sign' | 'flat' | 'vine' | 'cake' | 'carpet' | 'portal' | 'fire' | 'layer' | 'frame' | 'astralpool'
   | 'banner' | 'painting' | 'rail' | 'repeater' | 'piston' | 'piston_head' | 'hopper' | 'facing6';
 export type Layer = 'opaque' | 'cutout' | 'translucent';
 export type Tool = 'pickaxe' | 'axe' | 'shovel' | 'sword' | null;
@@ -328,8 +328,19 @@ def(182, 'redroot', 'Redroot', { ...plant, tiles: 'redroot_3', drop: 'none' });
 const hive = (full: string, base: string) => [base, base, base, base, base, full, full, full, full, full, full, full, full, full, full, full];
 def(183, 'bee_nest', 'Bee Nest', { hardness: 0.3, tool: 'axe', sound: 'wood', tiles: 'nest_side', metaTiles: hive('nest_honey', 'nest_side') });
 def(184, 'beehive', 'Beehive', { hardness: 0.6, tool: 'axe', sound: 'wood', tiles: 'hive_side', metaTiles: hive('hive_honey', 'hive_side') });
+// The Astral Gate in a sanctum: twelve frame stones around a 3x3 well. Meta bit 4 = a Starseeker is set in it.
+def(185, 'astral_frame', 'Astral Frame', { shape: 'frame', opaque: false, lightOpacity: 0, emit: 3, hardness: -1, drop: 'none', sound: 'stone', tiles: { top: 'astral_frame_top', side: 'astral_frame_side', bottom: 'hollow_bricks' } });
+def(186, 'astral_portal', 'Astral Gate', { shape: 'astralpool', layer: 'cutout', solid: false, opaque: false, lightOpacity: 0, emit: 15, hardness: -1, drop: 'none', sound: 'glass', flammable: false, tiles: 'astral_portal' });
+// The Hollow: pale islands adrift in a starry void.
+def(187, 'hollowstone', 'Hollowstone', { hardness: 3, tool: 'pickaxe', harvestTier: 0, tiles: 'hollowstone' });
+def(188, 'hollow_bricks', 'Hollow Bricks', { hardness: 3, tool: 'pickaxe', harvestTier: 0, tiles: 'hollow_bricks' });
+def(189, 'anchor_stone', 'Anchor Stone', { emit: 15, hardness: 1, drop: 'none', sound: 'glass', tiles: 'anchor_stone' });
+def(190, 'starbloom', 'Starbloom', { ...plant, emit: 7, tiles: 'starbloom' });
 def(160, 'brewing_stand', 'Brewing Stand', { shape: 'table', opaque: false, lightOpacity: 0, emit: 3, tiles: { top: 'brewing_top', side: 'brewing_side', bottom: 'cobblestone' }, hardness: 0.5, tool: 'pickaxe', harvestTier: 0, icon: 'brewing_item' });
 def(115, 'bell', 'Village Bell', { shape: 'lantern', layer: 'cutout', opaque: false, hardness: 5, tool: 'pickaxe', tiles: 'bell', icon: 'bell_item', sound: 'stone' });
+
+/** Spawner meta picks its creature (0 = chosen by position, as in dungeons). */
+export const SPAWNER_KINDS = ['', 'zombie', 'skeleton', 'shellcrawler', 'mirewalker', 'brambler', 'cinderbrute', 'emberwisp'];
 
 // Fill gaps so lookups never return undefined.
 for (let i = 0; i < 256; i++) if (!defs[i]) defs[i] = { ...defs[0], id: i, key: 'unknown_' + i };

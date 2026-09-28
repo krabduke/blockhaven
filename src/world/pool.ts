@@ -18,7 +18,7 @@ export class WorkerPool {
   /** Set when a worker fails to load or crashes; the world can't generate without them. */
   failed: string | null = null;
 
-  constructor(seed: number, dimension: 'overworld' | 'ember' = 'overworld', size = Math.max(1, Math.min(4, (navigator.hardwareConcurrency || 4) - 1))) {
+  constructor(seed: number, dimension: 'overworld' | 'ember' | 'hollow' = 'overworld', size = Math.max(1, Math.min(4, (navigator.hardwareConcurrency || 4) - 1))) {
     for (let i = 0; i < size; i++) {
       const w = new Worker(new URL('./worker.ts', import.meta.url), { type: 'module' });
       w.onmessage = (e) => {
