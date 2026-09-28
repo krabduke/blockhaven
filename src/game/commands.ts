@@ -141,12 +141,12 @@ export const COMMANDS: Command[] = [
     },
   },
   {
-    name: 'locate', usage: '/locate village|temple|shipwreck|mine|sanctum', help: 'Finds the nearest village or structure',
-    complete: (i) => (i === 0 ? ['village', 'temple', 'shipwreck', 'mine', 'sanctum'] : []),
+    name: 'locate', usage: '/locate village|temple|shipwreck|mine|sanctum|treasure', help: 'Finds the nearest village or structure',
+    complete: (i) => (i === 0 ? ['village', 'temple', 'shipwreck', 'mine', 'sanctum', 'treasure'] : []),
     run(g, a) {
       const w = g.world!, p = g.player;
       const what = a[0];
-      const kinds = ['temple', 'shipwreck', 'mine', 'sanctum'];
+      const kinds = ['temple', 'shipwreck', 'mine', 'sanctum', 'treasure'];
       if (what !== 'village' && !kinds.includes(what)) { g.chat.say('Usage: ' + this.usage); return; }
       if (w.dimension !== 'overworld') { g.chat.say('There are none in this dimension.'); return; }
       const gen = new WorldGen(w.seed);
@@ -154,8 +154,8 @@ export const COMMANDS: Command[] = [
       const found = what === 'village' ? nearestVillage(gen, px, pz) : nearestStructure(gen, what as StructureKind, px, pz);
       if (!found) { g.chat.say(`No ${what} found nearby.`); return; }
       const fx = 'cx' in found ? found.cx : found.x, fz = 'cz' in found ? found.cz : found.z;
-      const name = { village: 'village', temple: 'sun temple', shipwreck: 'shipwreck', mine: 'abandoned mine', sanctum: 'sanctum' }[what];
-      g.chat.say(`Nearest ${name} is at ${fx}, ${'y' in found && what !== 'temple' && what !== 'shipwreck' ? found.y + ', ' : ''}${fz} (${Math.round(Math.hypot(fx - px, fz - pz))} blocks away)`);
+      const name = { village: 'village', temple: 'sun temple', shipwreck: 'shipwreck', mine: 'abandoned mine', sanctum: 'sanctum', treasure: 'buried treasure' }[what];
+      g.chat.say(`Nearest ${name} is at ${fx}, ${'y' in found && what !== 'temple' && what !== 'shipwreck' && what !== 'treasure' ? found.y + ', ' : ''}${fz} (${Math.round(Math.hypot(fx - px, fz - pz))} blocks away)`);
     },
   },
   {

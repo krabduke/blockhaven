@@ -15,8 +15,8 @@ import { villageInRegion } from './villages';
 import type { WorldGen } from './worldgen';
 import { BIOME } from './worldgen';
 
-export type StructureKind = 'temple' | 'shipwreck' | 'mine' | 'sanctum';
-export const LOOT_TABLE: Record<StructureKind | 'dungeon', number> = { dungeon: 0, temple: 1, shipwreck: 2, mine: 3, sanctum: 4 };
+export type StructureKind = 'temple' | 'shipwreck' | 'mine' | 'sanctum' | 'treasure';
+export const LOOT_TABLE: Record<StructureKind | 'dungeon', number> = { dungeon: 0, temple: 1, shipwreck: 2, mine: 3, sanctum: 4, treasure: 6 };
 
 const REGION = 256;
 /** Each 3x3 block of regions holds exactly one sanctum. */
@@ -69,6 +69,18 @@ export function structuresInRegion(gen: WorldGen, rx: number, rz: number): Struc
     const mz = rz * REGION + 60 + Math.floor(rand() * (REGION - 120));
     const my = 18 + Math.floor(rand() * 14);
     if (gen.column(mx, mz).height > my + 14) out.push(mineLayout(mx, my, mz, seed ^ 0x9e37, rand));
+  }
+
+  // Buried treasure: a chest under a sandy beach, found with a treasure map.
+  if (rand() < 0.6) {
+    for (let t = 0; t < 12; t++) {
+      const tx = rx * REGION + 16 + Math.floor(rand() * (REGION - 32)), tz = rz * REGION + 16 + Math.floor(rand() * (REGION - 32));
+      const c = gen.column(tx, tz);
+      if (c.biome === BIOME.beach && c.height >= SEA_LEVEL && c.height <= SEA_LEVEL + 3) {
+        out.push({ kind: 'treasure', x: tx, y: c.height - 2, z: tz, rot: 0, seed, bounds: { x0: tx, z0: tz, x1: tx, z1: tz } });
+        break;
+      }
+    }
   }
 
   // The sanctum for this sector, if it falls in this region.
@@ -171,6 +183,7 @@ export function buildStructure(gen: WorldGen, s: Structure, blocks: Uint8Array, 
     case 'shipwreck': shipwreck(gen, s, set, h, chest); break;
     case 'mine': mine(s, set, get, h, chest); break;
     case 'sanctum': sanctum(s, set, h, chest); break;
+    case 'treasure': chest(s.x, s.y, s.z, 0); set(s.x, s.y - 1, s.z, B.sandstone); break;
   }
 }
 

@@ -438,3 +438,13 @@ body.touch, body.touch canvas#game { touch-action: none; overscroll-behavior: no
 .stat-list dt { color: var(--bone-dim); }
 .stat-list dd { margin: 0; text-align: right; color: var(--bone); font-variant-numeric: tabular-nums; }
 label.check { display: flex; align-items: center; gap: 8px; color: var(--bone-dim); cursor: pointer; }
+
+/* ---------- Instruments: compass, clock, maps; spyglass ---------- */
+#instruments { position: fixed; left: 10px; top: calc(40px * var(--ui, 1)); z-index: 6; display: none; flex-direction: column; align-items: flex-start; gap: 4px; pointer-events: none; zoom: var(--ui, 1); }
+#instruments.show { display: flex; }
+#instruments .dial, #instruments .paper { display: none; image-rendering: pixelated; filter: drop-shadow(2px 2px 0 rgba(0, 0, 0, 0.5)); }
+#instruments.compass .dial, #instruments.clock .dial { display: block; }
+#instruments.map .paper { display: block; width: min(272px, 42vw); height: auto; }
+#instruments .inst-label { background: rgba(20, 14, 10, 0.72); padding: 2px 8px; font-size: 14px; color: var(--bone); }
+#spyglass { position: fixed; inset: 0; z-index: 4; pointer-events: none; display: none; background: radial-gradient(circle at center, transparent 0, transparent 38vmin, rgba(0, 0, 0, 0.94) 39vmin); }
+#spyglass.show { display: block; }

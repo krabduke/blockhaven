@@ -948,6 +948,59 @@ tile('glider', (p) => {
   p.sprite(['r............r', 'mr..........rm', 'mmr........rmm', 'mmmr......rmmm', 'mmmmr.hh.rmmmm', 'mmmmmrhhrmmmmm', '.mmmmmrrmmmmm.', '..mmmm..mmmm..', '...mm....mm...'], { m: hex('#6a58a8'), r: hex('#d8c8a0'), h: hex('#8a6a3a') }, 0.06, 1, 4);
 });
 
+// ---------- Instruments: compass, clock, spyglass, maps, name tag, lead ----------
+tile('compass', (p) => {
+  p.transparent();
+  for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) {
+    const d = Math.hypot(x - 7.5, y - 7.5);
+    if (d < 6.2) p.set(x, y, p.jit(hex(d > 5 ? '#8a8e92' : '#e8e0c8'), 0.04));
+    else if (d < 7.2) p.set(x, y, hex('#4a4e52'));
+  }
+  for (let k = 1; k <= 4; k++) { p.set(8, 8 - k, hex('#c83a2a')); p.set(7, 7 + k, hex('#3a4a6a')); }
+  p.set(7, 7, hex('#2a2a2a')); p.set(8, 8, hex('#2a2a2a'));
+});
+tile('clock', (p) => {
+  p.transparent();
+  for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) {
+    const d = Math.hypot(x - 7.5, y - 7.5);
+    if (d < 6.2) p.set(x, y, y < 8 ? p.jit(hex('#6ab0e8'), 0.05) : p.jit(hex('#1a2250'), 0.05));
+    else if (d < 7.2) p.set(x, y, hex('#d8a830'));
+  }
+  p.rect(3, 4, 3, 3, hex('#f8e060')); p.set(11, 10, hex('#e8e8ff')); p.set(12, 11, hex('#e8e8ff')); p.set(10, 12, hex('#e8e8ff'));
+  p.rect(7, 2, 2, 12, hex('#3a2a10'), 0);
+});
+tile('spyglass', (p) => {
+  p.transparent();
+  for (let i = 0; i < 12; i++) { const x = 2 + i, y = 13 - i; const w = i < 5 ? 2 : 1; p.rect(x, y - w + 1, 2, w + 1, hex(i < 5 ? '#b8903a' : i < 9 ? '#d8b04a' : '#8a6a2a')); }
+  p.rect(12, 1, 3, 3, hex('#9ae8ff')); p.set(13, 2, hex('#e8ffff'));
+});
+const parchment = (p: Painter) => { p.fill(hex('#e0d0a0'), 0.05); p.border(hex('#a88a5a')); };
+tile('empty_map', (p) => { parchment(p); for (const y of [4, 7, 10]) p.rect(3, y, 10, 1, hex('#c8b488')); });
+tile('filled_map', (p) => {
+  parchment(p);
+  p.rect(2, 2, 12, 12, hex('#6aa0c8'));
+  p.sprite(['..gggg....', '.ggGggg...', 'gggggggs..', '.gGgg.ss..', '..gg...sss', '.......sss'], { g: hex('#6a9a4a'), G: hex('#4a7a3a'), s: hex('#d8c888') }, 0.05, 3, 4);
+  p.border(hex('#a88a5a'));
+});
+tile('treasure_map', (p) => {
+  parchment(p);
+  p.rect(2, 2, 12, 12, hex('#c8b890'));
+  for (const [x, y] of [[3, 12], [5, 11], [7, 10], [8, 8], [9, 6]]) p.set(x, y, hex('#8a5a3a'));
+  p.set(10, 4, hex('#c82a2a')); p.set(12, 4, hex('#c82a2a')); p.set(11, 5, hex('#c82a2a')); p.set(10, 6, hex('#c82a2a')); p.set(12, 6, hex('#c82a2a'));
+  p.border(hex('#a88a5a'));
+});
+tile('name_tag', (p) => {
+  p.transparent();
+  p.sprite(['....ttttttttt', '...tttttttttt', '..tttttttttt.', '.ttotttttttt.', '..tttttttttt.', '...tttttttttt', '....ttttttttt'], { t: hex('#e8d8b0'), o: hex('#6a5a4a') }, 0.04, 1, 5);
+  for (let i = 0; i < 4; i++) p.set(2 - (i >> 1) + i, 4 - i, hex('#c8c0a8'));
+});
+tile('lead', (p) => {
+  p.transparent();
+  for (let a = 0; a < 6.2; a += 0.15) { const x = Math.round(7.5 + Math.cos(a) * 5), y = Math.round(6.5 + Math.sin(a) * 4); p.set(x, y, hex(a % 0.6 < 0.3 ? '#b89a6a' : '#8a6a4a')); }
+  for (let y = 10; y < 15; y++) p.set(12 + (y % 2), y, hex('#8a6a4a'));
+  p.rect(11, 9, 3, 2, hex('#5a9a4a'));
+});
+
 // ---------- Batch 3: Emberdeep, villages, building blocks ----------
 tile('portal', (p) => {
   for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) {

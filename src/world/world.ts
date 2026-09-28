@@ -29,12 +29,12 @@ const HVEC: [number, number, number][] = [[0, 0, 1], [-1, 0, 0], [0, 0, -1], [1,
 const HORIZ: [number, number][] = [[1, 0], [-1, 0], [0, 1], [0, -1]];
 
 type LootRow = [id: number, min: number, max: number, weight: number];
-/** Chest loot by table (chest meta bits 5-7): dungeon, sun temple, shipwreck, mine, sanctum, Hollow ruin. */
+/** Chest loot by table (chest meta bits 5-7): dungeon, sun temple, shipwreck, mine, sanctum, Hollow ruin, buried treasure. */
 const LOOT: { rows: LootRow[]; rolls: [number, number] }[] = [
   { rows: [
     [I.iron_ingot, 1, 4, 10], [I.bread, 1, 3, 15], [I.seeds, 2, 4, 10], [I.bone, 2, 6, 15], [I.string, 1, 4, 12],
     [I.gold_ingot, 1, 3, 5], [I.diamond, 1, 2, 2], [I.bucket, 1, 1, 8], [I.arrow, 2, 8, 10], [I.bone_meal, 2, 6, 10],
-    [I.book, 1, 2, 5], [I.apple, 1, 3, 8], [I.gunpowder, 1, 4, 8], [I.carrot, 1, 3, 6], [I.golden_apple, 1, 1, 1], [I.saddle, 1, 1, 1],
+    [I.book, 1, 2, 5], [I.apple, 1, 3, 8], [I.gunpowder, 1, 4, 8], [I.carrot, 1, 3, 6], [I.golden_apple, 1, 1, 1], [I.saddle, 1, 1, 1], [I.name_tag, 1, 1, 3], [I.lead, 1, 2, 3],
   ], rolls: [4, 8] },
   { rows: [
     [I.gold_ingot, 2, 7, 15], [I.iron_ingot, 1, 5, 15], [I.bone, 4, 6, 25], [I.rotten_flesh, 3, 7, 16], [I.amber, 1, 3, 12],
@@ -44,7 +44,7 @@ const LOOT: { rows: LootRow[]; rolls: [number, number] }[] = [
   { rows: [
     [I.raw_fish, 2, 6, 15], [I.salmon, 1, 4, 12], [I.paper, 1, 8, 12], [I.coal, 2, 8, 10], [I.wheat_item, 4, 12, 10],
     [I.potato, 2, 6, 10], [I.carrot, 2, 6, 8], [I.iron_ingot, 1, 5, 12], [I.gold_ingot, 1, 5, 8], [I.amber, 1, 5, 10],
-    [I.diamond, 1, 1, 2], [I.glimmerfish, 1, 2, 4], [I.leather, 1, 4, 6], [I.fishing_rod, 1, 1, 3],
+    [I.diamond, 1, 1, 2], [I.glimmerfish, 1, 2, 4], [I.leather, 1, 4, 6], [I.fishing_rod, 1, 1, 3], [I.treasure_map, 1, 1, 10], [I.compass, 1, 1, 3],
   ], rolls: [4, 8] },
   { rows: [
     [I.bread, 1, 3, 15], [I.coal, 3, 8, 12], [B.rail, 4, 8, 12], [B.torch, 1, 16, 10], [I.iron_ingot, 1, 5, 10],
@@ -60,6 +60,10 @@ const LOOT: { rows: LootRow[]; rolls: [number, number] }[] = [
     [I.diamond, 1, 3, 8], [I.gold_ingot, 2, 6, 12], [I.iron_ingot, 3, 8, 12], [I.starseeker, 1, 3, 8], [I.golden_apple, 1, 2, 5],
     [I.diamond_pickaxe, 1, 1, 3], [I.diamond_chestplate, 1, 1, 2], [I.crystal_shard, 2, 5, 10], [I.book, 1, 4, 8], [B.starbloom, 1, 4, 8],
   ], rolls: [4, 8] },
+  { rows: [
+    [I.diamond, 1, 3, 8], [I.gold_ingot, 3, 8, 14], [I.iron_ingot, 3, 8, 12], [I.amber, 3, 9, 12], [I.golden_apple, 1, 2, 5],
+    [I.crystal_shard, 2, 6, 8], [I.glimmerfish, 1, 3, 6], [I.cooked_salmon, 2, 5, 8], [I.saddle, 1, 1, 3], [I.gunpowder, 2, 6, 6], [I.name_tag, 1, 1, 4],
+  ], rolls: [5, 9] },
 ];
 
 function fillLoot(inv: Inventory, rand: () => number, table = 0): void {
@@ -109,6 +113,8 @@ export class World implements ChunkSource {
   // ---------- Shared worlds ----------
   /** False on a guest: the host runs fluids, redstone, growth and furnaces and sends the results. */
   simulate = true;
+  /** Days since the world began (for the clock). */
+  day = 0;
   /** False on a guest: chunks come from the host and are never saved here. */
   persist = true;
   /** Every block or metadata change (the host broadcasts these; a guest sends its own to the host). */
@@ -1142,6 +1148,7 @@ export class World implements ChunkSource {
   tick(px: number, py: number, pz: number, randomTicks: boolean): void {
     this.tickCount++;
     this.time = (this.time + 1) % 24000;
+    if (this.time === 0) this.day++;
     if (!this.simulate) return;
     if (--this.weatherTimer <= 0) {
       if (this.weather === 'clear') {

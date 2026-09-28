@@ -122,6 +122,12 @@ s([I.bowl, I.redroot, I.redroot, I.redroot, I.redroot, I.redroot, I.redroot], I.
 s([I.redroot], I.dye_red);
 r(['PPP', 'HHH', 'PPP'], { P: PLANKS, H: I.honeycomb }, B.beehive);
 s([I.crystal_shard, I.ember_core], I.starseeker);
+r([' I ', 'ISI', ' I '], { I: I.iron_ingot, S: I.spark_dust }, I.compass);
+r([' G ', 'GSG', ' G '], { G: I.gold_ingot, S: I.spark_dust }, I.clock);
+r(['C', 'G', 'G'], { C: I.crystal_shard, G: I.gold_ingot }, I.spyglass);
+r(['PPP', 'PCP', 'PPP'], { P: I.paper, C: I.compass }, I.empty_map);
+s([I.paper, I.string, I.gold_ingot], I.name_tag);
+r(['SS ', 'SB ', '  S'], { S: I.string, B: I.bog_slime }, I.lead, 2);
 // Worn-out gliders mend with leather.
 s([I.glider, I.leather], I.glider);
 r(['GGG', 'GAG', 'GGG'], { G: I.gold_ingot, A: I.apple }, I.golden_apple);

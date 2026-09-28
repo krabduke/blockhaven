@@ -1235,6 +1235,75 @@ await wait(300);
   check('the progress screen lists achievements and your stats', qol.progress.achievements > 20 && qol.progress.done > 3 && qol.progress.hasStats && qol.progress.deaths >= 1 && qol.progress.walked > 0, JSON.stringify(qol.progress));
 }
 
+// --- Instruments and animal handling: compass, clock, maps, treasure, spyglass, leads, name tags.
+{
+  const inst = await g(async () => {
+    const G = window.blockhaven, p = G.player, w = G.world, B = G.ids, It = G.items, E = G.entities;
+    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+    try { Object.defineProperty(G.input, 'locked', { get: () => true, configurable: true }); } catch { /* already */ }
+    const out = {};
+    const label = () => document.querySelector('#instruments .inst-label')?.textContent ?? '';
+    p.creative = false; p.flying = false; p.health = 20;
+    const [x, , z] = p.body.pos.map(Math.floor);
+    const y = Math.floor(p.body.pos[1]) + 16;
+    for (let dx = -8; dx <= 8; dx++) for (let dz = -8; dz <= 8; dz++) { w.setBlock(x + dx, y - 1, z + dz, B.grass); for (let dy = 0; dy <= 5; dy++) w.setBlock(x + dx, y + dy, z + dz, 0); }
+    p.body.pos = [x + 0.5, y, z + 0.5]; p.body.vel = [0, 0, 0]; p.yaw = 0; p.pitch = -0.25;
+    p.inv.slots.fill(null); p.selected = 0;
+    const spawn = p.spawn;
+    p.spawn = [x + 40.5, y, z + 0.5];
+    p.inv.slots[0] = { id: It.compass, count: 1 };
+    await sleep(400);
+    out.compass = label();
+    p.spawn = spawn;
+    p.inv.slots[0] = { id: It.clock, count: 1 };
+    await sleep(300);
+    out.clock = label();
+    p.inv.slots[0] = { id: It.empty_map, count: 3 };
+    G.use();
+    await sleep(1200);
+    out.map = { held: p.held?.id === It.filled_map && typeof p.held.map === 'number', blanks: p.inv.count(It.empty_map), shown: document.querySelector('#instruments')?.classList.contains('map') };
+    p.inv.slots[0] = { id: It.treasure_map, count: 1 };
+    await sleep(800);
+    const tm = G.maps.get(p.held?.map);
+    out.treasure = { drawn: !!tm, target: tm?.target ?? null };
+    p.inv.slots[0] = { id: It.spyglass, count: 1 };
+    G.mouse[2] = true;
+    await sleep(600);
+    out.spy = { on: G.spyglass, fov: Math.round(G.renderer.camera.fov) };
+    G.mouse[2] = false;
+    await sleep(300);
+    out.spyOff = !G.spyglass;
+    // Leads and name tags.
+    const boar = E.spawnMob('boar', x + 0.5, y, z - 2.2); boar.wanderTimer = 99999;
+    await sleep(300);
+    p.inv.slots[0] = { id: It.lead, count: 1 };
+    p.yaw = 0; p.pitch = -0.25;
+    G.use(); await sleep(100);
+    out.leashed = boar.leash === 'player';
+    p.body.pos = [x + 0.5, y, z + 6.5];
+    await sleep(2500);
+    out.followed = Math.hypot(boar.body.pos[0] - p.body.pos[0], boar.body.pos[2] - p.body.pos[2]) < 6;
+    w.setBlock(x + 2, y, z + 6, B.fence);
+    p.yaw = -Math.PI / 2; p.pitch = -0.35;
+    await sleep(200);
+    G.use(); await sleep(100);
+    out.tied = Array.isArray(boar.leash);
+    p.body.pos = [boar.body.pos[0], y, boar.body.pos[2] + 2]; p.yaw = 0; p.pitch = -0.3;
+    p.inv.slots[0] = { id: It.name_tag, count: 1 };
+    await sleep(200);
+    G.use(); await sleep(300);
+    const box = document.querySelector('#ask-text input');
+    if (box) { box.value = 'Truffle'; document.querySelector('#ask-text .btn.primary').click(); }
+    await sleep(200);
+    out.named = boar.customName === 'Truffle' && !p.inv.slots[0];
+    return out;
+  });
+  check('a compass points home, and a clock tells the day and time', /Home: 40 blocks/.test(inst.compass) && /^Day \d+, \d+:\d\d (am|pm)$/.test(inst.clock), JSON.stringify(inst));
+  check('an empty map turns into a map in your hand and draws where you are; a treasure map marks buried treasure', inst.map.held && inst.map.blanks === 2 && inst.map.shown && inst.treasure.drawn && !!inst.treasure.target, JSON.stringify({ map: inst.map, treasure: inst.treasure }));
+  check('a spyglass zooms in while you hold use', inst.spy.on && inst.spy.fov < 20 && inst.spyOff, JSON.stringify(inst.spy));
+  check('a lead leads an animal and ties it to a fence; a name tag names it', inst.leashed && inst.followed && inst.tied && inst.named, JSON.stringify(inst));
+}
+
 // --- Sound: music you can hear, and caves that echo.
 {
   const snd = await g(async () => {

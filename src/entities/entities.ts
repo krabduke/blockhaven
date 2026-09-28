@@ -15,6 +15,7 @@ import { Vehicle, makeVehicle, type RiderInput } from './vehicles';
 import { animateMob, newAnimState } from './animate';
 import { tradesFor, type TradeOffer } from '../trading';
 import { HOLLOW_TOP, anchorPillars } from '../world/hollowgen';
+import { nameTag } from '../render/nametag';
 
 export interface PlayerLike {
   body: Body;
@@ -242,6 +243,13 @@ export class Mob extends Entity {
   /** The anchor stone mending it, if any (drawn as a beam). */
   healFrom: [number, number, number] | null = null;
   private beam?: THREE.Line;
+  /** A name given with a name tag: shown above it, and it never despawns. */
+  customName = '';
+  private tag?: THREE.Sprite;
+  private tagText = '';
+  /** On a lead: held by you, or tied to the fence post at this spot. */
+  leash: 'player' | [number, number, number] | null = null;
+  private leashLine?: THREE.Line;
   private beeTimer = 0;
   /** Ridden by the player: movement comes from the rider's keys. */
   ridden = false;
@@ -306,6 +314,7 @@ export class Mob extends Entity {
     if (this.spec.kind === 'bee' && byPlayer) for (const o of m.mobs()) if (o.spec.kind === 'bee' && dist(o.body.pos, this.body.pos) < 12) o.beeAnger = 400;
     if (this.health <= 0) {
       this.deathTime = 1;
+      if (this.leash) this.dropLead(m);
       if (!this.baby) {
         for (const st of this.spec.drops(Math.random)) if (st.count > 0) m.dropItem(this.body.pos[0], this.body.pos[1] + 0.5, this.body.pos[2], st);
         if (this.hurtByPlayer > 0) m.dropXp(this.body.pos[0], this.body.pos[1] + 0.5, this.body.pos[2], this.spec.hostile ? this.spec.xp : 1 + Math.floor(Math.random() * this.spec.xp + 1));
@@ -382,6 +391,7 @@ export class Mob extends Entity {
     }
     const w = m.world, b = this.body, p = m.nearestPlayer(this.body.pos);
     updateContacts(w, b, this.body.height * 0.85);
+    if (this.leash) this.leashTick(m);
     if (this.angry > 0) this.angry--;
     if (this.healCooldown > 0) this.healCooldown--;
     this.aiming = false;
@@ -562,7 +572,7 @@ export class Mob extends Entity {
     const sp = Math.hypot(b.vel[0], b.vel[2]);
     this.walkAnim += sp * 3.5;
     // Despawn far hostiles.
-    if (!this.rally && !this.spec.boss && (this.spec.hostile || this.spec.habitat === 'cave' || this.spec.habitat === 'water') && (pd0 > 96 || (pd0 > 40 && Math.random() < 1 / 800))) this.dead = true;
+    if (!this.rally && !this.spec.boss && !this.customName && !this.leash && (this.spec.hostile || this.spec.habitat === 'cave' || this.spec.habitat === 'water') && (pd0 > 96 || (pd0 > 40 && Math.random() < 1 / 800))) this.dead = true;
     if (b.pos[1] < -20) this.dead = true;
   }
 
@@ -628,6 +638,38 @@ export class Mob extends Entity {
     // Brushing past it hurts.
     if (target && dP < 2.6 && this.age % 20 === 0) p.damage(4, 'colossus', [toP[0] / (dP || 1), toP[2] / (dP || 1)]);
     if (this.age % 160 === 0 && dP < 64) sfx.mobSay(this.spec.pitch, m.spatialFor(b.pos));
+  }
+
+  /** Where the other end of its lead is. */
+  leashAnchor(m: EntityManager): [number, number, number] | null {
+    if (!this.leash) return null;
+    if (this.leash === 'player') { const pp = m.player.body.pos; return [pp[0], pp[1] + 1.1, pp[2]]; }
+    return [this.leash[0] + 0.5, this.leash[1] + 0.6, this.leash[2] + 0.5];
+  }
+
+  /** A lead pulls it along when it strays, and snaps if dragged too far. */
+  private leashTick(m: EntityManager): void {
+    const b = this.body;
+    const tied = Array.isArray(this.leash) ? this.leash : null;
+    if (tied && m.world.getBlock(tied[0], tied[1], tied[2]) !== B.fence) { this.dropLead(m); return; }
+    if (this.leash === 'player' && !m.player.alive) { this.dropLead(m); return; }
+    const a = this.leashAnchor(m)!;
+    const dx = a[0] - b.pos[0], dy = a[1] - 1 - b.pos[1], dz = a[2] - b.pos[2];
+    const d = Math.hypot(dx, dy, dz);
+    if (d > 12) { this.dropLead(m); sfx.click(); return; }
+    if (d > 3.5) {
+      const k = Math.min(0.12, (d - 3.5) * 0.03) / d;
+      b.vel[0] += dx * k; b.vel[2] += dz * k;
+      if (dy > 0.5 && b.onGround) b.vel[1] = Math.max(b.vel[1], 0.42);
+      this.yaw = Math.atan2(-dx, -dz);
+      this.panic = 0;
+    }
+  }
+
+  dropLead(m: EntityManager): void {
+    if (!this.leash) return;
+    this.leash = null;
+    m.dropItem(this.body.pos[0], this.body.pos[1] + 0.5, this.body.pos[2], { id: I.lead, count: 1 });
   }
 
   /** Carrying the player: turn toward where they look, run when they sprint, leap with jump. */
@@ -831,6 +873,32 @@ export class Mob extends Entity {
       sh.position.y = -drop / size + 0.03;
       (sh.material as THREE.MeshBasicMaterial).opacity = Math.max(0, 1 - drop / 5);
     }
+    // A name tag, and a lead drawn as a sagging line.
+    if (this.customName !== this.tagText) {
+      this.tag?.removeFromParent();
+      this.tag = undefined;
+      this.tagText = this.customName;
+      if (this.customName) { this.tag = nameTag(this.customName); this.object.add(this.tag); }
+    }
+    if (this.tag) this.tag.position.y = (this.body.height + 0.45) / Math.max(0.01, this.object.scale.y);
+    const anchor = this.deathTime === 0 ? this.leashAnchor(m) : null;
+    if (anchor) {
+      if (!this.leashLine) {
+        this.leashLine = new THREE.Line(new THREE.BufferGeometry().setFromPoints(Array.from({ length: 9 }, () => new THREE.Vector3())), new THREE.LineBasicMaterial({ color: 0x8a6a4a }));
+        this.leashLine.frustumCulled = false;
+        m.renderer.scene.add(this.leashLine);
+      }
+      const pos = this.leashLine.geometry.getAttribute('position') as THREE.BufferAttribute;
+      const o = this.object.position, sy = o.y + this.body.height * 0.75;
+      const len = Math.hypot(anchor[0] - o.x, anchor[1] - sy, anchor[2] - o.z);
+      for (let i = 0; i <= 8; i++) {
+        const t = i / 8, sag = Math.sin(t * Math.PI) * Math.max(0, 1.2 - len * 0.12);
+        pos.setXYZ(i, o.x + (anchor[0] - o.x) * t, sy + (anchor[1] - sy) * t - sag, o.z + (anchor[2] - o.z) * t);
+      }
+      pos.needsUpdate = true;
+      this.leashLine.visible = true;
+    } else if (this.leashLine) this.leashLine.visible = false;
+    if (this.dead) { this.leashLine?.removeFromParent(); }
     // A boss being mended: a beam of light from the anchor stone.
     if (this.spec.boss) {
       if (!this.beam) {
@@ -1687,11 +1755,12 @@ export class EntityManager {
   }
 
   serialize(): unknown[] {
-    const mobs = this.list.filter((e) => e instanceof Mob && e.deathTime === 0 && !(e as Mob).spec.hostile && (!(e as Mob).spec.flying || (e as Mob).spec.kind === 'bee') && !(e as Mob).spec.aquatic).map((e) => {
+    const mobs = this.list.filter((e) => e instanceof Mob && e.deathTime === 0 && !e.netId && ((e as Mob).customName || (!(e as Mob).spec.hostile && (!(e as Mob).spec.flying || (e as Mob).spec.kind === 'bee') && !(e as Mob).spec.aquatic))).map((e) => {
       const m = e as Mob;
       return {
         kind: m.spec.kind, pos: m.body.pos, health: m.health, growing: m.growing, sheared: m.sheared, profession: m.spec.trader ? m.profession : undefined, offers: m.spec.trader ? m.offers : undefined,
         tamed: m.tamed || undefined, sitting: m.sitting || undefined, saddled: m.saddled || undefined, home: m.home ?? undefined,
+        name: m.customName || undefined, tied: Array.isArray(m.leash) ? m.leash : undefined,
       };
     });
     const vehicles = this.vehicles().map((v) => ({ vehicle: v.kind, pos: v.body.pos, yaw: v.yaw }));
@@ -1727,7 +1796,7 @@ export class EntityManager {
 
   load(data: unknown): void {
     if (!Array.isArray(data)) return;
-    for (const d of data as { kind: string; vehicle?: string; yaw?: number; pos: [number, number, number]; health: number; growing?: number; sheared?: boolean; profession?: string; offers?: TradeOffer[]; tamed?: boolean; sitting?: boolean; saddled?: boolean; home?: [number, number, number] }[]) {
+    for (const d of data as { kind: string; vehicle?: string; yaw?: number; pos: [number, number, number]; health: number; growing?: number; sheared?: boolean; profession?: string; offers?: TradeOffer[]; tamed?: boolean; sitting?: boolean; saddled?: boolean; home?: [number, number, number]; name?: string; tied?: [number, number, number] }[]) {
       if (d.vehicle) { const v = makeVehicle(d.vehicle, d.pos[0], d.pos[1], d.pos[2], d.yaw ?? 0); if (v) this.add(v); continue; }
       if (!MOBS[d.kind]) continue;
       const m = this.spawnMob(d.kind, d.pos[0], d.pos[1], d.pos[2], d.profession);
@@ -1737,6 +1806,8 @@ export class EntityManager {
       m.sheared = !!d.sheared;
       m.tamed = !!d.tamed; m.sitting = !!d.sitting; m.saddled = !!d.saddled;
       if (d.home) m.home = d.home;
+      if (d.name) m.customName = d.name;
+      if (d.tied) m.leash = d.tied;
     }
   }
 }

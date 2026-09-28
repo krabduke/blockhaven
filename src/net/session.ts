@@ -21,6 +21,7 @@ import { rleDecode, rleEncode } from '../storage';
 import { CH, CS } from '../world/chunk';
 import type { Game } from '../game';
 import { createInvite, type Link, type Message } from './peer';
+import { nameTag } from '../render/nametag';
 
 const VOLUME = CS * CS * CH;
 /** Creatures and items within this distance of a guest are sent to them. */
@@ -72,26 +73,6 @@ class Figure {
     p.legL.rotation.x = s; p.legR.rotation.x = -s; p.armL.rotation.x = -s * 0.8; p.armR.rotation.x = s * 0.8;
   }
   dispose(): void { this.model.root.removeFromParent(); }
-}
-
-function nameTag(name: string): THREE.Sprite {
-  const cv = document.createElement('canvas');
-  const g = cv.getContext('2d')!;
-  g.font = 'bold 28px system-ui, sans-serif';
-  const w = Math.ceil(g.measureText(name).width) + 20;
-  cv.width = w; cv.height = 40;
-  g.font = 'bold 28px system-ui, sans-serif';
-  g.fillStyle = 'rgba(0,0,0,0.45)';
-  g.fillRect(0, 0, w, 40);
-  g.fillStyle = '#fff';
-  g.textBaseline = 'middle';
-  g.fillText(name, 10, 21);
-  const tex = new THREE.CanvasTexture(cv);
-  tex.colorSpace = THREE.SRGBColorSpace;
-  const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, depthTest: false, transparent: true }));
-  s.scale.set(w / 80, 0.5, 1);
-  s.renderOrder = 10;
-  return s;
 }
 
 // ---------------------------------------------------------------- Host

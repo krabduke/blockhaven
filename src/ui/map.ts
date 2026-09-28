@@ -102,6 +102,9 @@ export class WorldMap {
     this.drawMini();
   }
 
+  /** The overworld picture of one chunk, for held maps (null until the atlas is ready). */
+  chunkCanvas(ch: Chunk): HTMLCanvasElement | null { return this.tileFor(ch, 'overworld', CH - 1); }
+
   // ---------- colours ----------
   setAtlas(atlas: Atlas): void {
     const c = new Uint8Array(256 * 3);

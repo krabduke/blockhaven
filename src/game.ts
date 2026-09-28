@@ -34,6 +34,9 @@ import { Input } from './game/input';
 import { Signs } from './game/signs';
 import { Waypoints } from './game/waypoints';
 import { Raids } from './game/raids';
+import { MapStore } from './game/maps';
+import { Instruments } from './ui/instruments';
+import { nearestStructure } from './world/structures';
 import { GuestSession, HostSession, type Welcome } from './net/session';
 import { answerInvite, type Link } from './net/peer';
 import { ShareScreens } from './ui/share';
@@ -87,6 +90,9 @@ export const ACHIEVEMENTS: Record<string, [string, string]> = {
   hollow: ['Beyond the stars', 'Step into the Hollow'],
   colossus: ['Giant slayer', 'Defeat the Hollow Colossus'],
   glide: ['On the wind', 'Glide a hundred blocks'],
+  map: ['Cartographer', 'Draw a map of where you are'],
+  treasure: ['X marks the spot', 'Dig up buried treasure'],
+  named: ['What’s in a name', 'Name a creature with a name tag'],
   trade: ['Fair deal', 'Trade with a villager'],
   tame: ['Best friends', 'Tame a fox or a mossback'],
   brew: ['Local brewery', 'Brew a potion'],
@@ -106,6 +112,8 @@ type SaveMeta = WorldMeta & {
   /** The Hollow Colossus has been beaten (it doesn't come back). */
   colossusDefeated?: boolean;
   waypoints?: unknown;
+  maps?: unknown;
+  day?: number;
 };
 
 function dimState(meta: WorldMeta, dim: Dimension): DimState {
@@ -137,6 +145,13 @@ export class Game {
   readonly chat: Chat;
   readonly history: EditHistory;
   readonly waypoints = new Waypoints();
+  /** Paper maps made in this world. */
+  readonly maps = new MapStore();
+  private instruments!: Instruments;
+  private spyEl!: HTMLElement;
+  /** Looking through a spyglass. */
+  spyglass = false;
+  private mapTimer = 0;
   /** A shared world: this game is the host, or a guest in someone else's. */
   net: HostSession | GuestSession | null = null;
   /** The Invite a friend and Join a friend screens. */
@@ -203,6 +218,10 @@ export class Game {
       document.body.classList.add('touch');
     }
     this.hud = new Hud(root);
+    this.instruments = new Instruments(root);
+    this.spyEl = document.createElement('div');
+    this.spyEl.id = 'spyglass';
+    root.appendChild(this.spyEl);
     this.raids = new Raids(this, root);
     if (this.touchMode) {
       this.touch = new TouchControls(root, {
@@ -308,6 +327,7 @@ export class Game {
       world.dimension = dim;
       world.spawnedChunks = new Set(state.spawned ?? []);
       world.time = meta.time;
+      world.day = (meta as SaveMeta).day ?? 0;
       world.onSubMesh = (cx, sy, cz, m) => this.renderer.setSubMesh(cx, sy, cz, m);
       world.onChunkUnload = (cx, cz) => this.renderer.removeChunk(cx, cz);
       world.onDrop = (x, y, z, s) => this.entities?.dropItem(x, y, z, s);
@@ -398,6 +418,7 @@ export class Game {
     const p = new Player(0.5, 100, 0.5);
     p.creative = meta.gamemode === 'creative';
     this.waypoints.load((meta as SaveMeta).waypoints);
+    this.maps.load((meta as SaveMeta).maps);
     this.raids.stop();
     if (meta.player) p.load(meta.player);
     else {
@@ -565,6 +586,8 @@ export class Game {
       ...prev,
       lastPlayed: Date.now(),
       time: this.world.time,
+      day: this.world.day,
+      maps: this.maps.serialize(),
       player: this.player.serialize(),
       weather: this.world.weather,
       weatherTimer: this.world.weatherTimer,
@@ -820,6 +843,8 @@ export class Game {
   /** Turn the view by yaw/pitch deltas (radians). */
   turn(dYaw: number, dPitch: number): void {
     const p = this.player;
+    // Finer control while zoomed in.
+    if (this.spyglass) { dYaw *= 0.2; dPitch *= 0.2; }
     p.yaw += dYaw;
     p.pitch = Math.max(-Math.PI / 2 + 0.001, Math.min(Math.PI / 2 - 0.001, p.pitch + dPitch));
   }
@@ -950,6 +975,23 @@ export class Game {
     if (!box || box.max[1] <= 0.5 || box.max[1] > 1) return false;
     const clear = (cx: number, cy: number, cz: number) => !collisionBox(w.getBlock(cx, cy, cz), w.getMeta(cx, cy, cz));
     return clear(x, y + 1, z) && clear(x, y + 2, z) && clear(Math.floor(b.pos[0]), y + 2, Math.floor(b.pos[2]));
+  }
+
+  /** A map in your hand fills in around you; a treasure map is drawn the first time you look at it. */
+  private heldMap(dt: number): void {
+    const held = this.player.held, w = this.world;
+    if (!held || !w || this.mode !== 'playing') return;
+    if (held.id === I.treasure_map && held.map === undefined) {
+      if (w.dimension !== 'overworld') return;
+      const gen = new WorldGen(w.seed);
+      const t = nearestStructure(gen, 'treasure', this.player.body.pos[0], this.player.body.pos[2], 12);
+      if (!t) { this.toast('The map is too faded to read.'); held.id = I.empty_map; return; }
+      held.map = this.maps.createTreasure(gen, t.x, t.z);
+      return;
+    }
+    if (held.id !== I.filled_map || held.map === undefined || (this.mapTimer -= dt) > 0) return;
+    this.mapTimer = 0.5;
+    this.maps.explore(held.map, w, this.map, this.player.body.pos[0], this.player.body.pos[2]);
   }
 
   // ---------- Difficulty, rules and progress ----------
@@ -1105,6 +1147,9 @@ export class Game {
     if (this.shotPending) this.saveScreenshot();
     this.hud.update(this.player, dt);
     this.hud.updateInfo(this, dt);
+    this.heldMap(dt);
+    this.instruments.update(this, dt);
+    this.spyEl.classList.toggle('show', this.spyglass && this.player.alive);
     this.updateBossBar();
     this.net?.frame(dt);
     if ((this.soundTimer -= dt) <= 0) { this.soundTimer = 0.25; this.listen(); }
@@ -1181,6 +1226,7 @@ export class Game {
       cam.rotation.set(front ? -p.pitch : p.pitch, front ? p.yaw + Math.PI : p.yaw, hurtTilt, 'YXZ');
     }
     let fov = this.settings.fov;
+    if (this.spyglass) fov = 12;
     if (p.sprinting && !calm) fov *= 1.12;
     if (p.flying && p.sprinting && !calm) fov *= 1.05;
     this.fovCurrent += (fov - this.fovCurrent) * 0.2;

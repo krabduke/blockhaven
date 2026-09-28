@@ -8,6 +8,7 @@ import { Boat, Minecart } from '../entities/vehicles';
 import { I, coloredItem, enchLevel, itemDef, maxStack, type ItemStack } from '../items';
 import { raycast, selectionBox, type RayHit } from '../physics';
 import { nearestStructure } from '../world/structures';
+import { askText } from '../ui/prompt';
 import { WorldGen } from '../world/worldgen';
 import type { Game } from '../game';
 
@@ -38,6 +39,7 @@ export class Actions {
     this.tickBreaking();
     const holding = this.g.input.mouse[2] && (active || this.g.input.locked);
     p.blocking = holding && p.alive && p.held?.id === I.shield;
+    this.g.spyglass = holding && p.alive && p.held?.id === I.spyglass;
     if (this.crossbowLoad > 0) {
       const cb = p.held;
       if (!holding || cb?.id !== I.crossbow) this.crossbowLoad = 0;
@@ -273,6 +275,26 @@ export class Actions {
     }
     // Animals: feeding, breeding, shearing, taming and riding.
     const mobHit = mobHit0;
+    if (mobHit && (!hit || mobHit.dist < hit.dist) && !repeat && !mobHit.mob.netId) {
+      const mob = mobHit.mob;
+      // A creature on a lead: let it go.
+      if (mob.leash && held?.id !== I.name_tag) { mob.dropLead(this.entities); sfx.click(); this.renderer.swingHand(); return; }
+      if (held?.id === I.lead && !mob.spec.hostile && !mob.spec.boss && !mob.ridden) {
+        mob.leash = 'player';
+        consume(); sfx.click(); this.renderer.swingHand();
+        return;
+      }
+      if (held?.id === I.name_tag) {
+        const tag = held;
+        void askText(this.g, 'Name this creature', mob.customName, 20).then((name) => {
+          if (!name || mob.dead) return;
+          mob.customName = name;
+          if (!p.creative) { tag.count--; if (tag.count <= 0) { const i = p.inv.slots.indexOf(tag); if (i >= 0) p.inv.slots[i] = null; } }
+          p.achieve('named');
+        });
+        return;
+      }
+    }
     if (mobHit && (!hit || mobHit.dist < hit.dist)) {
       const res = mobHit.mob.interact(this.entities, held);
       if (res === 'fed' || res === 'tamed') { consume(); this.renderer.swingHand(); if (res === 'tamed') p.achieve('tame'); return; }
@@ -338,6 +360,18 @@ export class Actions {
     }
     // Drinking a potion works like eating.
     if (def?.potion && !def.potion.splash) { this.eating = 1; return; }
+    // An empty map: start drawing the area you're in.
+    if (held?.id === I.empty_map && !repeat) {
+      if (w.dimension !== 'overworld') { this.g.toast('Maps only work in the overworld.', 3); return; }
+      const id = this.g.maps.create(p.body.pos[0], p.body.pos[2]);
+      // The new map goes in your hand; any other blank ones move to your pack.
+      const rest = p.creative ? held.count : held.count - 1;
+      p.inv.slots[p.selected] = { id: I.filled_map, count: 1, map: id };
+      if (rest > 0) { const left = p.inv.add({ id: I.empty_map, count: rest }); if (left) this.throwStack(left); }
+      sfx.place('wool'); this.renderer.swingHand();
+      p.achieve('map');
+      return;
+    }
     // Starseekers: set into an Astral Frame, or thrown to show the way to the nearest sanctum.
     if (held?.id === I.starseeker && !repeat) {
       if (hit && hit.id === B.astral_frame) {
@@ -409,6 +443,12 @@ export class Actions {
       if (id === B.hopper) { const be = w.getBlockEntity(x, y, z); if (be?.kind === 'hopper') { document.exitPointerLock(); this.containers.show('hopper', { hopper: be }); } return; }
       if (id === B.brewing_stand) { const be = w.getBlockEntity(x, y, z); if (be?.kind === 'brewing') { document.exitPointerLock(); this.containers.show('brewing', { brewing: be }); } return; }
       if (id === B.furnace || id === B.furnace_lit) { const be = w.getBlockEntity(x, y, z); if (be?.kind === 'furnace') { document.exitPointerLock(); this.containers.show('furnace', { furnace: be }); } return; }
+      // Tie creatures you're leading to a fence post.
+      if (id === B.fence && !repeat) {
+        const led = this.entities.mobs().filter((m) => m.leash === 'player' && Math.hypot(m.body.pos[0] - p.body.pos[0], m.body.pos[2] - p.body.pos[2]) < 12);
+        if (led.length) { for (const m of led) m.leash = [x, y, z]; sfx.click(); this.renderer.swingHand(); return; }
+      }
+      if (id === B.chest && (w.getMeta(x, y, z) & 16) && ((w.getMeta(x, y, z) >> 5) & 7) === 6) p.achieve('treasure');
       if (id === B.chest) { const be = w.getBlockEntity(x, y, z); if (be?.kind === 'chest') { document.exitPointerLock(); this.containers.show('chest', { chest: be.inv }); } return; }
       if (id === B.door) {
         const m = w.getMeta(x, y, z);

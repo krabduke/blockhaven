@@ -134,6 +134,15 @@ item(513, 'glimmerfish', 'Glimmerfish', { food: { hunger: 1, saturation: 0.2 }, 
 item(514, 'starseeker', 'Starseeker', { maxStack: 16 });
 // Won from the Hollow Colossus. Worn in the chest slot; jump while falling to glide.
 item(515, 'glider', 'Glider', { maxStack: 1, armor: { slot: 1, points: 0, durability: 432 } });
+// Instruments.
+item(516, 'compass', 'Compass', { maxStack: 1 });
+item(517, 'clock', 'Clock', { maxStack: 1 });
+item(518, 'spyglass', 'Spyglass', { maxStack: 1 });
+item(519, 'empty_map', 'Empty Map');
+item(520, 'filled_map', 'Map', { maxStack: 1 });
+item(521, 'treasure_map', 'Treasure Map', { maxStack: 1 });
+item(522, 'name_tag', 'Name Tag');
+item(523, 'lead', 'Lead');
 item(501, 'boat', 'Boat', { maxStack: 1 });
 item(502, 'minecart', 'Minecart', { maxStack: 1 });
 item(503, 'saddle', 'Saddle', { maxStack: 1 });
@@ -248,6 +257,8 @@ export interface ItemStack {
   damage?: number;
   /** A crossbow with an arrow loaded. */
   charged?: boolean;
+  /** A filled map: which picture it shows (kept with the world). */
+  map?: number;
   ench?: Enchant[];
 }
 
