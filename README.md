@@ -10,13 +10,13 @@ QubeCraft (formerly Blockhaven) is an independent fan project. It is not affilia
 
 ## Play
 
-**In your browser:** once GitHub Pages has deployed, the game is at <https://krabduke.github.io/blockhaven/>.
+**In your browser:** once GitHub Pages has deployed, the game is at <https://krabduke.github.io/qubecraft/>.
 
 **Locally:**
 
 ```bash
-git clone https://github.com/krabduke/blockhaven.git
-cd blockhaven
+git clone https://github.com/krabduke/qubecraft.git
+cd qubecraft
 npm install
 npm run dev
 ```
